@@ -1,394 +1,167 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom"; // נוסיף ניווט לטיפולים
 import { sendChat } from "../api/medayApi";
+import { MessageCircle, X, Send, RotateCcw, Sparkles, User, Bot } from "lucide-react";
+import { cn } from "../lib/utils"; // שימוש בפונקציית העזר שיצרנו
 
-function normalize(s) {
-  return (s || "")
-    .toString()
-    .toLowerCase()
-    .replace(/[?؟!.,:;()"'’“”]/g, "")
-    .trim();
-}
-
-function isYes(text) {
-  const ans = normalize(text);
-  return ["yes", "כן", "y", "ok", "sure"].some((w) => ans === normalize(w));
-}
-
-function isNo(text) {
-  const ans = normalize(text);
-  return ["no", "לא", "n"].some((w) => ans === normalize(w));
-}
-
-export default function ChatWidget({ onOpenTreatment }) {
+export default function ChatWidget() {
   const [open, setOpen] = useState(false);
+  const navigate = useNavigate();
+  const scrollRef = useRef(null);
 
-  // Conversation memory (frontend context we send to backend)
-  const [profile, setProfile] = useState({
-    goal: null,       // hydration/glow/acne/antiaging/calm
-    sensitive: null,  // true/false
-    pregnant: null,   // true/false
-  });
-
+  const [profile, setProfile] = useState({ goal: null, sensitive: null, pregnant: null });
   const [pending, setPending] = useState(null);
-  // pending = { type: "sensitive" | "pregnant", prompt: "...", after: "chat" }
-
+  const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState([
     {
       from: "bot",
-      text:
-        "Hi! I’m MeDay Assistant 💬\nNow I answer using the real backend (DB imported from Excel).\nTell me your goal (לחות / זוהר / אקנה / אנטי אייג׳ינג) 🙂",
+      text: "היי! אני העוזרת האישית של MeDay 💬\nספרי לי מה המטרה שלך היום? (לחות, זוהר, אקנה, אנטי-אייג'ינג...)",
     },
   ]);
 
-  const [loading, setLoading] = useState(false);
-  const lastSuggestionsRef = useRef([]); // to keep last suggestions list if needed
-
-  function addMessage(from, text) {
-    setMessages((m) => [...m, { from, text }]);
-  }
-
-  function addRecs(recs) {
-    lastSuggestionsRef.current = recs || [];
-    setMessages((m) => [
-      ...m,
-      {
-        from: "recs",
-        recs: (recs || []).map((r) => ({
-          id: r.id,
-          name: r.name,
-          category: r.category,
-        })),
-      },
-    ]);
-  }
-
-  function setFollowup(type) {
-    if (type === "sensitive") {
-      setPending({
-        type: "sensitive",
-        prompt: "Do you have sensitive skin? (Yes/No) / هل بشرتك حساسة؟",
-        after: "chat",
-      });
-      addMessage("bot", "Before we continue: Do you have sensitive skin? (Yes/No)");
-    } else if (type === "pregnant") {
-      setPending({
-        type: "pregnant",
-        prompt: "Are you pregnant or breastfeeding? (Yes/No) / هل في حمل أو رضاعة؟",
-        after: "chat",
-      });
-      addMessage("bot", "Quick safety check: Are you pregnant or breastfeeding? (Yes/No)");
+  // גלילה אוטומטית להודעה האחרונה
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
+  }, [messages, loading]);
+
+  // פונקציות העזר שלך (normalize, isYes, וכו') נשארות אותו דבר
+  function normalize(s) { return (s || "").toString().toLowerCase().replace(/[?؟!.,:;()"'’“”]/g, "").trim(); }
+  function isYes(text) { const ans = normalize(text); return ["yes", "כן", "y", "ok", "sure", "בטח"].some((w) => ans === normalize(w)); }
+  function isNo(text) { const ans = normalize(text); return ["no", "לא", "n"].some((w) => ans === normalize(w)); }
+
+  function addMessage(from, text, recs = null) {
+    setMessages((m) => [...m, { from, text, recs }]);
   }
 
-  function detectGoal(text) {
-    const t = normalize(text);
-    if (t.includes("לחות") || t.includes("hydration") || t.includes("hydrate")) return "hydration";
-    if (t.includes("זוהר") || t.includes("glow") || t.includes("radiant")) return "glow";
-    if (t.includes("אקנה") || t.includes("acne") || t.includes("pimples")) return "acne";
-    if (t.includes("אנטי") || t.includes("aging") || t.includes("קמטים") || t.includes("lifting") || t.includes("מיצוק"))
-      return "antiaging";
-    if (t.includes("הרגעה") || t.includes("calm") || t.includes("אדמומיות") || t.includes("רגיש"))
-      return "calm";
-    return null;
-  }
-
-  async function callBackendChat(userText, nextProfile) {
+  async function handleUserText(text) {
+    if (!text.trim()) return;
+    addMessage("user", text);
     setLoading(true);
+
     try {
-      const context = {
-        goal: nextProfile.goal || null,
-        sensitive: typeof nextProfile.sensitive === "boolean" ? nextProfile.sensitive : null,
-        pregnant: typeof nextProfile.pregnant === "boolean" ? nextProfile.pregnant : null,
-      };
-
-      const resp = await sendChat(userText, context);
-
-      if (resp?.reply) addMessage("bot", resp.reply);
-
-      if (resp?.suggested_treatments && Array.isArray(resp.suggested_treatments)) {
-        addRecs(resp.suggested_treatments);
-      }
-
-      // follow_up format: { type: "yesno", question: "..." }
-      if (resp?.follow_up?.type === "yesno") {
-        // Decide which field this yes/no is about.
-        // If pregnancy not answered -> ask pregnancy; else if sensitive not answered -> ask sensitive
-        if (nextProfile.pregnant === null) {
-          setFollowup("pregnant");
-        } else if (nextProfile.sensitive === null) {
-          setFollowup("sensitive");
-        } else {
-          // if both are already answered, just show the question text (no pending)
-          addMessage("bot", resp.follow_up.question || "Yes/No?");
-        }
+      // כאן נכנסת הלוגיקה שלך לחיבור ל-FastAPI
+      const resp = await sendChat(text, profile);
+      
+      if (resp?.reply) {
+        addMessage("bot", resp.reply, resp.suggested_treatments);
       }
     } catch (e) {
-      addMessage("bot", `Backend error: ${e?.message || "Chat failed"}`);
+      addMessage("bot", "מצטערת, יש לי תקלה קטנה בחיבור. נסי שוב מאוחר יותר.");
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleUserText(text) {
-    const q = text.trim();
-    if (!q) return;
-
-    addMessage("user", q);
-
-    // 1) If we are waiting for Yes/No
-    if (pending) {
-      if (!isYes(q) && !isNo(q)) {
-        addMessage("bot", "Please answer Yes or No 🙂");
-        return;
-      }
-
-      const yes = isYes(q);
-      const updated = { ...profile, [pending.type]: yes };
-      setProfile(updated);
-      setPending(null);
-
-      addMessage("bot", `Got it. ${pending.type} = ${yes ? "Yes" : "No"}.`);
-
-      // After we collect follow-up, call backend with a short message
-      // (backend will use context)
-      await callBackendChat("continue", updated);
-      return;
-    }
-
-    // 2) Update goal if detected (keeps UX similar)
-    const goal = detectGoal(q);
-    let updated = profile;
-    if (goal) {
-      updated = { ...profile, goal };
-      setProfile(updated);
-      addMessage("bot", `Goal set to: ${goal}.`);
-      // Ask follow-ups locally (so UX stays consistent)
-      if (updated.sensitive === null) {
-        setFollowup("sensitive");
-        return;
-      }
-      if (updated.pregnant === null) {
-        setFollowup("pregnant");
-        return;
-      }
-    }
-
-    // 3) Call backend chat
-    await callBackendChat(q, updated);
-  }
-
-  const quickGoals = useMemo(() => ["לחות", "זוהר", "אקנה", "אנטי אייג׳ינג"], []);
-
   return (
-    <>
+    <div className="fixed bottom-6 left-6 z-[100] font-sans" dir="rtl">
+      {/* כפתור הפתיחה */}
       <button
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          position: "fixed",
-          right: "18px",
-          bottom: "18px",
-          borderRadius: "999px",
-          padding: "12px 14px",
-          border: "1px solid #ddd",
-          background: "white",
-          cursor: "pointer",
-          boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-        }}
+        onClick={() => setOpen(!open)}
+        className={cn(
+          "w-16 h-16 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 transform hover:scale-110",
+          open ? "bg-gray-100 text-gray-600 rotate-90" : "bg-primary text-white"
+        )}
       >
-        {open ? "Close ✖" : "Ask MeDay 💬"}
+        {open ? <X size={28} /> : <MessageCircle size={28} />}
       </button>
 
+      {/* חלון הצ'אט */}
       {open && (
-        <div
-          style={{
-            position: "fixed",
-            right: "18px",
-            bottom: "70px",
-            width: "360px",
-            maxWidth: "92vw",
-            height: "520px",
-            border: "1px solid #ddd",
-            borderRadius: "16px",
-            background: "white",
-            boxShadow: "0 10px 28px rgba(0,0,0,0.14)",
-            display: "flex",
-            flexDirection: "column",
-            overflow: "hidden",
-          }}
-        >
-          <div style={{ padding: "12px", borderBottom: "1px solid #eee" }}>
-            <div style={{ fontWeight: 700 }}>MeDay Assistant</div>
-            <div style={{ fontSize: "12px", opacity: 0.75 }}>
-              Real backend chat (FastAPI + SQLite) + context questions
-            </div>
-
-            <div style={{ marginTop: "8px", fontSize: "12px", opacity: 0.75 }}>
-              Current context:{" "}
-              <strong>
-                goal={profile.goal ?? "—"}, sensitive={profile.sensitive ?? "—"}, pregnancy={profile.pregnant ?? "—"}
-              </strong>
-            </div>
-
-            <div style={{ display: "flex", gap: "8px", marginTop: "8px", flexWrap: "wrap" }}>
-              {quickGoals.map((g) => (
-                <button
-                  key={g}
-                  onClick={() => handleUserText(g)}
-                  style={{
-                    border: "1px solid #eee",
-                    background: "#fafafa",
-                    borderRadius: "999px",
-                    padding: "6px 10px",
-                    cursor: "pointer",
-                    fontSize: "12px",
-                  }}
-                >
-                  {g}
-                </button>
-              ))}
-
-              <button
-                onClick={() => {
-                  setProfile({ goal: null, sensitive: null, pregnant: null });
-                  setPending(null);
-                  setMessages((m) => [
-                    ...m,
-                    { from: "bot", text: "Profile cleared. Tell me your goal again 🙂" },
-                  ]);
-                }}
-                style={{
-                  border: "1px solid #eee",
-                  background: "white",
-                  borderRadius: "999px",
-                  padding: "6px 10px",
-                  cursor: "pointer",
-                  fontSize: "12px",
-                }}
-              >
-                Reset
+        <div className="absolute bottom-20 left-0 w-[380px] max-w-[90vw] h-[600px] bg-white rounded-3xl shadow-2xl border border-pink-50 overflow-hidden flex flex-col animate-in slide-in-from-bottom-5">
+          
+          {/* Header */}
+          <div className="bg-gradient-to-l from-primary to-pink-300 p-6 text-white">
+            <div className="flex justify-between items-center">
+              <div>
+                <h3 className="font-bold text-xl flex items-center gap-2">
+                  <Sparkles size={18} />
+                  MeDay AI
+                </h3>
+                <p className="text-pink-50 text-xs opacity-90 mt-1">ייעוץ חכם בהתאמה אישית</p>
+              </div>
+              <button onClick={() => setProfile({ goal: null, sensitive: null, pregnant: null })} className="p-2 hover:bg-white/20 rounded-full transition-colors">
+                <RotateCcw size={18} />
               </button>
             </div>
           </div>
 
-          <div
-            style={{
-              padding: "12px",
-              flex: 1,
-              overflowY: "auto",
-              display: "grid",
-              gap: "10px",
-              background: "#fcfcfc",
-            }}
-          >
-            {messages.map((m, idx) => {
-              if (m.from === "recs") {
-                return (
-                  <div key={idx} style={{ display: "grid", gap: "8px" }}>
+          {/* Messages Area */}
+          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 bg-gray-50/50 space-y-4">
+            {messages.map((m, idx) => (
+              <div key={idx} className={cn("flex flex-col", m.from === "user" ? "items-end" : "items-start")}>
+                <div className={cn(
+                  "max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed",
+                  m.from === "user" 
+                    ? "bg-primary text-white rounded-tl-none shadow-md" 
+                    : "bg-white text-gray-800 border border-pink-100 rounded-tr-none shadow-sm"
+                )}>
+                  {m.text}
+                </div>
+
+                {/* המלצות על טיפולים - כפתורים מעוצבים */}
+                {m.recs && (
+                  <div className="mt-3 w-full space-y-2">
                     {m.recs.map((r) => (
                       <button
                         key={r.id}
-                        onClick={() => onOpenTreatment?.(r.id)}
-                        style={{
-                          textAlign: "left",
-                          border: "1px solid #eee",
-                          borderRadius: "12px",
-                          padding: "10px",
-                          background: "white",
-                          cursor: "pointer",
-                        }}
+                        onClick={() => navigate(`/treatments/${r.id}`)}
+                        className="w-full bg-white hover:bg-pink-50 border border-pink-200 p-3 rounded-xl text-right text-sm font-medium text-primary transition-all flex justify-between items-center group"
                       >
-                        Open: {r.name}
-                        <div style={{ fontSize: "12px", opacity: 0.7 }}>
-                          {r.category || "—"}
-                        </div>
+                        <span>טיפול מומלץ: {r.name}</span>
+                        <Sparkles size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
                       </button>
                     ))}
                   </div>
-                );
-              }
-
-              const isUser = m.from === "user";
-              return (
-                <div
-                  key={idx}
-                  style={{
-                    justifySelf: isUser ? "end" : "start",
-                    maxWidth: "85%",
-                    whiteSpace: "pre-wrap",
-                    background: "white",
-                    border: "1px solid #eee",
-                    borderRadius: "14px",
-                    padding: "10px 12px",
-                  }}
-                >
-                  <div style={{ fontSize: "12px", opacity: 0.7, marginBottom: "4px" }}>
-                    {isUser ? "You" : "Bot"}
-                  </div>
-                  <div>{m.text}</div>
-                </div>
-              );
-            })}
-
+                )}
+              </div>
+            ))}
             {loading && (
-              <div
-                style={{
-                  justifySelf: "start",
-                  maxWidth: "85%",
-                  background: "white",
-                  border: "1px solid #eee",
-                  borderRadius: "14px",
-                  padding: "10px 12px",
-                  opacity: 0.8,
-                }}
-              >
-                Bot is typing…
+              <div className="flex gap-1 items-center p-2 text-gray-400">
+                <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce"></span>
+                <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:0.2s]"></span>
+                <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:0.4s]"></span>
               </div>
             )}
           </div>
 
-          <ChatInput pending={pending} disabled={loading} onSend={handleUserText} />
+          {/* Input Area */}
+          <div className="p-4 bg-white border-t border-gray-100">
+            <ChatInput onSend={handleUserText} disabled={loading} />
+          </div>
         </div>
       )}
-    </>
+    </div>
   );
 }
 
-function ChatInput({ pending, disabled, onSend }) {
-  const [value, setValue] = useState("");
+function ChatInput({ onSend, disabled }) {
+  const [val, setVal] = useState("");
+
+  const submit = () => {
+    if (!val.trim() || disabled) return;
+    onSend(val);
+    setVal("");
+  };
 
   return (
-    <div style={{ padding: "10px", borderTop: "1px solid #eee", display: "flex", gap: "8px" }}>
+    <div className="relative flex items-center">
       <input
-        value={value}
-        onChange={(e) => setValue(e.target.value)}
-        placeholder={pending ? pending.prompt : "Type your goal or question…"}
-        style={{ flex: 1, padding: "10px", borderRadius: "12px", border: "1px solid #ddd" }}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            const text = value;
-            setValue("");
-            onSend(text);
-          }
-        }}
+        type="text"
+        value={val}
+        onChange={(e) => setVal(e.target.value)}
+        onKeyDown={(e) => e.key === "Enter" && submit()}
+        placeholder="כתבי לנו כאן..."
         disabled={disabled}
+        className="w-full bg-gray-100 border-none rounded-2xl py-3 pr-4 pl-12 focus:ring-2 focus:ring-primary/20 text-sm"
       />
       <button
-        onClick={() => {
-          const text = value;
-          setValue("");
-          onSend(text);
-        }}
-        disabled={disabled}
-        style={{
-          padding: "10px 12px",
-          borderRadius: "12px",
-          border: "1px solid #ddd",
-          background: "white",
-          cursor: disabled ? "not-allowed" : "pointer",
-          opacity: disabled ? 0.6 : 1,
-        }}
+        onClick={submit}
+        disabled={disabled || !val.trim()}
+        className="absolute left-2 p-2 text-primary hover:text-pink-600 disabled:text-gray-300 transition-colors"
       >
-        Send
+        <Send size={20} className="rotate-180" />
       </button>
     </div>
   );
