@@ -27,12 +27,12 @@ export default function Home() {
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
             <button 
-              onClick={() => navigate('/treatments')}
-              className="w-full sm:w-auto px-10 py-4 bg-gray-900 text-white rounded-full font-bold text-lg hover:bg-primary transition-all shadow-xl hover:shadow-primary/20 flex items-center justify-center gap-2"
-            >
-              לכל הטיפולים
-              <ArrowLeft size={20} />
-            </button>
+onClick={() => navigate('/categories')} // Changed from /treatments to /categories
+  className="w-full sm:w-auto px-10 py-4 bg-gray-900 text-white rounded-full font-bold text-lg hover:bg-primary transition-all shadow-xl hover:shadow-primary/20 flex items-center justify-center gap-2"
+>
+  לכל הטיפולים
+  <ArrowLeft size={20} />
+</button>
             
             <button 
               onClick={() => {

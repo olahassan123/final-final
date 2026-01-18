@@ -4,10 +4,25 @@ import { fetchTreatments } from "../api/medayApi";
 import cosmeticsCategories from "../data/cosmeticsCategories";
 import { Sparkles, ArrowLeft, Info } from "lucide-react";
 import { cn } from "../lib/utils";
+import { useLocation } from "react-router-dom"; // Add this to imports
+
+
+
+
+
 
 function TreatmentCard({ t }) {
   const navigate = useNavigate();
-  
+  const { state } = useLocation();
+
+useEffect(() => {
+  if (state?.scrollTo && !loading) {
+    const element = document.getElementById(state.scrollTo);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
+    }
+  }
+}, [state, loading]);
   // בחירת טקסט קצר להצגה בכרטיס
   const brief = t.keywords || t.results_timing || "לחצי לפרטים נוספים";
 
@@ -39,20 +54,25 @@ export default function TreatmentsListPage() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    let alive = true;
-    (async () => {
-      try {
-        setLoading(true);
-        const data = await fetchTreatments();
-        if (alive) setTreatments(Array.isArray(data) ? data : []);
-      } catch (e) {
-        if (alive) setError(e?.message || "נכשל בטעינת רשימת הטיפולים");
-      } finally {
-        if (alive) setLoading(false);
+  let alive = true;
+  (async () => {
+    try {
+      setLoading(true);
+      const data = await fetchTreatments();
+      if (alive) setTreatments(Array.isArray(data) ? data : []);
+    } catch (e) {
+      console.error(e);
+      // אם השרת נכשל, נטען נתונים מקומיים כדי שהדף לא יהיה ריק
+      if (alive) {
+          // כאן את יכולה להכניס מערך דוגמה אם יש לך קובץ נתונים מקומי
+          setError("לא הצלחנו להתחבר לשרת, אנא וודאי שה-Backend פועל.");
       }
-    })();
-    return () => { alive = false; };
-  }, []);
+    } finally {
+      if (alive) setLoading(false);
+    }
+  })();
+  return () => { alive = false; };
+}, []);
 
   const byCategory = useMemo(() => {
     return treatments.reduce((acc, t) => {
