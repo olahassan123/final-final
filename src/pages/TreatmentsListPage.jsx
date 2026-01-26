@@ -1,167 +1,141 @@
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { fetchTreatments } from "../api/medayApi";
-import cosmeticsCategories from "../data/cosmeticsCategories";
-import { Sparkles, ArrowLeft, Info } from "lucide-react";
-import { cn } from "../lib/utils";
-import { useLocation } from "react-router-dom"; // Add this to imports
-
-
-
-
-
-
-function TreatmentCard({ t }) {
-  const navigate = useNavigate();
-  const { state } = useLocation();
-
-useEffect(() => {
-  if (state?.scrollTo && !loading) {
-    const element = document.getElementById(state.scrollTo);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
-  }
-}, [state, loading]);
-  // בחירת טקסט קצר להצגה בכרטיס
-  const brief = t.keywords || t.results_timing || "לחצי לפרטים נוספים";
-
-  return (
-    <div className="group bg-white border border-pink-100 rounded-3xl p-6 transition-all duration-300 hover:shadow-xl hover:shadow-pink-100/50 hover:-translate-y-1 flex flex-col justify-between">
-      <div>
-        <h3 className="text-xl font-bold text-gray-800 mb-2 group-hover:text-primary transition-colors">
-          {t.name}
-        </h3>
-        <p className="text-gray-500 text-sm line-clamp-2 leading-relaxed">
-          {brief}
-        </p>
-      </div>
-
-      <button 
-        onClick={() => navigate(`/treatments/${t.id}`)}
-        className="mt-6 flex items-center justify-between w-full text-primary font-bold text-sm border-t border-pink-50 pt-4 group/btn"
-      >
-        <span>לפרטי הטיפול</span>
-        <ArrowLeft className="w-4 h-4 transition-transform group-hover/btn:-translate-x-1" />
-      </button>
-    </div>
-  );
-}
+import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
+import { ChevronDown, Sparkles } from "lucide-react";
+import { cosmeticSections } from "../data/cosmeticSections";
 
 export default function TreatmentsListPage() {
-  const [treatments, setTreatments] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+  const location = useLocation();
 
+  // أي فئة مفتوحة؟
+  const [openSectionId, setOpenSectionId] = useState(
+    cosmeticSections?.[0]?.id || null
+  );
+
+  // أي علاج مفتوح (لـ "לקרוא עוד")؟
+  const [openTreatments, setOpenTreatments] = useState({});
+
+  // إذا إجانا state من صفحة ثانية (اختياري)
   useEffect(() => {
-  let alive = true;
-  (async () => {
-    try {
-      setLoading(true);
-      const data = await fetchTreatments();
-      if (alive) setTreatments(Array.isArray(data) ? data : []);
-    } catch (e) {
-      console.error(e);
-      // אם השרת נכשל, נטען נתונים מקומיים כדי שהדף לא יהיה ריק
-      if (alive) {
-          // כאן את יכולה להכניס מערך דוגמה אם יש לך קובץ נתונים מקומי
-          setError("לא הצלחנו להתחבר לשרת, אנא וודאי שה-Backend פועל.");
-      }
-    } finally {
-      if (alive) setLoading(false);
+    const target = location.state?.openSectionId;
+    if (target) {
+      setOpenSectionId(target);
+      setTimeout(() => {
+        const el = document.getElementById(target);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 50);
     }
-  })();
-  return () => { alive = false; };
-}, []);
+  }, [location.state]);
 
-  const byCategory = useMemo(() => {
-    return treatments.reduce((acc, t) => {
-      const cat = t.category || "General";
-      acc[cat] = acc[cat] || [];
-      acc[cat].push(t);
-      return acc;
-    }, {});
-  }, [treatments]);
+  const toggleSection = (id) => {
+    setOpenSectionId((prev) => (prev === id ? null : id));
+  };
 
-  if (loading) return (
-    <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
-      <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-primary"></div>
-      <p className="text-gray-500 font-medium">טוען טיפולים...</p>
-    </div>
-  );
-
-  if (error) return (
-    <div className="container mx-auto p-20 text-center text-red-500 italic">
-      {error}
-    </div>
-  );
+  const toggleTreatment = (id) => {
+    setOpenTreatments((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
 
   return (
-    <div className="min-h-screen bg-[#fffafa] py-12 px-6" dir="rtl">
-      <div className="max-w-7xl mx-auto">
-        
-        {/* Header Section */}
-        <div className="text-center mb-16">
-          <div className="flex justify-center mb-4">
-            <span className="bg-pink-100 text-primary px-4 py-1 rounded-full text-sm font-bold flex items-center gap-2">
-              <Sparkles size={14} />
-              התפריט המלא
-            </span>
+    <div className="min-h-screen bg-[#fff1f4] py-10 px-4" dir="rtl">
+      <div className="max-w-5xl mx-auto">
+        {/* Header */}
+        <div className="text-center mb-10">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-pink-100 text-primary text-sm font-bold mb-4">
+            <Sparkles size={16} />
+            <span>התפריט המלא</span>
           </div>
-          <h1 className="text-4xl md:text-5xl font-serif font-bold text-gray-900 mb-4">סוגי טיפולים</h1>
+          <h1 className="text-4xl md:text-5xl font-serif font-bold text-gray-900 mb-3">
+            סוגי טיפולים
+          </h1>
           <p className="text-gray-600 max-w-2xl mx-auto leading-relaxed">
-            גלי את מגוון הטיפולים המקצועיים שלנו. לכל שאלה נוספת, את מוזמנת להתייעץ עם הצ'אטבוט החכם שלנו בפינת המסך.
+            בחרי קטגוריה כדי לראות את הטיפולים שבתוכה.
           </p>
         </div>
 
-        {/* Categories Loop */}
-        <div className="space-y-20">
-          {cosmeticsCategories.map((cat) => {
-            const list = byCategory[cat.key] || [];
-            return (
-              <section key={cat.key} className="scroll-mt-24">
-                <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 border-r-4 border-primary pr-6">
-                  <div>
-                    <h2 className="text-2xl md:text-3xl font-bold text-gray-800">{cat.title}</h2>
-                    <p className="text-primary font-medium">{cat.subtitle}</p>
-                  </div>
-                  <p className="text-gray-500 max-w-md text-sm mt-2 md:mt-0 leading-relaxed">
-                    {cat.description}
-                  </p>
-                </div>
+        {/* Accordion */}
+        <div className="space-y-4">
+          {cosmeticSections.map((section) => {
+            const isOpen = openSectionId === section.id;
 
-                {list.length === 0 ? (
-                  <div className="bg-white/50 border border-dashed border-gray-200 rounded-3xl p-10 text-center text-gray-400">
-                    עדיין לא נוספו טיפולים לקטגוריה זו.
+            return (
+              <div
+                key={section.id}
+                id={section.id}
+                className="rounded-3xl overflow-hidden border border-pink-200 bg-white/70"
+              >
+                {/* Section Header (click to open) */}
+                <button
+                  onClick={() => toggleSection(section.id)}
+                  className="w-full flex items-center justify-between px-6 py-5 text-right hover:bg-white transition"
+                >
+                  <div>
+                    <h2 className="text-2xl md:text-3xl font-bold text-gray-900">
+                      {section.title}
+                    </h2>
+                    {section.subtitle ? (
+                      <p className="text-primary font-medium mt-1">
+                        {section.subtitle}
+                      </p>
+                    ) : null}
                   </div>
-                ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-                    {list.map((t) => (
-                      <TreatmentCard key={t.id} t={t} />
-                    ))}
+
+                  <ChevronDown
+                    className={`w-6 h-6 text-primary transition-transform ${
+                      isOpen ? "rotate-180" : ""
+                    }`}
+                  />
+                </button>
+
+                {/* Section Body */}
+                {isOpen ? (
+                  <div className="px-6 pb-6">
+                    <div className="h-px bg-pink-100 mb-4" />
+
+                    <ul className="space-y-6">
+                      {section.treatments.map((t) => {
+                        const expanded = !!openTreatments[t.id];
+                        const linesToShow = expanded ? t.lines : t.lines.slice(0, 2);
+
+                        return (
+                          <li key={t.id} className="py-2">
+                            {/* Treatment Title */}
+                            <h3 className="text-xl md:text-2xl font-extrabold text-gray-900 leading-tight">
+                              {t.name}
+                            </h3>
+
+                            {/* Treatment Text */}
+                            <div className="mt-3 space-y-2 text-gray-700 leading-relaxed">
+                              {linesToShow.map((line, idx) => (
+                                <p key={idx}>{line}</p>
+                              ))}
+                            </div>
+
+                            {/* Read more */}
+                            {t.lines.length > 2 ? (
+                              <button
+                                onClick={() => toggleTreatment(t.id)}
+                                className="mt-3 text-primary font-bold text-sm hover:underline"
+                              >
+                                {expanded ? "לסגור ▲" : "לקרוא עוד ▼"}
+                              </button>
+                            ) : null}
+
+                            {/* Soft separator */}
+                            <div className="mt-6 h-px bg-pink-100/70" />
+                          </li>
+                        );
+                      })}
+                    </ul>
                   </div>
-                )}
-              </section>
+                ) : null}
+              </div>
             );
           })}
-        </div>
-
-        {/* Footer Info Box */}
-        <div className="mt-20 bg-gray-900 rounded-[2rem] p-8 md:p-12 text-white flex flex-col md:flex-row items-center gap-8">
-          <div className="bg-white/10 p-4 rounded-2xl">
-            <Info className="w-8 h-8 text-pink-300" />
-          </div>
-          <div>
-            <h4 className="text-xl font-bold mb-2">צריכה עזרה בבחירת הטיפול?</h4>
-            <p className="text-gray-400">
-              מערכת הבינה המלאכותית שלנו למדה את כל הידע המקצועי של MeDay כדי לתת לך המלצה מדויקת לפי סוג העור והמטרות שלך.
-            </p>
-          </div>
-          <button className="whitespace-nowrap bg-primary text-white px-8 py-3 rounded-full font-bold hover:bg-white hover:text-primary transition-all shadow-lg shadow-primary/20">
-            התחילי ייעוץ עכשיו
-          </button>
         </div>
       </div>
     </div>
   );
 }
+
+
+
+
