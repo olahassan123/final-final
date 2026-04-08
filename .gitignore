@@ -27,6 +27,9 @@ dist-ssr
 # Python / Backend
 # =========================
 backend/.venv/
+backend/venv/
+
+
 __pycache__/
 *.pyc
 *.pyo
@@ -37,3 +40,7 @@ backend/*.db
 
 # Environment variables
 .env
+backend/.env
+
+# Database file (local data)
+backend/appointments.db

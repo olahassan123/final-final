@@ -1,51 +1,93 @@
 import { useMemo, useRef, useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom"; // נוסיף ניווט לטיפולים
+import { useNavigate } from "react-router-dom";
 import { sendChat } from "../api/medayApi";
-import { MessageCircle, X, Send, RotateCcw, Sparkles, User, Bot } from "lucide-react";
-import { cn } from "../lib/utils"; // שימוש בפונקציית העזר שיצרנו
+import {
+  MessageCircle,
+  X,
+  Send,
+  RotateCcw,
+  Sparkles,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
+import { cn } from "../lib/utils";
+
+const INITIAL_BOT_MSG =
+  "היי! אני העוזרת האישית של MeDay 💬\nספרי לי מה המטרה שלך היום? (לחות, זוהר, אקנה, אנטי-אייג'ינג...)";
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const scrollRef = useRef(null);
 
+  // Profile management (goal/sensitive/pregnant)
   const [profile, setProfile] = useState({ goal: null, sensitive: null, pregnant: null });
-  const [pending, setPending] = useState(null);
+
+  // CONTEXT: Tracks the treatment the user is currently viewing
+  const [selectedTreatment, setSelectedTreatment] = useState(null);
+
   const [loading, setLoading] = useState(false);
+  const [showSources, setShowSources] = useState(false);
   const [messages, setMessages] = useState([
-    {
-      from: "bot",
-      text: "היי! אני העוזרת האישית של MeDay 💬\nספרי לי מה המטרה שלך היום? (לחות, זוהר, אקנה, אנטי-אייג'ינג...)",
-    },
+    { from: "bot", text: INITIAL_BOT_MSG },
   ]);
 
-  // גלילה אוטומטית להודעה האחרונה
+  // --- NEW: Global Event Listeners for Page Sync ---
+  useEffect(() => {
+    // Listens for the 'treatmentSelected' event from TreatmentDetailsPage
+    const handleTreatmentSelection = (e) => {
+      setSelectedTreatment(e.detail); // e.detail is {id, name}
+    };
+
+    // Listens for 'openChatWithQuestion' event to trigger automatic chat
+    const handleOpenWithQuestion = (e) => {
+      setOpen(true);
+      handleUserText(e.detail); 
+    };
+
+    window.addEventListener('treatmentSelected', handleTreatmentSelection);
+    window.addEventListener('openChatWithQuestion', handleOpenWithQuestion);
+
+    return () => {
+      window.removeEventListener('treatmentSelected', handleTreatmentSelection);
+      window.removeEventListener('openChatWithQuestion', handleOpenWithQuestion);
+    };
+  }, []);
+
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, loading]);
 
-  // פונקציות העזר שלך (normalize, isYes, וכו') נשארות אותו דבר
-  function normalize(s) { return (s || "").toString().toLowerCase().replace(/[?؟!.,:;()"'’“”]/g, "").trim(); }
-  function isYes(text) { const ans = normalize(text); return ["yes", "כן", "y", "ok", "sure", "בטח"].some((w) => ans === normalize(w)); }
-  function isNo(text) { const ans = normalize(text); return ["no", "לא", "n"].some((w) => ans === normalize(w)); }
-
-  function addMessage(from, text, recs = null) {
-    setMessages((m) => [...m, { from, text, recs }]);
+  function addMessage(from, text, recs = null, meta = null) {
+    setMessages((m) => [...m, { from, text, recs, meta }]);
   }
 
   async function handleUserText(text) {
-    if (!text.trim()) return;
+    if (!text.trim() || loading) return;
+
     addMessage("user", text);
     setLoading(true);
 
     try {
-      // כאן נכנסת הלוגיקה שלך לחיבור ל-FastAPI
-      const resp = await sendChat(text, profile);
-      
+      // Passes text, profile, and the selected treatment ID as context to the API
+      const resp = await sendChat(text, profile, selectedTreatment, messages);
+
       if (resp?.reply) {
-        addMessage("bot", resp.reply, resp.suggested_treatments);
+        addMessage("bot", resp.reply, resp.suggested_treatments, {
+          confidence: resp.confidence,
+          sources: resp.sources,
+        });
+      }
+
+      // Display follow-up clarifying questions if returned by backend
+      if (resp?.follow_up) {
+        // Handle both object and string formats for follow-up questions
+        const followUpText = typeof resp.follow_up === 'object' 
+          ? resp.follow_up.question 
+          : resp.follow_up;
+        addMessage("bot", followUpText);
       }
     } catch (e) {
       addMessage("bot", "מצטערת, יש לי תקלה קטנה בחיבור. נסי שוב מאוחר יותר.");
@@ -54,9 +96,16 @@ export default function ChatWidget() {
     }
   }
 
+  function resetChat() {
+    setProfile({ goal: null, sensitive: null, pregnant: null });
+    setSelectedTreatment(null);
+    setMessages([{ from: "bot", text: INITIAL_BOT_MSG }]);
+    setShowSources(false);
+  }
+
   return (
     <div className="fixed bottom-6 left-6 z-[100] font-sans" dir="rtl">
-      {/* כפתור הפתיחה */}
+      {/* Floating Action Button */}
       <button
         onClick={() => setOpen(!open)}
         className={cn(
@@ -67,7 +116,7 @@ export default function ChatWidget() {
         {open ? <X size={28} /> : <MessageCircle size={28} />}
       </button>
 
-      {/* חלון הצ'אט */}
+      {/* Chat Window */}
       {open && (
         <div className="absolute bottom-20 left-0 w-[380px] max-w-[90vw] h-[600px] bg-white rounded-3xl shadow-2xl border border-pink-50 overflow-hidden flex flex-col animate-in slide-in-from-bottom-5">
           
@@ -79,35 +128,81 @@ export default function ChatWidget() {
                   <Sparkles size={18} />
                   MeDay AI
                 </h3>
-                <p className="text-pink-50 text-xs opacity-90 mt-1">ייעוץ חכם בהתאמה אישית</p>
+                <p className="text-pink-50 text-xs opacity-90 mt-1">
+                  ייעוץ חכם בהתאמה אישית
+                </p>
+
+                {/* Context Display */}
+                {selectedTreatment?.name && (
+                  <p className="text-pink-50 text-[11px] font-medium bg-white/10 rounded-full px-2 py-0.5 mt-2 inline-block">
+                    הקשר: {selectedTreatment.name}
+                  </p>
+                )}
               </div>
-              <button onClick={() => setProfile({ goal: null, sensitive: null, pregnant: null })} className="p-2 hover:bg-white/20 rounded-full transition-colors">
-                <RotateCcw size={18} />
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowSources((s) => !s)}
+                  className="p-2 hover:bg-white/20 rounded-full transition-colors"
+                  title="מקורות (דיבאג)"
+                >
+                  {showSources ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+                </button>
+
+                <button
+                  onClick={resetChat}
+                  className="p-2 hover:bg-white/20 rounded-full transition-colors"
+                  title="איפוס"
+                >
+                  <RotateCcw size={18} />
+                </button>
+              </div>
             </div>
           </div>
 
           {/* Messages Area */}
           <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 bg-gray-50/50 space-y-4">
             {messages.map((m, idx) => (
-              <div key={idx} className={cn("flex flex-col", m.from === "user" ? "items-end" : "items-start")}>
-                <div className={cn(
-                  "max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed",
-                  m.from === "user" 
-                    ? "bg-primary text-white rounded-tl-none shadow-md" 
-                    : "bg-white text-gray-800 border border-pink-100 rounded-tr-none shadow-sm"
-                )}>
+              <div
+                key={idx}
+                className={cn("flex flex-col", m.from === "user" ? "items-end" : "items-start")}
+              >
+                <div
+                  className={cn(
+                    "max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed",
+                    m.from === "user"
+                      ? "bg-primary text-white rounded-tl-none shadow-md"
+                      : "bg-white text-gray-800 border border-pink-100 rounded-tr-none shadow-sm"
+                  )}
+                >
                   {m.text}
                 </div>
 
-                {/* המלצות על טיפולים - כפתורים מעוצבים */}
+                {/* Debug Sources UI */}
+                {showSources && m?.meta?.sources?.length > 0 && (
+                  <div className="mt-2 max-w-[85%] text-[10px] text-gray-500 bg-white border border-gray-100 rounded-xl p-2 font-mono">
+                    <div className="font-bold text-gray-700 mb-1 border-b pb-1">DATABASE SOURCES:</div>
+                    <ul className="list-disc pr-4 space-y-1">
+                      {m.meta.sources.map((s, i) => (
+                        <li key={i}>
+                          <span className="uppercase text-[9px] font-bold">{s.type}</span>: {s.title}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Treatment Recommendations Buttons */}
                 {m.recs && (
                   <div className="mt-3 w-full space-y-2">
                     {m.recs.map((r) => (
                       <button
                         key={r.id}
-                        onClick={() => navigate(`/treatments/${r.id}`)}
-                        className="w-full bg-white hover:bg-pink-50 border border-pink-200 p-3 rounded-xl text-right text-sm font-medium text-primary transition-all flex justify-between items-center group"
+                        onClick={() => {
+                          setSelectedTreatment({ id: r.id, name: r.name });
+                          navigate(`/treatments/${r.id}`);
+                        }}
+                        className="w-full bg-white hover:bg-pink-50 border border-pink-200 p-3 rounded-xl text-right text-sm font-medium text-primary transition-all flex justify-between items-center group shadow-sm"
                       >
                         <span>טיפול מומלץ: {r.name}</span>
                         <Sparkles size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -117,6 +212,7 @@ export default function ChatWidget() {
                 )}
               </div>
             ))}
+
             {loading && (
               <div className="flex gap-1 items-center p-2 text-gray-400">
                 <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce"></span>
