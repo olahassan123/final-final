@@ -570,24 +570,52 @@ export default function SecretaryPage() {
 
       {/* Header */}
       <div className="px-8 py-4 flex items-center justify-between relative overflow-hidden"
-        style={{ background: "#C9A27E", boxShadow: "0 4px 12px rgba(0,0,0,0.05)" }}>
+        style={{ background: "#FAF6F1", boxShadow: "0 4px 12px rgba(0,0,0,0.05)", borderBottom: "1px solid #EADFD5" }}>
 
         {/* Animated radiant glow from logo side */}
         <div className="absolute inset-0 pointer-events-none">
           <div
             className="absolute right-0 top-1/2 -translate-y-1/2 w-[70%] h-[200%]"
             style={{
-              background: "radial-gradient(ellipse at right center, rgba(255,210,225,0.22) 0%, rgba(255,190,210,0.10) 45%, transparent 72%)",
+              background: "radial-gradient(ellipse at right center, rgba(201,162,126,0.18) 0%, rgba(201,162,126,0.07) 45%, transparent 72%)",
               animation: "radiateGlow 3.5s ease-in-out infinite",
             }}
           />
         </div>
 
         {/* Logo — faded */}
-        <img src="/logo.png" alt="logo" className="h-16 w-auto opacity-40 relative z-10" />
+        <img src="/logo.png" alt="logo" className="h-16 w-auto opacity-60 relative z-10" />
+
+        {/* Centered title */}
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
+          <div className="text-center select-none">
+            <p style={{
+              fontFamily: "'Cormorant Garamond', Georgia, serif",
+              fontSize: "13px",
+              letterSpacing: "0.55em",
+              color: "#8b6f52",
+              textTransform: "uppercase",
+              marginBottom: "1px",
+              fontWeight: 400,
+            }}>
+              notebook of
+            </p>
+            <h1 style={{
+              fontFamily: "'Cormorant Garamond', Georgia, serif",
+              fontSize: "42px",
+              fontStyle: "italic",
+              fontWeight: 600,
+              letterSpacing: "0.06em",
+              lineHeight: 1,
+              color: "#7a4f2a",
+            }}>
+              appointments
+            </h1>
+          </div>
+        </div>
 
         <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full border relative z-10"
-          style={{ color: "#FFFFFF", background: "rgba(255,255,255,0.2)", borderColor: "rgba(255,255,255,0.4)" }}>
+          style={{ color: "#8b6f52", background: "rgba(201,162,126,0.12)", borderColor: "rgba(201,162,126,0.35)" }}>
           <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
           מחובר
         </div>
@@ -612,10 +640,10 @@ export default function SecretaryPage() {
               onClick={() => setFormOpen((o) => !o)}
               className="w-full rounded-2xl transition-all duration-200 group overflow-hidden"
               style={{
-                background: "#C9A27E",
+                background: "linear-gradient(135deg, #e8b4c0, #d4899a)",
                 border: "none",
                 borderRadius: "12px",
-                boxShadow: "0 8px 20px rgba(0,0,0,0.04)",
+                boxShadow: "0 8px 20px rgba(212,137,154,0.25)",
               }}
             >
               <div className="px-5 py-4 flex items-center justify-between">
@@ -823,27 +851,8 @@ export default function SecretaryPage() {
           </button>
           )}
 
-          {/* Title above calendar */}
-          <div className="absolute top-4 inset-x-12 z-20 flex justify-center pointer-events-none">
-            <h1
-              style={{
-                fontFamily: "Georgia, serif",
-                background: "linear-gradient(135deg, #c8a06a, #8b5e3c, #c8a06a)",
-                backgroundSize: "200% auto",
-                WebkitBackgroundClip: "text",
-                WebkitTextFillColor: "transparent",
-                backgroundClip: "text",
-                animation: "shimmer 3s linear infinite",
-                letterSpacing: "0.12em",
-                textShadow: "none",
-              }}
-              className="text-2xl font-bold tracking-widest select-none"
-            >
-              ניהול תורים
-            </h1>
-          </div>
-
           <style>{`
+            @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400;1,600&display=swap');
             @keyframes shimmer {
               0% { background-position: 200% center; }
               100% { background-position: -200% center; }
