@@ -1,12 +1,16 @@
-import { useState, useEffect } from "react";
-import { fetchTreatments, fetchAppointments, createAppointment, deleteAppointment } from "../api/medayApi";
+import { useState, useEffect, useRef } from "react";
+import { fetchTreatments, fetchAppointments, createAppointment, deleteAppointment, updateAppointment } from "../api/medayApi";
 import {
-  ChevronLeft, ChevronRight, Trash2, Plus, Sparkles, User, Phone, CalendarDays, Clock, X,
+  ChevronLeft, ChevronRight, Trash2, Plus, Sparkles, User, Phone, CalendarDays, Clock, X, LayoutGrid,
 } from "lucide-react";
 
 // ── Calendar helpers ──────────────────────────────────────────
 const HOURS = Array.from({ length: 15 }, (_, i) => i + 8); // 8..22
 const DAY_NAMES = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
+const MONTH_NAMES_HE = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
+const MINI_DAY_HEADS = ["א׳","ב׳","ג׳","ד׳","ה׳","ו׳","ש׳"]; // Sun→Sat
+const ROW_HEIGHT = 80; // px per hour row
+const FIRST_HOUR = 8;
 
 function getWeekStart(date) {
   const d = new Date(date);
@@ -32,22 +36,50 @@ function displayDate(date) {
   return `${date.getDate()}/${date.getMonth() + 1}`;
 }
 
-function apptHour(time) {
-  return parseInt((time || "00:00").split(":")[0], 10);
+function timeToMinutes(time) {
+  const [h, m] = (time || "00:00").split(":").map(Number);
+  return h * 60 + m;
 }
 
-function apptSpansHour(appt, hour) {
-  const start = apptHour(appt.time);
-  const end = apptHour(appt.end_time || appt.time);
-  return hour > start && hour < end;
-}
+// Returns layout info for each appt: { top, height, left, width }
+// Appointments that overlap share the horizontal space side-by-side.
+function computeOverlapLayout(appts) {
+  // Sort by start time
+  const sorted = [...appts].sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 
-function apptStartsAt(appt, hour) {
-  return apptHour(appt.time) === hour;
-}
+  // Group into overlap clusters
+  const clusters = [];
+  for (const appt of sorted) {
+    const start = timeToMinutes(appt.time);
+    let placed = false;
+    for (const cluster of clusters) {
+      const clusterEnd = Math.max(...cluster.map((c) => timeToMinutes(c.end_time || c.time) || timeToMinutes(c.time) + 60));
+      if (start < clusterEnd) {
+        cluster.push(appt);
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) clusters.push([appt]);
+  }
 
-function apptEndsAt(appt, hour) {
-  return apptHour(appt.end_time || appt.time) === hour;
+  const layout = new Map();
+  for (const cluster of clusters) {
+    const n = cluster.length;
+    cluster.forEach((appt, idx) => {
+      const startMin = timeToMinutes(appt.time);
+      const endMin = timeToMinutes(appt.end_time || appt.time) || startMin + 60;
+      const top = ((startMin - FIRST_HOUR * 60) / 60) * ROW_HEIGHT;
+      const height = Math.max(((endMin - startMin) / 60) * ROW_HEIGHT, 18);
+      layout.set(appt.id, {
+        top,
+        height,
+        left: idx / n,
+        width: 1 / n,
+      });
+    });
+  }
+  return layout;
 }
 
 // ── Detail Modal ──────────────────────────────────────────────
@@ -127,6 +159,79 @@ export default function SecretaryPage() {
   const [drag, setDrag] = useState(null);
   const isDragging = drag !== null;
 
+  const [viewMode, setViewMode] = useState("week"); // "week" | "year"
+  const [yearViewYear, setYearViewYear] = useState(new Date().getFullYear());
+  const [highlightedDateCol, setHighlightedDateCol] = useState(null);
+  const highlightedDateTimer = useRef(null);
+
+  // ── Reschedule drag state ──────────────────────────────────
+  // reschedule = { appt, durationMin, targetDate, targetHour }
+  const rescheduleRef = useRef(null);
+  const [reschedule, _setReschedule] = useState(null);
+  function setReschedule(val) {
+    const next = typeof val === "function" ? val(rescheduleRef.current) : val;
+    rescheduleRef.current = next;
+    _setReschedule(next);
+  }
+  const [justRescheduledId, setJustRescheduledId] = useState(null);
+  const justRescheduledTimer = useRef(null);
+
+  // ── Post-booking scroll + highlight ───────────────────────
+  const calendarScrollRef = useRef(null);
+  const [newlyBookedId, setNewlyBookedId] = useState(null);
+  const newlyBookedTimer = useRef(null);
+  // ─────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
+
+  const [fieldErrors, setFieldErrors] = useState({});
+  const [fieldFlash, setFieldFlash] = useState({});
+  const flashTimers = useRef({});
+  const fieldRefs = useRef({});
+
+  function isValidPhone(val) {
+    return /^05\d-?\d{7}$/.test(val.trim());
+  }
+
+  function triggerFlash(fields) {
+    const flashOn = {};
+    fields.forEach((f) => { flashOn[f] = true; });
+    setFieldFlash((prev) => ({ ...prev, ...flashOn }));
+    fields.forEach((field) => {
+      if (flashTimers.current[field]) clearTimeout(flashTimers.current[field]);
+      flashTimers.current[field] = setTimeout(() => {
+        setFieldFlash((prev) => ({ ...prev, [field]: false }));
+      }, 1500);
+    });
+  }
+
+  // Field order determines which is "first" when scrolling to errors
+  const FIELD_ORDER = ["client_name", "client_phone", "treatment_id", "date", "time", "end_time"];
+
+  function scrollToFirstError(invalidFields) {
+    const first = FIELD_ORDER.find((f) => invalidFields.includes(f));
+    if (first && fieldRefs.current[first]) {
+      fieldRefs.current[first].scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }
+
+  function clearFieldError(field) {
+    setFieldErrors((prev) => ({ ...prev, [field]: false }));
+    setFieldFlash((prev) => ({ ...prev, [field]: false }));
+  }
+
+  function handlePhoneChange(e) {
+    const val = e.target.value;
+    setForm((f) => ({ ...f, client_phone: val }));
+    if (val === "") {
+      setFieldErrors((prev) => ({ ...prev, client_phone: true }));
+    } else if (!isValidPhone(val)) {
+      setFieldErrors((prev) => ({ ...prev, client_phone: true }));
+      triggerFlash(["client_phone"]);
+    } else {
+      clearFieldError("client_phone");
+    }
+  }
+
   const [flipDir, setFlipDir] = useState(null);
   const [animating, setAnimating] = useState(false);
 
@@ -154,6 +259,13 @@ export default function SecretaryPage() {
 
   useEffect(() => { setPastLabelVisible(true); }, [weekStart]);
 
+  useEffect(() => {
+    if (form.time && form.end_time && form.time < form.end_time) {
+      setFieldErrors((prev) => ({ ...prev, time: false, end_time: false, time_order: false }));
+      setFieldFlash((prev) => ({ ...prev, time: false, end_time: false }));
+    }
+  }, [form.time, form.end_time]);
+
   function load() {
     fetchAppointments().then(setAppointments).catch(console.error);
   }
@@ -172,18 +284,57 @@ export default function SecretaryPage() {
 
   async function handleSubmit(e) {
     e.preventDefault();
-    if (!form.client_name || !form.treatment_id || !form.date || !form.time) return;
-    if (form.end_time && form.end_time <= form.time) {
-      alert("שעת הסיום חייבת להיות אחרי שעת ההתחלה");
+    const required = {
+      client_name: !!form.client_name.trim(),
+      client_phone: !!form.client_phone.trim() && isValidPhone(form.client_phone),
+      treatment_id: !!form.treatment_id,
+      date: !!form.date,
+      time: !!form.time,
+      end_time: !!form.end_time,
+    };
+    const invalid = Object.keys(required).filter((k) => !required[k]);
+    if (invalid.length > 0) {
+      const errors = {};
+      invalid.forEach((k) => { errors[k] = true; });
+      setFieldErrors((prev) => ({ ...prev, ...errors }));
+      triggerFlash(invalid);
+      scrollToFirstError(invalid);
+      return;
+    }
+    if (form.end_time <= form.time) {
+      setFieldErrors((prev) => ({ ...prev, time_order: true }));
+      triggerFlash(["time", "end_time"]);
+      scrollToFirstError(["time"]);
       return;
     }
     setSaving(true);
     try {
-      await createAppointment(form);
+      const result = await createAppointment(form);
+      const bookedDate = form.date;
+      const bookedTime = form.time;
+      const bookedTreatmentId = form.treatment_id;
       setForm({ client_name: "", client_phone: "", treatment_id: "", treatment_name: "", date: "", time: "", end_time: "", notes: "" });
+      setFieldErrors({});
+      setFieldFlash({});
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
+      // Switch filter to the booked treatment's category (uses existing fade transition)
+      const bookedCat = treatments.find((t) => t.id === bookedTreatmentId)?.class_name || null;
+      switchCategory(bookedCat);
+      // Navigate to the booked week
+      setWeekStart(getWeekStart(new Date(bookedDate)));
+      setNewlyBookedId(result.id);
       load();
+      // Scroll after filter transition + state settle (220ms fade + buffer)
+      setTimeout(() => {
+        if (calendarScrollRef.current) {
+          const hour = Math.floor(timeToMinutes(bookedTime) / 60);
+          const scrollTop = Math.max(0, (hour - FIRST_HOUR) * ROW_HEIGHT - 60);
+          calendarScrollRef.current.scrollTo({ top: scrollTop, behavior: "smooth" });
+        }
+        if (newlyBookedTimer.current) clearTimeout(newlyBookedTimer.current);
+        newlyBookedTimer.current = setTimeout(() => setNewlyBookedId(null), 2500);
+      }, 340);
     } catch (err) {
       console.error(err);
     } finally {
@@ -196,8 +347,83 @@ export default function SecretaryPage() {
     load();
   }
 
+  // ── Reschedule helpers ────────────────────────────────────
+  function isFutureSlot(date, hour) {
+    const now = new Date();
+    const slot = new Date(`${date}T${String(hour).padStart(2, "0")}:00`);
+    return slot > now;
+  }
+
+  function handleRescheduleStart(appt, e) {
+    if (isDragging) return;
+    const now = new Date();
+    if (new Date(`${appt.date}T${appt.time}`) <= now) return; // past appt
+    e.preventDefault();
+    e.stopPropagation();
+    const startMin = timeToMinutes(appt.time);
+    const endMin = timeToMinutes(appt.end_time || appt.time);
+    const durationMin = Math.max(endMin - startMin, 60);
+    setReschedule({ appt, durationMin, targetDate: appt.date, targetHour: Math.floor(startMin / 60) });
+  }
+
+  function handleRescheduleEnter(date, hour) {
+    if (!rescheduleRef.current) return;
+    if (!isFutureSlot(date, hour)) return;
+    setReschedule((r) => ({ ...r, targetDate: date, targetHour: hour }));
+  }
+
+  // Register global mouseup once; reads latest state via ref
+  useEffect(() => {
+    async function onGlobalMouseUp() {
+      const r = rescheduleRef.current;
+      if (!r) return;
+      setReschedule(null);
+
+      const { appt, durationMin, targetDate, targetHour } = r;
+
+      if (!isFutureSlot(targetDate, targetHour)) return;
+      // No-op if dropped on same hour/day
+      if (targetDate === appt.date && targetHour === Math.floor(timeToMinutes(appt.time) / 60)) return;
+
+      const newTime = `${String(targetHour).padStart(2, "0")}:00`;
+      const endTotalMin = Math.min(targetHour * 60 + durationMin, 22 * 60);
+      const newEndTime = `${String(Math.floor(endTotalMin / 60)).padStart(2, "0")}:${String(endTotalMin % 60).padStart(2, "0")}`;
+
+      // Optimistic update
+      setAppointments((prev) =>
+        prev.map((a) => a.id === appt.id ? { ...a, date: targetDate, time: newTime, end_time: newEndTime } : a)
+      );
+      if (justRescheduledTimer.current) clearTimeout(justRescheduledTimer.current);
+      setJustRescheduledId(appt.id);
+      justRescheduledTimer.current = setTimeout(() => setJustRescheduledId(null), 2000);
+
+      try {
+        await updateAppointment(appt.id, { date: targetDate, time: newTime, end_time: newEndTime });
+      } catch (err) {
+        console.error(err);
+        load(); // rollback on error
+      }
+    }
+    window.addEventListener("mouseup", onGlobalMouseUp);
+    return () => window.removeEventListener("mouseup", onGlobalMouseUp);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Apply grabbing cursor to whole page while rescheduling
+  useEffect(() => {
+    const active = reschedule !== null;
+    if (!active) return;
+    document.body.style.cursor = "grabbing";
+    document.body.style.userSelect = "none";
+    return () => {
+      document.body.style.cursor = "";
+      document.body.style.userSelect = "";
+    };
+  }, [reschedule !== null]); // eslint-disable-line react-hooks/exhaustive-deps
+  // ─────────────────────────────────────────────────────────
+
   function handleCellClick(date, hour) {
     if (isDragging) return;
+    if (rescheduleRef.current) return;
     if (date < today) return;
     const h = String(hour).padStart(2, "0");
     const endH = String(hour + 1).padStart(2, "0");
@@ -205,6 +431,7 @@ export default function SecretaryPage() {
   }
 
   function handleDragStart(date, hour) {
+    if (rescheduleRef.current) return;
     if (date < today) return;
     setDrag({ date, startHour: hour, endHour: hour });
   }
@@ -225,19 +452,113 @@ export default function SecretaryPage() {
     setDrag(null);
     setFlashFields(true);
     setTimeout(() => setFlashFields(false), 1800);
+    setTimeout(() => {
+      if (fieldRefs.current.date) {
+        fieldRefs.current.date.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    }, 150);
+  }
+
+  const [activeCategory, setActiveCategory] = useState(null); // null = show all
+  const [categoryFading, setCategoryFading] = useState(false);
+
+  function switchCategory(cat) {
+    // No animation when toggling off (going back to "all") or clicking same
+    if (cat === null || cat === activeCategory) {
+      setActiveCategory(cat === activeCategory ? null : cat);
+      return;
+    }
+    setCategoryFading(true);
+    setTimeout(() => {
+      setActiveCategory(cat);
+      setCategoryFading(false);
+    }, 220);
   }
 
   const today = toISO(new Date());
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const weekLabel = `${displayDate(weekStart)} – ${displayDate(addDays(weekStart, 6))}`;
   const weekDayStrings = weekDays.map(toISO);
-  const weekAppts = appointments.filter((a) => weekDayStrings.includes(a.date));
+  const allWeekAppts = appointments.filter((a) => weekDayStrings.includes(a.date));
+  const weekAppts = activeCategory
+    ? allWeekAppts.filter((a) => {
+        const t = treatments.find((x) => x.id === a.treatment_id);
+        return t?.class_name === activeCategory;
+      })
+    : allWeekAppts;
   const isPastWeek = toISO(addDays(weekStart, 6)) < today;
+  const isCurrentWeek = toISO(weekStart) === toISO(getWeekStart(new Date()));
+  const apptDates = new Set(appointments.map((a) => a.date));
 
-  const inputCls = "w-full pr-8 pl-2 py-2.5 bg-white rounded-xl text-sm focus:outline-none focus:ring-2 transition-all placeholder-gray-300 shadow-sm"
-    + " border focus:ring-[#C9A27E]/40 focus:border-[#C9A27E]"
-    + " " + "border-[#EADFD5] text-[#2C2C2C]";
-  const labelCls = "block text-[11px] font-semibold uppercase tracking-widest mb-1.5" + " text-[#7A7A7A]";
+  function buildMonthGrid(year, month) {
+    const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const cells = [];
+    for (let i = 0; i < firstDay; i++) cells.push(null);
+    for (let d = 1; d <= daysInMonth; d++) cells.push(d);
+    while (cells.length % 7 !== 0) cells.push(null);
+    return cells;
+  }
+
+  function handleYearDayClick(year, month, day) {
+    if (!day) return;
+    const date = new Date(year, month, day);
+    const iso = toISO(date);
+    setWeekStart(getWeekStart(date));
+    setViewMode("week");
+    if (highlightedDateTimer.current) clearTimeout(highlightedDateTimer.current);
+    setHighlightedDateCol(iso);
+    highlightedDateTimer.current = setTimeout(() => setHighlightedDateCol(null), 1800);
+    setTimeout(() => {
+      if (calendarScrollRef.current)
+        calendarScrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
+    }, 100);
+  }
+
+  function goToToday() {
+    if (animating) return;
+    const currentWeekStart = getWeekStart(new Date());
+    const dir = currentWeekStart < weekStart ? "prev" : "next";
+    setFlipDir(dir);
+    setAnimating(true);
+    setTimeout(() => {
+      setWeekStart(currentWeekStart);
+      setAnimating(false);
+      setFlipDir(null);
+      // Scroll to current hour after animation
+      setTimeout(() => {
+        if (calendarScrollRef.current) {
+          const nowHour = Math.min(Math.max(new Date().getHours(), FIRST_HOUR), 22);
+          calendarScrollRef.current.scrollTo({ top: Math.max(0, (nowHour - FIRST_HOUR) * ROW_HEIGHT - 60), behavior: "smooth" });
+        }
+      }, 60);
+    }, 350);
+  }
+
+  // Derive ordered category list from loaded treatments
+  const categories = Array.from(new Set(treatments.map((t) => t.class_name).filter(Boolean)));
+
+  function inputCls(field) {
+    const base = "w-full pr-8 pl-2 py-2.5 bg-white rounded-xl text-sm focus:outline-none focus:ring-2 transition-all placeholder-gray-300 shadow-sm border text-[#2C2C2C]";
+    if (fieldFlash[field]) return base + " border-red-400 focus:ring-red-200 focus:border-red-400";
+    if (fieldErrors[field]) return base + " border-red-300 focus:ring-red-200 focus:border-red-300";
+    return base + " border-[#EADFD5] focus:ring-[#C9A27E]/40 focus:border-[#C9A27E]";
+  }
+  function selectCls(field) {
+    const base = "w-full px-3 py-2.5 bg-white rounded-xl text-sm focus:outline-none focus:ring-2 transition-all shadow-sm text-[#2C2C2C] border";
+    if (fieldFlash[field]) return base + " border-red-400 focus:ring-red-200 focus:border-red-400";
+    if (fieldErrors[field]) return base + " border-red-300 focus:ring-red-200 focus:border-red-300";
+    return base + " border-[#EADFD5] focus:ring-[#C9A27E]/40 focus:border-[#C9A27E]";
+  }
+  const labelCls = "block text-[11px] font-semibold uppercase tracking-widest mb-1.5 text-[#7A7A7A]";
+  const Star = () => <span className="text-red-300 font-normal normal-case tracking-normal ml-0.5">*</span>;
+  const FieldError = ({ show, message = "שדה חובה." }) => (
+    <div className="flex items-center gap-1 mt-1 overflow-hidden"
+      style={{ maxHeight: show ? "24px" : "0px", opacity: show ? 1 : 0, transition: "max-height 0.3s ease, opacity 0.3s ease" }}>
+      <X size={11} className="text-red-400 shrink-0" />
+      <span className="text-[11px] text-red-400">{message}</span>
+    </div>
+  );
 
   return (
     <div dir="rtl" className="min-h-screen" style={{ background: "#F9F7F4" }}>
@@ -256,7 +577,7 @@ export default function SecretaryPage() {
           <div
             className="absolute right-0 top-1/2 -translate-y-1/2 w-[70%] h-[200%]"
             style={{
-              background: "radial-gradient(ellipse at right center, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.08) 40%, transparent 75%)",
+              background: "radial-gradient(ellipse at right center, rgba(255,210,225,0.22) 0%, rgba(255,190,210,0.10) 45%, transparent 72%)",
               animation: "radiateGlow 3.5s ease-in-out infinite",
             }}
           />
@@ -282,7 +603,7 @@ export default function SecretaryPage() {
             backgroundPosition: "center",
           }}>
           {/* Faded white overlay */}
-          <div className="absolute inset-0 pointer-events-none" style={{ background: "rgba(255,255,255,0.82)" }} />
+          <div className="absolute inset-0 pointer-events-none" style={{ background: "rgba(255,255,255,0.62)" }} />
 
           {/* Toggle button */}
           <div className="p-4 border-b border-gray-50 relative z-10">
@@ -322,32 +643,48 @@ export default function SecretaryPage() {
           <form onSubmit={handleSubmit}
             className={`p-5 space-y-4 overflow-y-auto transition-all duration-300 relative z-10 ${formOpen ? "flex-1 opacity-100" : "max-h-0 opacity-0 p-0 pointer-events-none overflow-hidden"}`}>
 
+            {/* שם הלקוחה */}
             <div>
-              <label className={labelCls}>שם הלקוחה</label>
+              <label className={labelCls}>שם הלקוחה <Star /></label>
               <div className="relative">
                 <User size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300" />
-                <input type="text" required value={form.client_name}
-                  onChange={(e) => setForm((f) => ({ ...f, client_name: e.target.value }))}
-                  placeholder="שם מלא" className={inputCls} />
+                <input type="text" value={form.client_name}
+                  ref={(el) => { fieldRefs.current.client_name = el; }}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, client_name: e.target.value }));
+                    if (e.target.value.trim()) clearFieldError("client_name");
+                  }}
+                  placeholder="שם מלא" className={inputCls("client_name")} />
               </div>
+              <FieldError show={fieldErrors.client_name} />
             </div>
 
+            {/* טלפון */}
             <div>
-              <label className={labelCls}>טלפון</label>
+              <label className={labelCls}>טלפון <Star /></label>
               <div className="relative">
                 <Phone size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300" />
                 <input type="tel" value={form.client_phone}
-                  onChange={(e) => setForm((f) => ({ ...f, client_phone: e.target.value }))}
-                  placeholder="050-0000000" className={inputCls} />
+                  ref={(el) => { fieldRefs.current.client_phone = el; }}
+                  onChange={handlePhoneChange}
+                  placeholder="050-0000000"
+                  className={inputCls("client_phone")} />
               </div>
+              <FieldError show={fieldErrors.client_phone} />
             </div>
 
             <div className="h-px bg-gray-100" />
 
+            {/* טיפול */}
             <div>
-              <label className={labelCls}>טיפול</label>
-              <select required value={form.treatment_id} onChange={handleTreatmentChange}
-                className="w-full px-3 py-2.5 bg-white rounded-xl text-sm focus:outline-none focus:ring-2 transition-all shadow-sm text-[#2C2C2C] border border-[#EADFD5] focus:ring-[#C9A27E]/40 focus:border-[#C9A27E]">
+              <label className={labelCls}>טיפול <Star /></label>
+              <select value={form.treatment_id}
+                ref={(el) => { fieldRefs.current.treatment_id = el; }}
+                onChange={(e) => {
+                  handleTreatmentChange(e);
+                  if (e.target.value) clearFieldError("treatment_id");
+                }}
+                className={selectCls("treatment_id")}>
                 <option value="">בחרי טיפול...</option>
                 {Object.entries(grouped).map(([cat, items]) => (
                   <optgroup key={cat} label={cat}>
@@ -357,40 +694,73 @@ export default function SecretaryPage() {
                   </optgroup>
                 ))}
               </select>
+              <FieldError show={fieldErrors.treatment_id} />
             </div>
 
-            <div className={`rounded-xl transition-all duration-500 ${flashFields ? "ring-2 ring-[#C9A27E]/50 bg-[#F4EFEA] p-2 -m-2" : ""}`}>
-              <label className={labelCls}>תאריך</label>
+            {/* תאריך */}
+            <div
+              className="rounded-xl"
+              style={flashFields ? { animation: "fieldHighlight 1.8s ease forwards" } : {}}
+            >
+              <label className={labelCls}>תאריך <Star /></label>
               <div className="relative">
                 <CalendarDays size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300" />
-                <input type="date" required min={today} value={form.date}
-                  onChange={(e) => setForm((f) => ({ ...f, date: e.target.value }))}
-                  className={inputCls} />
+                <input type="date" min={today} value={form.date}
+                  ref={(el) => { fieldRefs.current.date = el; }}
+                  onChange={(e) => {
+                    setForm((f) => ({ ...f, date: e.target.value }));
+                    if (e.target.value) clearFieldError("date");
+                  }}
+                  className={inputCls("date")} />
               </div>
+              <FieldError show={fieldErrors.date} />
             </div>
 
-            <div className={`rounded-xl transition-all duration-500 ${flashFields ? "ring-2 ring-[#C9A27E]/50 bg-[#F4EFEA] p-2 -m-2" : ""}`}>
-              <label className={labelCls}>שעות</label>
+            {/* שעות */}
+            <div
+              className="rounded-xl"
+              style={flashFields ? { animation: "fieldHighlight 1.8s ease forwards" } : {}}
+            >
+              <label className={labelCls}>שעות <Star /></label>
               <div className="grid grid-cols-2 gap-2">
                 <div className="relative">
                   <Clock size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300" />
-                  <input type="time" required value={form.time}
-                    onChange={(e) => setForm((f) => ({ ...f, time: e.target.value }))}
-                    className={inputCls} />
+                  <input type="time" value={form.time}
+                    ref={(el) => { fieldRefs.current.time = el; }}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setForm((f) => {
+                        if (val) clearFieldError("time");
+                        if (val && f.end_time && val < f.end_time) clearFieldError("time_order");
+                        return { ...f, time: val };
+                      });
+                    }}
+                    className={inputCls("time")} />
                 </div>
                 <div className="relative">
                   <Clock size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300" />
-                  <input type="time" required value={form.end_time}
-                    onChange={(e) => setForm((f) => ({ ...f, end_time: e.target.value }))}
-                    className={inputCls} />
+                  <input type="time" value={form.end_time}
+                    ref={(el) => { fieldRefs.current.end_time = el; }}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setForm((f) => {
+                        if (val) clearFieldError("end_time");
+                        if (val && f.time && f.time < val) clearFieldError("time_order");
+                        return { ...f, end_time: val };
+                      });
+                    }}
+                    className={inputCls("end_time")} />
                 </div>
               </div>
               <div className="flex justify-between text-[10px] text-gray-300 mt-1 px-1">
                 <span>התחלה</span>
                 <span>סיום</span>
               </div>
+              <FieldError show={fieldErrors.time || fieldErrors.end_time} />
+              <FieldError show={fieldErrors.time_order} message="שעת ההתחלה חייבת להיות מוקדמת משעת הסיום" />
             </div>
 
+            {/* הערות */}
             <div>
               <label className={labelCls}>הערות</label>
               <textarea rows={2} value={form.notes}
@@ -427,7 +797,8 @@ export default function SecretaryPage() {
         {/* ── Right panel: Calendar ─────────────────────────── */}
         <div className="flex-1 flex items-stretch relative overflow-hidden" style={{ background: "#F9F7F4" }}>
 
-          {/* Left arrow — next week */}
+          {/* Left arrow — next week (hidden in year view) */}
+          {viewMode === "week" && (
           <button
             onClick={() => navigateWeek("next")}
             disabled={animating}
@@ -437,8 +808,10 @@ export default function SecretaryPage() {
               <ChevronLeft size={20} className="text-[#B5B5B5] group-hover:text-[#C9A27E] transition-colors" />
             </div>
           </button>
+          )}
 
-          {/* Right arrow — previous week */}
+          {/* Right arrow — previous week (hidden in year view) */}
+          {viewMode === "week" && (
           <button
             onClick={() => navigateWeek("prev")}
             disabled={animating}
@@ -448,6 +821,7 @@ export default function SecretaryPage() {
               <ChevronRight size={20} className="text-[#B5B5B5] group-hover:text-[#C9A27E] transition-colors" />
             </div>
           </button>
+          )}
 
           {/* Title above calendar */}
           <div className="absolute top-4 inset-x-12 z-20 flex justify-center pointer-events-none">
@@ -480,6 +854,41 @@ export default function SecretaryPage() {
               70%  { opacity: 0.8; transform: translateY(-50%) scaleX(1.05); }
               100% { opacity: 0; transform: translateY(-50%) scaleX(0.85); }
             }
+            @keyframes fieldHighlight {
+              0%   { background: transparent; box-shadow: 0 0 0 0px rgba(201,162,126,0); }
+              18%  { background: #F4EFEA; box-shadow: 0 0 0 4px rgba(201,162,126,0.55); }
+              55%  { background: #EDE4DA; box-shadow: 0 0 0 4px rgba(201,162,126,0.45); }
+              82%  { background: #F4EFEA; box-shadow: 0 0 0 3px rgba(201,162,126,0.3); }
+              100% { background: transparent; box-shadow: 0 0 0 0px rgba(201,162,126,0); }
+            }
+            @keyframes rescheduleGlow {
+              0%   { box-shadow: 0 0 0 0px rgba(201,162,126,0); }
+              20%  { box-shadow: 0 0 0 5px rgba(201,162,126,0.65); background-color: #fef3e2; }
+              65%  { box-shadow: 0 0 0 4px rgba(201,162,126,0.45); background-color: #fef3e2; }
+              100% { box-shadow: 0 0 0 0px rgba(201,162,126,0); }
+            }
+            @keyframes columnHighlight {
+              0%   { background: transparent; }
+              20%  { background: rgba(201,162,126,0.16); }
+              70%  { background: rgba(201,162,126,0.10); }
+              100% { background: transparent; }
+            }
+            @keyframes columnHeaderHighlight {
+              0%   { background: #eddfc9; }
+              20%  { background: rgba(186,138,90,0.55); }
+              70%  { background: rgba(186,138,90,0.38); }
+              100% { background: #eddfc9; }
+            }
+            @keyframes fadeInView {
+              from { opacity: 0; transform: scale(0.97); }
+              to   { opacity: 1; transform: scale(1); }
+            }
+            @keyframes newBookingPulse {
+              0%   { box-shadow: 0 0 0 0px rgba(201,162,126,0); background-color: #fef9c3; }
+              18%  { box-shadow: 0 0 0 7px rgba(201,162,126,0.75); background-color: #fde8b4; }
+              60%  { box-shadow: 0 0 0 5px rgba(201,162,126,0.45); background-color: #fde8b4; }
+              100% { box-shadow: 0 0 0 0px rgba(201,162,126,0); background-color: #fef9c3; }
+            }
           `}</style>
 
           {/* Calendar card */}
@@ -509,11 +918,30 @@ export default function SecretaryPage() {
                       <div key={i} className={`w-2.5 h-2.5 rounded-full ${i === 0 ? "bg-red-400" : i === 1 ? "bg-yellow-400" : "bg-green-400"}`} />
                     ))}
                   </div>
-                  <span className="text-xs pr-3" style={{ color: "#8b6f52", borderRight: "1px solid #c8ad8e" }}>יומן שבועי</span>
+                  <span className="text-xs pr-3" style={{ color: "#8b6f52", borderRight: "1px solid #c8ad8e" }}>
+                    {viewMode === "week" ? "יומן שבועי" : "תצוגה שנתית"}
+                  </span>
+                  <button
+                    onClick={() => {
+                      if (viewMode === "week") { setYearViewYear(weekStart.getFullYear()); setViewMode("year"); }
+                      else setViewMode("week");
+                    }}
+                    title={viewMode === "week" ? "תצוגה שנתית" : "חזרה לשבועי"}
+                    className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border transition-all hover:shadow-sm active:scale-95"
+                    style={{ color: "#6b4f35", background: "rgba(255,255,255,0.6)", borderColor: "#c8ad8e" }}
+                  >
+                    <LayoutGrid size={12} style={{ color: "#C9A27E" }} />
+                  </button>
                 </div>
                 <div className="text-center">
-                  <p className="font-bold text-sm" style={{ color: "#3d2e1a" }}>{weekLabel}</p>
-                  <p className="text-xs mt-0.5" style={{ color: "#8b6f52" }}>{weekAppts.length} תורים השבוע</p>
+                  {viewMode === "week" ? (
+                    <>
+                      <p className="font-bold text-sm" style={{ color: "#3d2e1a" }}>{weekLabel}</p>
+                      <p className="text-xs mt-0.5" style={{ color: "#8b6f52" }}>{weekAppts.length} תורים השבוע</p>
+                    </>
+                  ) : (
+                    <p className="font-bold text-sm" style={{ color: "#3d2e1a", fontFamily: "Georgia, serif" }}>{yearViewYear}</p>
+                  )}
                 </div>
                 <div className="flex items-center gap-2">
                   {isPastWeek && (
@@ -521,14 +949,132 @@ export default function SecretaryPage() {
                       שבוע שעבר
                     </span>
                   )}
-                  <div className="w-7 h-7 rounded-xl flex items-center justify-center" style={{ background: "#c8ad8e50" }}>
-                    <CalendarDays size={14} style={{ color: "#6b4f35" }} />
-                  </div>
+                  {!isCurrentWeek ? (
+                    <button
+                      onClick={goToToday}
+                      disabled={animating}
+                      title="חזור לשבוע הנוכחי"
+                      className="flex items-center gap-1.5 text-[11px] font-semibold px-2.5 py-1.5 rounded-xl border transition-all hover:shadow-md active:scale-95 disabled:opacity-40"
+                      style={{ color: "#6b4f35", background: "#fff", borderColor: "#c8ad8e" }}
+                    >
+                      <CalendarDays size={12} style={{ color: "#C9A27E" }} />
+                      חזור לשבוע הנוכחי
+                    </button>
+                  ) : (
+                    <div className="w-7 h-7 rounded-xl flex items-center justify-center relative" style={{ background: "#c8ad8e50" }}>
+                      <CalendarDays size={14} style={{ color: "#6b4f35" }} />
+                      <div className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-emerald-400 border border-white" />
+                    </div>
+                  )}
                 </div>
               </div>
 
-              {/* Page area */}
-              <div className={`flex-1 min-h-0 flex flex-col overflow-hidden bg-white relative ${isPastWeek ? "opacity-75" : ""}`}>
+              {/* Category filter bar — hidden in year view */}
+              {viewMode === "week" && (
+              <div className="flex items-center gap-2 px-4 py-2 flex-shrink-0 flex-wrap"
+                style={{ background: "#f5ede3", borderBottom: "1px solid #e0cfbb" }}>
+                <button
+                  onClick={() => switchCategory(null)}
+                  className="text-[11px] font-semibold px-3 py-1 rounded-full transition-all"
+                  style={
+                    activeCategory === null
+                      ? { background: "#C9A27E", color: "#fff", boxShadow: "0 2px 8px rgba(201,162,126,0.35)" }
+                      : { background: "rgba(201,162,126,0.12)", color: "#8b6f52" }
+                  }>
+                  הכל
+                </button>
+                {categories.map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => switchCategory(cat === activeCategory ? null : cat)}
+                    className="text-[11px] font-semibold px-3 py-1 rounded-full transition-all"
+                    style={
+                      activeCategory === cat
+                        ? { background: "#C9A27E", color: "#fff", boxShadow: "0 2px 8px rgba(201,162,126,0.35)" }
+                        : { background: "rgba(201,162,126,0.12)", color: "#8b6f52" }
+                    }>
+                    {cat}
+                  </button>
+                ))}
+              </div>
+              )}
+
+              {/* ── Year view ─────────────────────────────────── */}
+              {viewMode === "year" && (
+                <div className="flex-1 min-h-0 overflow-y-auto" style={{ background: "#FAF7F4", animation: "fadeInView 0.25s ease" }}>
+                  {/* Year navigation */}
+                  <div className="flex items-center justify-center gap-5 py-4">
+                    <button onClick={() => setYearViewYear((y) => y + 1)} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-[#EADFD5] transition-colors" style={{ color: "#8b6f52" }}>
+                      <ChevronRight size={16} />
+                    </button>
+                    <span className="font-bold text-base" style={{ color: "#3d2e1a", fontFamily: "Georgia, serif", letterSpacing: "0.08em" }}>{yearViewYear}</span>
+                    <button onClick={() => setYearViewYear((y) => y - 1)} className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-[#EADFD5] transition-colors" style={{ color: "#8b6f52" }}>
+                      <ChevronLeft size={16} />
+                    </button>
+                  </div>
+
+                  {/* 4 × 3 month grid — LTR so Jan is top-left */}
+                  <div className="grid grid-cols-4 gap-3 px-4 pb-4" dir="ltr">
+                    {Array.from({ length: 12 }, (_, monthIdx) => {
+                      const cells = buildMonthGrid(yearViewYear, monthIdx);
+                      return (
+                        <div key={monthIdx} className="rounded-xl overflow-hidden" style={{ background: "#fff", border: "1px solid #EADFD5", boxShadow: "0 1px 6px rgba(0,0,0,0.04)" }}>
+                          {/* Month name */}
+                          <div className="py-2 text-center" style={{ background: "#f5ede3", borderBottom: "1px solid #EADFD5" }}>
+                            <span className="text-[11px] font-bold" style={{ fontFamily: "Georgia, serif", color: "#8b5e3c" }}>
+                              {MONTH_NAMES_HE[monthIdx]}
+                            </span>
+                          </div>
+                          {/* Day-of-week headers */}
+                          <div className="grid grid-cols-7 px-1 pt-1.5">
+                            {MINI_DAY_HEADS.map((h, i) => (
+                              <div key={i} className="text-center text-[8px] font-semibold pb-1" style={{ color: i >= 5 ? "#C9A27E" : "#b09070" }}>{h}</div>
+                            ))}
+                          </div>
+                          {/* Day cells */}
+                          <div className="grid grid-cols-7 px-1 pb-2">
+                            {cells.map((day, ci) => {
+                              if (!day) return <div key={ci} />;
+                              const colIdx = ci % 7;
+                              const isWeekend = colIdx >= 5;
+                              const dateStr = `${yearViewYear}-${String(monthIdx + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+                              const isToday = dateStr === today;
+                              const isPastDay = dateStr < today;
+                              const hasAppt = apptDates.has(dateStr);
+                              return (
+                                <div
+                                  key={ci}
+                                  onClick={() => handleYearDayClick(yearViewYear, monthIdx, day)}
+                                  className="flex flex-col items-center justify-center cursor-pointer rounded-md py-0.5 transition-colors hover:bg-[#F4EFEA]"
+                                  style={{ opacity: isPastDay ? 0.4 : 1 }}
+                                >
+                                  <span
+                                    className={`text-[9px] font-medium leading-none ${isToday ? "text-white rounded-full flex items-center justify-center" : ""}`}
+                                    style={{
+                                      width: isToday ? 16 : undefined,
+                                      height: isToday ? 16 : undefined,
+                                      background: isToday ? "#6BA292" : undefined,
+                                      color: isToday ? "#fff" : isWeekend ? "#C9A27E" : "#3d2e1a",
+                                    }}
+                                  >
+                                    {day}
+                                  </span>
+                                  {hasAppt && (
+                                    <div className="w-1 h-1 rounded-full mt-0.5" style={{ background: "#C9A27E" }} />
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* Page area — week view only */}
+              {viewMode === "week" && <div className={`flex-1 min-h-0 flex flex-col overflow-hidden bg-white relative ${isPastWeek ? "opacity-75" : ""}`} style={{ animation: "fadeInView 0.25s ease" }}>
 
                 {isPastWeek && (
                   <div className="absolute inset-0 z-20 flex items-center justify-center">
@@ -543,107 +1089,175 @@ export default function SecretaryPage() {
                   </div>
                 )}
 
-                <div className="overflow-y-auto flex-1" onMouseLeave={handleDragEnd}>
-                  {/* Day headers */}
-                  <div className="grid sticky top-0 z-30"
-                    style={{ gridTemplateColumns: "52px repeat(7, 1fr)", background: "#eddfc9", borderBottom: "2px solid #c8ad8e" }}>
-                    <div style={{ borderRight: "1px solid #c8ad8e" }} />
-                    {weekDays.map((day, i) => {
-                      const iso = toISO(day);
-                      const isToday = iso === today;
-                      return (
-                        <div key={i}
-                          className={`text-center py-3 ${iso < today ? "blur-[1.5px]" : ""}`}
-                          style={{ borderRight: "1px solid #c8ad8e" }}>
-                          <p className="text-[11px] font-semibold uppercase tracking-wider"
-                            style={{ color: isToday ? "#6BA292" : "#7A7A7A" }}>
-                            {DAY_NAMES[day.getDay()]}
-                          </p>
-                          <p className={`text-sm font-bold mt-0.5 ${isToday
-                            ? "text-white rounded-full w-7 h-7 flex items-center justify-center mx-auto shadow-sm"
-                            : ""}`}
-                            style={isToday ? { background: "#6BA292" } : { color: "#2C2C2C" }}>
-                            {day.getDate()}
-                          </p>
-                        </div>
-                      );
-                    })}
-                  </div>
+                {/* Scrollable body — headers are sticky inside so they always match column widths */}
+                <div ref={calendarScrollRef} className="overflow-y-auto flex-1" onMouseLeave={handleDragEnd}>
+                  <div className="grid" style={{ gridTemplateColumns: "52px repeat(7, 1fr)" }}>
 
-                  {/* Hour rows */}
-                  {HOURS.map((hour) => (
-                    <div key={hour}
-                      className="grid last:border-0"
-                      style={{ gridTemplateColumns: "52px repeat(7, 1fr)", height: "56px", borderBottom: "1px solid #e0d0bc" }}>
-
-                      <div className="flex items-start justify-center pt-1.5" style={{ borderRight: "1px solid #e0d0bc" }}>
-                        <span className="text-[10px] font-medium" style={{ color: "#b09070" }}>
-                          {`${String(hour).padStart(2, "0")}:00`}
-                        </span>
-                      </div>
-
-                      {weekDays.map((day, di) => {
+                    {/* Sticky day headers row */}
+                    <div className="contents sticky top-0 z-30">
+                      <div style={{ background: "#eddfc9", borderBottom: "2px solid #c8ad8e", borderRight: "1px solid #c8ad8e", position: "sticky", top: 0, zIndex: 30 }} />
+                      {weekDays.map((day, i) => {
                         const iso = toISO(day);
-                        const startingHere = weekAppts.filter((a) => a.date === iso && apptStartsAt(a, hour));
-                        const spanningHere = weekAppts.filter((a) => a.date === iso && apptSpansHour(a, hour));
-                        const isPastDay = iso < today;
-                        const dragMin = drag ? Math.min(drag.startHour, drag.endHour) : null;
-                        const dragMax = drag ? Math.max(drag.startHour, drag.endHour) : null;
-                        const isDragCell = drag && drag.date === iso && hour >= dragMin && hour <= dragMax;
-
+                        const isToday = iso === today;
                         return (
-                          <div key={di}
-                            onClick={() => handleCellClick(iso, hour)}
-                            onMouseDown={(e) => { e.preventDefault(); handleDragStart(iso, hour); }}
-                            onMouseEnter={() => handleDragEnter(iso, hour)}
-                            onMouseUp={handleDragEnd}
-                            className={`relative h-14 select-none transition-colors
-                              ${isPastDay ? "blur-[1.5px] cursor-not-allowed" : "cursor-pointer"}
-                              ${!isPastDay && isDragCell ? "bg-yellow-50" : ""}
-                              ${!isPastDay && !isDragCell ? "hover:bg-yellow-50/70" : ""}`}
-                            style={{ borderRight: "1px solid #e0d0bc" }}>
-
-                            {startingHere.map((a) => {
-                              const hasContinuation = a.end_time && apptHour(a.end_time) > hour;
-                              const isHovered = hoveredApptId === a.id;
-                              return (
-                                <div key={a.id}
-                                  onClick={(e) => { e.stopPropagation(); setSelectedAppt(a); }}
-                                  onMouseEnter={() => setHoveredApptId(a.id)}
-                                  onMouseLeave={() => setHoveredApptId(null)}
-                                  className={`absolute inset-x-0.5 top-0 bottom-0 text-[10px] px-1.5 pt-1 leading-tight cursor-pointer transition-all z-10
-                                    border-t border-x
-                                    ${isHovered
-                                      ? "bg-yellow-100 border-yellow-400 shadow-sm"
-                                      : "bg-yellow-50 border-yellow-300"}
-                                    ${hasContinuation ? "rounded-t-lg" : "rounded-lg border-b"}`}>
-                                  <div className="font-bold truncate text-yellow-900">{a.client_name}</div>
-                                  <div className="truncate text-yellow-600 text-[9px]">{a.treatment_name}</div>
-                                  <div className="text-[9px] text-yellow-500">{a.time}{a.end_time ? `–${a.end_time}` : ""}</div>
-                                </div>
-                              );
-                            })}
-
-                            {spanningHere.map((a) => {
-                              const isHovered = hoveredApptId === a.id;
-                              return (
-                                <div key={a.id}
-                                  onClick={(e) => { e.stopPropagation(); setSelectedAppt(a); }}
-                                  onMouseEnter={() => setHoveredApptId(a.id)}
-                                  onMouseLeave={() => setHoveredApptId(null)}
-                                  className={`absolute inset-x-0.5 top-0 bottom-0 border-x cursor-pointer transition-all z-10
-                                    ${isHovered ? "bg-yellow-100 border-yellow-400" : "bg-yellow-50 border-yellow-300"}
-                                    ${apptEndsAt(a, hour) ? "rounded-b-lg border-b" : ""}`}
-                                />
-                              );
-                            })}
+                          <div key={i}
+                            className={`text-center py-3 ${iso < today ? "blur-[1.5px]" : ""}`}
+                            style={{ background: "#eddfc9", borderBottom: "2px solid #c8ad8e", borderRight: "1px solid #c8ad8e", position: "sticky", top: 0, zIndex: 30, animation: iso === highlightedDateCol ? "columnHeaderHighlight 1.8s ease forwards" : undefined }}>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider"
+                              style={{ color: isToday ? "#6BA292" : "#7A7A7A" }}>
+                              {DAY_NAMES[day.getDay()]}
+                            </p>
+                            <p className={`text-sm font-bold mt-0.5 ${isToday
+                              ? "text-white rounded-full w-7 h-7 flex items-center justify-center mx-auto shadow-sm"
+                              : ""}`}
+                              style={isToday ? { background: "#6BA292" } : { color: "#2C2C2C" }}>
+                              {day.getDate()}
+                            </p>
                           </div>
                         );
                       })}
                     </div>
-                  ))}
+
+                    {/* Time gutter */}
+                    <div style={{ borderRight: "1px solid #e0d0bc" }}>
+                      {HOURS.map((hour) => (
+                        <div key={hour}
+                          className="flex items-start justify-center pt-1.5"
+                          style={{ height: `${ROW_HEIGHT}px`, borderBottom: "1px solid #e0d0bc" }}>
+                          <span className="text-[10px] font-medium" style={{ color: "#b09070" }}>
+                            {`${String(hour).padStart(2, "0")}:00`}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Day columns */}
+                    {weekDays.map((day, di) => {
+                      const iso = toISO(day);
+                      const isPastDay = iso < today;
+                      const dayAppts = weekAppts.filter((a) => a.date === iso);
+                      const layout = computeOverlapLayout(dayAppts);
+                      const totalHeight = HOURS.length * ROW_HEIGHT;
+
+                      return (
+                        <div key={di}
+                          className="relative"
+                          style={{ height: `${totalHeight}px`, borderRight: "1px solid #e0d0bc", animation: iso === highlightedDateCol ? "columnHighlight 1.8s ease forwards" : undefined }}>
+
+                          {/* Hour cell interaction areas */}
+                          {HOURS.map((hour) => {
+                            const dragMin = drag ? Math.min(drag.startHour, drag.endHour) : null;
+                            const dragMax = drag ? Math.max(drag.startHour, drag.endHour) : null;
+                            const isDragCell = drag && drag.date === iso && hour >= dragMin && hour <= dragMax;
+                            const isRescheduleTarget = reschedule && reschedule.targetDate === iso && reschedule.targetHour === hour;
+                            return (
+                              <div key={hour}
+                                onClick={() => handleCellClick(iso, hour)}
+                                onMouseDown={(e) => { e.preventDefault(); handleDragStart(iso, hour); }}
+                                onMouseEnter={() => { handleDragEnter(iso, hour); handleRescheduleEnter(iso, hour); }}
+                                onMouseUp={handleDragEnd}
+                                className={`absolute w-full select-none transition-colors
+                                  ${isPastDay ? "blur-[1.5px] cursor-not-allowed" : "cursor-pointer"}
+                                  ${!isPastDay && isDragCell ? "bg-yellow-50" : ""}
+                                  ${!isPastDay && isRescheduleTarget ? "bg-[#F4EFEA]" : ""}
+                                  ${!isPastDay && !isDragCell && !isRescheduleTarget ? "hover:bg-yellow-50/70" : ""}`}
+                                style={{
+                                  top: `${(hour - FIRST_HOUR) * ROW_HEIGHT}px`,
+                                  height: `${ROW_HEIGHT}px`,
+                                  borderBottom: "1px solid #e0d0bc",
+                                }}
+                              />
+                            );
+                          })}
+
+                          {/* Appointments overlay — pointer-events:none so empty-cell clicks reach the hour cells below */}
+                          <div style={{ opacity: categoryFading ? 0 : 1, transition: "opacity 0.2s ease", position: "absolute", inset: 0, pointerEvents: "none" }}>
+                          {dayAppts.map((a) => {
+                            const pos = layout.get(a.id);
+                            if (!pos) return null;
+                            const isHovered = hoveredApptId === a.id;
+                            const isBeingDragged = reschedule?.appt.id === a.id;
+                            const isJustRescheduled = justRescheduledId === a.id;
+                            const isApptFuture = new Date(`${a.date}T${a.time}`) > new Date();
+                            const GAP = 2;
+                            const containerW = 100;
+                            const leftPct = pos.left * containerW + GAP;
+                            const widthPct = pos.width * containerW - GAP * 2;
+                            return (
+                              <div key={a.id}
+                                onClick={(e) => {
+                                  if (reschedule) return;
+                                  e.stopPropagation();
+                                  setSelectedAppt(a);
+                                }}
+                                onMouseDown={(e) => { if (isApptFuture) handleRescheduleStart(a, e); }}
+                                onMouseEnter={() => setHoveredApptId(a.id)}
+                                onMouseLeave={() => setHoveredApptId(null)}
+                                className={`absolute text-[10px] px-1.5 pt-1 leading-tight rounded-lg border z-10 overflow-hidden transition-opacity
+                                  ${isApptFuture && !isBeingDragged ? "cursor-grab" : "cursor-pointer"}
+                                  ${isBeingDragged ? "opacity-25" : "opacity-100"}
+                                  ${!isBeingDragged && isHovered ? "bg-yellow-100 border-yellow-400 shadow-sm" : "bg-yellow-50 border-yellow-300"}`}
+                                style={{
+                                  top: `${pos.top + 2}px`,
+                                  height: `${pos.height - 4}px`,
+                                  left: `${leftPct}%`,
+                                  width: `${widthPct}%`,
+                                  pointerEvents: "auto",
+                                  animation: isJustRescheduled
+                                    ? "rescheduleGlow 2s ease forwards"
+                                    : a.id === newlyBookedId
+                                    ? "newBookingPulse 2.5s ease forwards"
+                                    : undefined,
+                                }}>
+                                <div className="font-bold truncate text-yellow-900">{a.client_name}</div>
+                                {pos.height > 30 && (
+                                  <div className="truncate text-yellow-600 text-[9px]">{a.treatment_name}</div>
+                                )}
+                                {pos.height > 44 && (
+                                  <div className="text-[9px] text-yellow-500">{a.time}{a.end_time ? `–${a.end_time}` : ""}</div>
+                                )}
+                              </div>
+                            );
+                          })}
+
+                          {/* Reschedule ghost — shown in the target day column */}
+                          {reschedule && reschedule.targetDate === iso && (() => {
+                            const ghostTop = (reschedule.targetHour - FIRST_HOUR) * ROW_HEIGHT;
+                            const ghostHeight = Math.min(
+                              (reschedule.durationMin / 60) * ROW_HEIGHT,
+                              totalHeight - ghostTop
+                            );
+                            return (
+                              <div
+                                className="absolute z-20 rounded-lg border-2 border-dashed pointer-events-none overflow-hidden"
+                                style={{
+                                  top: `${ghostTop + 2}px`,
+                                  height: `${Math.max(ghostHeight - 4, 18)}px`,
+                                  left: "4%",
+                                  right: "4%",
+                                  background: "rgba(201,162,126,0.18)",
+                                  borderColor: "#C9A27E",
+                                }}
+                              >
+                                <div className="text-[10px] px-1.5 pt-1 font-bold truncate" style={{ color: "#7a4f2a" }}>
+                                  {reschedule.appt.client_name}
+                                </div>
+                                {ghostHeight > 30 && (
+                                  <div className="text-[9px] px-1.5 truncate" style={{ color: "#C9A27E" }}>
+                                    {reschedule.appt.treatment_name}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
+              </div>}
+
             </div>
           </div>
         </div>

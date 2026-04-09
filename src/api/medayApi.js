@@ -44,6 +44,16 @@ export async function deleteAppointment(id) {
   return res.json();
 }
 
+export async function updateAppointment(id, data) {
+  const res = await fetch(`${API_BASE}/appointments/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update appointment");
+  return res.json();
+}
+
 export async function fetchAnalytics() {
   const res = await fetch(`${API_BASE}/appointments/analytics`);
   if (!res.ok) throw new Error("Failed to fetch analytics");

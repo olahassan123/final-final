@@ -91,6 +91,22 @@ def load_treatments() -> List[Dict]:
 
 
 TREATMENTS = load_treatments()
+
+# ── Hardcoded extra categories not yet in the Excel ──────────
+_EXTRA_TREATMENTS = [
+    {"id": "manicure_1", "name": "מניקור",                               "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_2", "name": "לק גל",                                "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_3", "name": "עיצוב ופיסול ציפורן",                  "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_4", "name": "פדיקור אסתטי+ לק גל",                 "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_5", "name": "פדיקור טיפולי+ לק\\לק גל",            "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+]
+
+# Only add if not already present (safe to restart server repeatedly)
+_existing_ids = {t["id"] for t in TREATMENTS}
+for _t in _EXTRA_TREATMENTS:
+    if _t["id"] not in _existing_ids:
+        TREATMENTS.append(_t)
+
 TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
 
 # ------------------------------------------------------------
@@ -324,6 +340,27 @@ def delete_appointment(appt_id: int):
     conn.commit()
     conn.close()
     return {"ok": True}
+
+
+class AppointmentReschedule(BaseModel):
+    date: str
+    time: str
+    end_time: Optional[str] = None
+
+
+@app.patch("/appointments/{appt_id}")
+def reschedule_appointment(appt_id: int, data: AppointmentReschedule):
+    conn = get_db()
+    conn.execute(
+        "UPDATE appointments SET date = ?, time = ?, end_time = ? WHERE id = ?",
+        (data.date, data.time, data.end_time, appt_id),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM appointments WHERE id = ?", (appt_id,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return dict(row)
 
 
 @app.get("/appointments/analytics")
