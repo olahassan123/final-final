@@ -1,12 +1,13 @@
-import { BrowserRouter as Router, Routes, Route, useLocation } from "react-router-dom";
+import { BrowserRouter as Router, Routes, Route, useLocation, Navigate } from "react-router-dom";
 import Navbar from "./components/Navbar";
 import Home from "./pages/Home";
-import TreatmentsListPage from "./pages/TreatmentsListPage";
 import TreatmentDetailsPage from "./pages/TreatmentDetailsPage";
 import ChatWidget from "./components/ChatWidget";
 import CategorySelectionPage from "./pages/CategorySelectionPage";
 import SecretaryPage from "./pages/SecretaryPage";
 import AdminDashboard from "./pages/AdminDashboard";
+import ServiceCategoryPage from "./pages/ServiceCategoryPage";
+import ServiceTreatmentDetailsPage from "./pages/ServiceTreatmentDetailsPage";
 
 function AppContent() {
   const location = useLocation();
@@ -19,7 +20,12 @@ function AppContent() {
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/categories" element={<CategorySelectionPage />} />
-          <Route path="/treatments" element={<TreatmentsListPage />} />
+          <Route path="/categories/:categorySlug" element={<ServiceCategoryPage />} />
+          <Route
+            path="/categories/:categorySlug/:treatmentSlug"
+            element={<ServiceTreatmentDetailsPage />}
+          />
+          <Route path="/treatments" element={<Navigate to="/categories/cosmetology" replace />} />
           <Route path="/treatments/:id" element={<TreatmentDetailsPage />} />
           <Route path="/secretary" element={<SecretaryPage />} />
           <Route path="/admin" element={<AdminDashboard />} />

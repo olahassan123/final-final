@@ -1,55 +1,35 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { Sparkles, ArrowLeft } from 'lucide-react';
+import React from "react";
+import { useNavigate } from "react-router-dom";
+import { Sparkles, ArrowLeft } from "lucide-react";
+import { serviceCatalog } from "../data/serviceCatalog";
 
 export default function CategorySelectionPage() {
   const navigate = useNavigate();
 
-  // רשימת כל סוגי הטיפולים שביקשת
-  const categories = [
-    { id: 1, name: "מניקור ופדיקור" },
-    { id: 2, name: "עיצוב שיער" },
-    { id: 3, name: "טיפולי קוסמטיקה", target: "/treatments" }, // רק זה מוביל לעמוד הרשימה
-    { id: 4, name: "טיפולי גוף" },
-    { id: 5, name: "הסרת שיער" },
-    { id: 6, name: "איפור מקצועי" },
-    { id: 7, name: "איפור קבוע ועיצוב גבות" },
-    { id: 8, name: "סטיילינג אישי" },
-    { id: 9, name: "טיפולי אסתטיקה" },
-  ];
-
-  const handleCategoryClick = (category) => {
-    if (category.target) {
-      navigate(category.target);
-    } else {
-      alert(`העמוד עבור ${category.name} בבנייה...`);
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-[#fffafa] py-12 px-6" dir="rtl">
-      <div className="max-w-4xl mx-auto">
-        {/* כותרת העמוד */}
-        <div className="text-center mb-12">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-pink-100 text-primary text-sm font-bold mb-4">
+    <div className="min-h-screen bg-[#fffafa] px-6 py-12" dir="rtl">
+      <div className="mx-auto max-w-5xl">
+        <div className="mb-12 text-center">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-pink-100 px-4 py-1.5 text-sm font-bold text-primary">
             <Sparkles size={16} />
             <span>MeDay Beauty Center</span>
           </div>
+
           <h1 className="text-4xl font-serif font-bold text-gray-900">סוגי טיפולים</h1>
         </div>
 
-        {/* רשימת כפתורי הקטגוריות */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {categories.map((category) => (
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          {serviceCatalog.map((category) => (
             <button
-              key={category.id}
-              onClick={() => handleCategoryClick(category)}
-              className="group flex items-center justify-between p-6 bg-white border border-pink-100 rounded-2xl hover:shadow-lg hover:border-primary transition-all text-right"
+              key={category.slug}
+              onClick={() => navigate(`/categories/${category.slug}`)}
+              className="group flex items-center justify-between rounded-2xl border border-pink-100 bg-white p-6 text-right transition-all hover:border-primary hover:shadow-lg"
             >
-              <span className={`text-xl font-bold transition-colors ${category.target ? 'text-gray-900 group-hover:text-primary' : 'text-gray-400'}`}>
+              <span className="text-xl font-bold text-gray-900 transition-colors group-hover:text-primary">
                 {category.name}
               </span>
-              <ArrowLeft className={`w-5 h-5 transition-transform group-hover:-translate-x-1 ${category.target ? 'text-primary' : 'text-gray-300'}`} />
+
+              <ArrowLeft className="h-5 w-5 text-primary transition-transform group-hover:-translate-x-1" />
             </button>
           ))}
         </div>
