@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom"; // לשימוש בכתובת URL
+import { useParams, useNavigate } from "react-router-dom";
 import { fetchTreatmentById } from "../api/medayApi";
-import { ArrowRight, Clock, ShieldCheck, Sparkles, AlertCircle } from "lucide-react"; // אייקונים לעיצוב
+import { ArrowRight, Clock, ShieldCheck, Sparkles, AlertCircle, MessageCircle } from "lucide-react";
 
-// רכיב שורה מעוצב עם Tailwind
 function DetailRow({ label, value, icon: Icon }) {
   if (!value) return null;
   return (
@@ -18,7 +17,7 @@ function DetailRow({ label, value, icon: Icon }) {
 }
 
 export default function TreatmentDetailsPage() {
-  const { id } = useParams(); // לוקח את ה-ID מהכתובת: /treatments/123
+  const { id } = useParams();
   const navigate = useNavigate();
   const [treatment, setTreatment] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -30,7 +29,15 @@ export default function TreatmentDetailsPage() {
       try {
         setLoading(true);
         const data = await fetchTreatmentById(id);
-        if (alive) setTreatment(data);
+        if (alive) {
+          setTreatment(data);
+          
+          // --- הוספת הקונטקסט לצ'אטבוט ---
+          // אנחנו שולחים אירוע גלובלי שהצ'אטבוט יאזין לו כדי להתעדכן בטיפול הנבחר
+          window.dispatchEvent(new CustomEvent('treatmentSelected', { 
+            detail: { id: data.id, name: data.name } 
+          }));
+        }
       } catch (e) {
         if (alive) setError(e?.message || "נכשל בטעינת הטיפול");
       } finally {
@@ -40,6 +47,13 @@ export default function TreatmentDetailsPage() {
     loadData();
     return () => { alive = false; };
   }, [id]);
+
+  // פונקציה לפתיחת הצ'אט עם שאלה ספציפית
+  const askAboutTreatment = () => {
+    window.dispatchEvent(new CustomEvent('openChatWithQuestion', { 
+      detail: `אני רוצה לשאול על טיפול ${treatment.name}` 
+    }));
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center min-h-[60vh]">
@@ -57,7 +71,6 @@ export default function TreatmentDetailsPage() {
 
   return (
     <div className="max-w-4xl mx-auto px-6 py-12 bg-white" dir="rtl">
-      {/* כפתור חזרה מעוצב */}
       <button 
         onClick={() => navigate(-1)} 
         className="flex items-center gap-2 text-gray-500 hover:text-primary transition-colors mb-8 group"
@@ -66,7 +79,6 @@ export default function TreatmentDetailsPage() {
         <span>חזרה לכל הטיפולים</span>
       </button>
 
-      {/* כותרת הטיפול */}
       <div className="mb-10">
         <span className="text-primary font-medium tracking-wide uppercase text-sm">{treatment.category}</span>
         <h1 className="text-4xl md:text-5xl font-serif font-bold text-gray-900 mt-2 tracking-tight">
@@ -74,10 +86,7 @@ export default function TreatmentDetailsPage() {
         </h1>
       </div>
 
-      {/* גוף המידע - חלוקה לכרטיסים */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-        
-        {/* עמודה ראשית: פרטי הטיפול */}
         <div className="md:col-span-2 space-y-2">
           <h3 className="text-xl font-bold text-gray-800 mb-4 flex items-center gap-2">
             <Sparkles className="w-5 h-5 text-primary" />
@@ -93,21 +102,29 @@ export default function TreatmentDetailsPage() {
           </div>
         </div>
 
-        {/* עמודה צדדית: סיכום מהיר / CTA */}
         <div className="space-y-6">
           <div className="bg-gray-900 text-white rounded-3xl p-8 shadow-xl">
             <h4 className="text-xl font-bold mb-4 italic">MeDay Tip</h4>
             <p className="text-gray-300 leading-relaxed mb-6">
               חשוב לדעת: {treatment.consultation_required === 'Yes' ? 'טיפול זה דורש ייעוץ מקדים עם המומחיות שלנו.' : 'ניתן להגיע לטיפול ללא פגישת ייעוץ מקדימה.'}
             </p>
-            <button className="w-full bg-primary hover:bg-white hover:text-primary text-white py-3 rounded-full font-bold transition-all duration-300">
-              תיאום תור לטיפול זה
-            </button>
+            <div className="space-y-3">
+                <button className="w-full bg-primary hover:bg-white hover:text-primary text-white py-3 rounded-full font-bold transition-all duration-300">
+                תיאום תור לטיפול זה
+                </button>
+                {/* כפתור חדש שמחבר לצ'אטבוט */}
+                <button 
+                  onClick={askAboutTreatment}
+                  className="w-full bg-transparent border border-white/30 hover:bg-white/10 text-white py-3 rounded-full font-bold transition-all duration-300 flex items-center justify-center gap-2"
+                >
+                <MessageCircle size={18} />
+                שאלתי את הבוט על הטיפול
+                </button>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* שאלות ותשובות (FAQ) */}
       <div className="mt-16">
         <h3 className="text-2xl font-serif font-bold text-gray-900 mb-8 border-r-4 border-primary pr-4">שאלות נפוצות</h3>
         <div className="grid gap-4">

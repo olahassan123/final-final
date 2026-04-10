@@ -1,14 +1,21 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy.orm import Session
 import pandas as pd
-from fastapi import UploadFile, File, HTTPException
-from io import BytesIO
+from typing import Optional, List, Dict
+from pydantic import BaseModel
+from groq import Groq
+import os
+import sqlite3
+from pathlib import Path
+from dotenv import load_dotenv
+import random
+import random
 
+load_dotenv()
 
-from db import SessionLocal, engine, Base
-from models import Treatment, FAQ
-
+# ------------------------------------------------------------
+# App setup
+# ------------------------------------------------------------
 app = FastAPI(title="MeDay Backend")
 
 app.add_middleware(
@@ -22,9 +29,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ------------------------------------------------------------
+# Groq setup
+# ------------------------------------------------------------
+groq = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
 
+# ------------------------------------------------------------
+# Load Excel data once on startup
+# ------------------------------------------------------------
+EXCEL_DIR = Path(__file__).parent
 
-Base.metadata.create_all(bind=engine)
 
 def to_text(x):
     if x is None:
@@ -32,244 +46,496 @@ def to_text(x):
     s = str(x).strip()
     return "" if s.lower() == "nan" else s
 
+
+def load_treatments() -> List[Dict]:
+    treatments_df = pd.read_excel(EXCEL_DIR / "Treatments.xlsx")
+    faq_df = pd.read_excel(EXCEL_DIR / "questions.xlsx")
+
+    treatments = []
+    for i, row in treatments_df.iterrows():
+        name = to_text(row.get("שם_הטיפול", ""))
+        if not name:
+            continue
+
+        tid = f"t_{i}"
+
+        # Match FAQs by treatment name
+        faqs = {}
+        mask = (
+            faq_df["שם_הטיפול"].astype(str).str.strip().str.lower()
+            == name.strip().lower()
+        )
+        for _, frow in faq_df[mask].iterrows():
+            q = to_text(frow.get("שאלה", ""))
+            a = to_text(frow.get("תשובה", ""))
+            if q and a:
+                faqs[q] = a
+
+        treatments.append({
+            "id": tid,
+            "name": name,
+            "class_name": to_text(row.get("קטגוריה ראשית", "")),
+            "category": to_text(row.get("תת_קטגוריה", "")),
+            "keywords": to_text(row.get("הערות_כלליות", "")),
+            "suitable_for_all_skins": to_text(row.get("למי_מתאים", "")),
+            "ages": "",
+            "results_timing": to_text(row.get("תוצאות", "")),
+            "complementary_products": "",
+            "aftercare": to_text(row.get("תיאור_הטיפול", "")),
+            "consultation_required": "",
+            "recommended_frequency": to_text(row.get("מספר_טיפולים_מומלץ", "")),
+            "pregnancy_breastfeeding": to_text(row.get("הריון_והנקה", "")),
+            "medical_limitations": to_text(row.get("למי_לא_מתאים", "")),
+            "faq": faqs,
+        })
+
+    return treatments
+
+
+TREATMENTS = load_treatments()
+
+# ── Hardcoded extra categories not yet in the Excel ──────────
+_EXTRA_TREATMENTS = [
+    {"id": "manicure_1", "name": "מניקור",                               "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_2", "name": "לק גל",                                "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_3", "name": "עיצוב ופיסול ציפורן",                  "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_4", "name": "פדיקור אסתטי+ לק גל",                 "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_5", "name": "פדיקור טיפולי+ לק\\לק גל",            "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+]
+
+# Only add if not already present (safe to restart server repeatedly)
+_existing_ids = {t["id"] for t in TREATMENTS}
+for _t in _EXTRA_TREATMENTS:
+    if _t["id"] not in _existing_ids:
+        TREATMENTS.append(_t)
+
+TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
+
+# ------------------------------------------------------------
+# Basic routes
+# ------------------------------------------------------------
+
+
 @app.get("/health")
 def health():
     return {"ok": True}
 
+
 @app.get("/treatments")
 def list_treatments():
-    db: Session = SessionLocal()
-    try:
-        treatments = db.query(Treatment).all()
-        out = []
-        for t in treatments:
-            out.append({
-                "id": t.id,
-                "name": t.name,
-                "class_name": t.class_name,
-                "category": t.category,
-                "keywords": t.keywords,
-                "suitable_for_all_skins": t.suitable_for_all_skins,
-                "ages": t.ages,
-                "results_timing": t.results_timing,
-                "complementary_products": t.complementary_products,
-                "aftercare": t.aftercare,
-                "consultation_required": t.consultation_required,
-                "recommended_frequency": t.recommended_frequency,
-                "pregnancy_breastfeeding": t.pregnancy_breastfeeding,
-                "medical_limitations": t.medical_limitations,
-                "faq": {f.question: f.answer for f in t.faqs},
-            })
-        return out
-    finally:
-        db.close()
+    return TREATMENTS
 
-from fastapi import HTTPException
 
 @app.get("/treatments/{treatment_id}")
 def get_treatment(treatment_id: str):
-    db: Session = SessionLocal()
-    try:
-        t = db.query(Treatment).filter(Treatment.id == treatment_id).first()
-        if not t:
-            raise HTTPException(status_code=404, detail="Treatment not found")
-
-        return {
-            "id": t.id,
-            "name": t.name,
-            "class_name": t.class_name,
-            "category": t.category,
-            "keywords": t.keywords,
-            "suitable_for_all_skins": t.suitable_for_all_skins,
-            "ages": t.ages,
-            "results_timing": t.results_timing,
-            "complementary_products": t.complementary_products,
-            "aftercare": t.aftercare,
-            "consultation_required": t.consultation_required,
-            "recommended_frequency": t.recommended_frequency,
-            "pregnancy_breastfeeding": t.pregnancy_breastfeeding,
-            "medical_limitations": t.medical_limitations,
-            "faq": {f.question: f.answer for f in t.faqs},
-        }
-    finally:
-        db.close()
+    t = TREATMENT_MAP.get(treatment_id)
+    if not t:
+        raise HTTPException(status_code=404, detail="Treatment not found")
+    return t
 
 
-from pydantic import BaseModel
-from typing import Optional, List, Dict
-
+# ------------------------------------------------------------
+# Chat schemas
+# ------------------------------------------------------------
 class ChatContext(BaseModel):
     goal: Optional[str] = None
     sensitive: Optional[bool] = None
     pregnant: Optional[bool] = None
 
+
 class ChatRequest(BaseModel):
     message: str
     context: Optional[ChatContext] = None
+    selected_treatment_id: Optional[str] = None
+    history: Optional[List[Dict]] = None
+
 
 class ChatResponse(BaseModel):
     reply: str
     follow_up: Optional[Dict] = None
     suggested_treatments: Optional[List[Dict]] = None
+    sources: Optional[List[Dict]] = None
 
-def _norm(s: str) -> str:
-    return (s or "").strip().lower()
 
+# ------------------------------------------------------------
+# Prompt builder
+# ------------------------------------------------------------
+def build_prompt(
+    message: str,
+    selected: Optional[Dict],
+    ctx: ChatContext,
+    history: List[Dict],
+) -> str:
+    system = (
+        "אתה עוזרת AI של MeDay - קליניקת יופי וטיפולים קוסמטיים.\n"
+        "תפקידך לעזור ללקוחות לבחור טיפולים מתאימים ולענות על שאלות לגבי הטיפולים.\n"
+        "ענה תמיד בעברית בצורה חמה, מקצועית ומזמינה.\n"
+        "בסס את תשובותיך אך ורק על המידע שנמסר לך - אל תמציא מידע שאינו ברשימה.\n"
+    )
+
+    if selected:
+        faq_text = "\n".join(
+            [f"ש: {q}\nת: {a}" for q, a in selected.get("faq", {}).items()]
+        )
+        knowledge = (
+            f"\nהמשתמשת צופה כרגע בטיפול: {selected['name']}\n\n"
+            f"פרטי הטיפול:\n"
+            f"- קטגוריה: {selected['class_name']} / {selected['category']}\n"
+            f"- תיאור: {selected['aftercare']}\n"
+            f"- תוצאות: {selected['results_timing']}\n"
+            f"- למי מתאים: {selected['suitable_for_all_skins']}\n"
+            f"- למי לא מתאים: {selected['medical_limitations']}\n"
+            f"- הריון והנקה: {selected['pregnancy_breastfeeding']}\n"
+            f"- תדירות מומלצת: {selected['recommended_frequency']}\n"
+            f"- הערות: {selected['keywords']}\n\n"
+            f"שאלות ותשובות נפוצות:\n{faq_text or 'אין שאלות נפוצות.'}\n\n"
+            "ענה על שאלות המשתמשת לגבי טיפול זה בהתבסס על המידע הנ\"ל.\n"
+        )
+    else:
+        ctx_notes = []
+        if ctx.pregnant:
+            ctx_notes.append("המשתמשת בהריון/מניקה - המלץ רק טיפולים מתאימים")
+        if ctx.sensitive:
+            ctx_notes.append("לעור רגיש")
+        if ctx.goal:
+            ctx_notes.append(f"מטרה: {ctx.goal}")
+
+        ctx_line = " | ".join(ctx_notes) if ctx_notes else ""
+
+        treatments_list = "\n".join([
+            f"- {t['name']} ({t['category']}): "
+            f"{(t['suitable_for_all_skins'] or t['aftercare'])[:100]}"
+            for t in TREATMENTS
+        ])
+
+        knowledge = (
+            f"\n{f'הקשר: {ctx_line}' if ctx_line else ''}\n\n"
+            f"טיפולים זמינים בקליניקה:\n{treatments_list}\n\n"
+            "עזרי למשתמשת לבחור טיפול מתאים. "
+            "כשתמליצי על טיפולים, ציין את שמות הטיפולים בדיוק כפי שהם מופיעים ברשימה.\n"
+        )
+
+    # Conversation history (last 8 messages)
+    history_text = ""
+    for msg in history[-8:]:
+        role = "משתמשת" if msg.get("from") == "user" else "עוזרת"
+        history_text += f"{role}: {msg.get('text', '')}\n"
+
+    return f"{system}{knowledge}\nשיחה:\n{history_text}משתמשת: {message}\nעוזרת:"
+
+
+# ========================================================
+# CHAT MODE CONFIGURATION (choose one)
+# ========================================================
+# Options: "hardcoded", "ollama", "groq"
+CHAT_MODE = os.getenv("CHAT_MODE", "hardcoded")
+# ========================================================
+
+# Keyword detection helper
+def _has_keyword(message: str, keywords: List[str]) -> bool:
+    """
+    Check if message contains any keyword (case-insensitive, partial match).
+    """
+    msg_lower = message.lower()
+    return any(keyword.lower() in msg_lower for keyword in keywords)
+
+def get_hardcoded_response(message: str) -> str:
+    """
+    Analyze user message and return varied responses based on flexible keyword matching.
+    Supports Hebrew and English, partial matching, and randomized responses.
+    """
+    # GREETING KEYWORDS (flexible - case insensitive, partial match)
+    greeting_keywords = ["hello", "hi", "היי", "שלום", "הי", "אהלן", "hey"]
+    
+    # HYDRATION TREATMENT KEYWORDS
+    hydration_keywords = ["hydrat", "dry", "יבש", "הידר", "זוהר", "glow", "radiant", "moistur"]
+    
+    # ACNE TREATMENT KEYWORDS
+    acne_keywords = ["acne", "pimple", "breakout", "spot", "oily", "אקנה", "פגע", "זיהום", "שומנ"]
+    
+    # ANTI-AGING KEYWORDS
+    antiaging_keywords = ["wrinkle", "fine line", "aging", "lift", "firm", "קמט", "בוגר", "הצער", "age"]
+    
+    # Greeting responses (randomized)
+    greeting_responses = [
+        "היי! 👋 כמה שמחת שחזרת!\nאיזו בעיה עור יש לך או מה אתה מחפש?",
+        "שלום! 😊 אני כאן לעזור.\nספרי לי - מה אתה מחפש היום?",
+        "הי! 🌟 ברוכה ל-MeDay!\nאיך אני יכול לעזור?",
+    ]
+    
+    # Hydration responses (randomized)
+    hydration_responses = [
+        "💧 **טיפול הידרציה וזוהר** - בחירה מעולה!\n\nאני ממליצה:\n• פנינג הידרו\n• מסכת ג'ל הידרטנטית\n• טיפול בוטוקס טבעי\n\nעור זוהר תוך 24 שעות! 🌟",
+        "💧 עור יבש? אנחנו יודעים!\n\nהטיפולים שלנו:\n• טיפול הידרציה עמוק\n• קרם תזונה עדו\n• מסכה רטובה\n\nתוצאות בתוך שבוע! 🌟",
+        "🌟 **לחות וזוהר** - זה מה שנעשה!\n\nאנחנו משתמשים:\n• טכנולוגיה מתקדמת\n• יעול עם טיפול\n• מסכה מעמיקה\n\nעור נרטוב תוך שבועות! 💎",
+    ]
+    
+    # Acne responses (randomized)
+    acne_responses = [
+        "💊 **אקנה?** אנחנו יודעים איך לטפל!\n\nגישה שלנו:\n• חשמל גלוואני עדין\n• טיפול כימי בדיוק\n• לייזר מוקד\n\nעור נקי יותר תוך 3-5 טיפולים! ✨",
+        "🎯 **טיהור אקנה** - תוכניתנו המקצועית!\n\nשיטה שלנו:\n• טכנולוגיה חשמלית\n• סדרות טיהור\n• יעוץ על טיפול\n\nתוצאות בחודשיים! 💪",
+        "⭐ **עור בעיתי?** בואי נפתור!\n\nתהליך שלנו:\n• ספירה בדיוקה\n• סדרת טיפולים\n• יעוץ אישי\n\nעור נקי וערים! 🌟",
+    ]
+    
+    # Anti-aging responses (randomized)
+    antiaging_responses = [
+        "✨ **הצערה וחידוש** - השקעה בעצמך!\n\nהשיטה שלנו:\n• בעדשות זהב\n• מיקרוג'ט מעורר\n• טיפול peptide אנטי-אייג'\n\nעור נמתח ויוקרה! 💪",
+        "🌟 **קמטים?** אנחנו כאן!\n\nטיפולים שלנו:\n• רדיו פריקנציה\n• מיקרוג'ט עדו\n• טיפול יצירתי לעור בשלב התחזוקה\n\nעור חיוך בתוך 4 שבועות! 🎯",
+        "💎 **חידוש עור** - בחירה חכמה!\n\nשיטות שלנו:\n• סדרת הצערה\n• טיפול מתקדם\n• יעוץ על רכיבים\n\nנתוצאות ברורות בשבוע-שניים! ✨",
+    ]
+    
+    # Fallback responses (randomized)
+    fallback_responses = [
+        "😊 זאת שאלה טובה!\n\nאני לא בטוחה לגמרי, אבל אני יכולה לעזור.\n\nספרי לי:\n• עור יבש? אקנה? זוהר? הצערה?\n• בואי נמצא את הטיפול המושלם! 🎯",
+        "🤔 שאלה מעניינת!\n\nאני מציעה לך:\n• טיפולי פנים\n• טיפולי גוף\n• יעוץ אישי\n\nמה בדיוק רוצה? 💕",
+        "🌟 טוב ששאלתך!\n\nאני יכולה להמליץ אם תגידי:\n• בעיית עור ספציפית\n• התוצאה שאתה רוצה\n• תקציב טיפول\n\nנמצא את הפתרון! ✨",
+    ]
+    
+    # Check for greetings first
+    if _has_keyword(message, greeting_keywords):
+        return random.choice(greeting_responses)
+    
+    # Check for hydration treatment
+    if _has_keyword(message, hydration_keywords):
+        return random.choice(hydration_responses)
+    
+    # Check for acne treatment
+    if _has_keyword(message, acne_keywords):
+        return random.choice(acne_responses)
+    
+    # Check for anti-aging treatment
+    if _has_keyword(message, antiaging_keywords):
+        return random.choice(antiaging_responses)
+    
+    # Fallback response for unknown queries
+    return random.choice(fallback_responses)
+
+
+def get_ollama_response(message: str, selected: Optional[Dict], ctx: ChatContext, history: List[Dict]) -> str:
+    """Call Ollama local AI (requires Ollama running on localhost:11434)"""
+    try:
+        import requests
+        
+        prompt = build_prompt(message, selected, ctx, history)
+        
+        response = requests.post(
+            "http://localhost:11434/api/generate",
+            json={
+                "model": "mistral",  # lightweight model, fast
+                "prompt": prompt,
+                "stream": False,
+                "temperature": 0.7,
+            },
+            timeout=30
+        )
+        
+        if response.status_code == 200:
+            return response.json()["response"].strip()
+        else:
+            raise Exception(f"Ollama error: {response.status_code}")
+    except Exception as e:
+        print(f"OLLAMA ERROR: {e}")
+        raise HTTPException(status_code=500, detail=f"Ollama error: {str(e)}")
+
+
+def get_groq_response(message: str, selected: Optional[Dict], ctx: ChatContext, history: List[Dict]) -> str:
+    """Call Groq cloud AI (requires GROQ_API_KEY env var)"""
+    try:
+        prompt = build_prompt(message, selected, ctx, history)
+        
+        response = groq.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return response.choices[0].message.content.strip()
+    except Exception as e:
+        print(f"GROQ ERROR: {e}")
+        raise HTTPException(status_code=500, detail=f"Groq error: {str(e)}")
+
+
+# Main chat endpoint
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
-    msg = _norm(req.message)
     ctx = req.context or ChatContext()
+    selected = TREATMENT_MAP.get(req.selected_treatment_id) if req.selected_treatment_id else None
 
-    db: Session = SessionLocal()
-    try:
-        treatments = db.query(Treatment).all()
+    # Choose response based on CHAT_MODE
+    if CHAT_MODE == "hardcoded":
+        reply = get_hardcoded_response(req.message)
+    elif CHAT_MODE == "ollama":
+        reply = get_ollama_response(req.message, selected, ctx, req.history or [])
+    elif CHAT_MODE == "groq":
+        reply = get_groq_response(req.message, selected, ctx, req.history or [])
+    else:
+        reply = get_hardcoded_response(req.message)
 
-        goal_keywords = {
-            "hydration": ["hydration", "dry", "לחות", "יובש"],
-            "glow": ["glow", "shine", "זוהר", "קורן"],
-            "acne": ["acne", "pimple", "פצע", "אקנה"],
-            "antiaging": ["anti", "aging", "wrinkle", "אנטי", "קמט", "מיצוק", "lifting"],
-            "calm": ["calm", "sensitive", "red", "הרגעה", "רגיש", "אדמומיות"],
-        }
+    # Detect any treatment names mentioned in the reply → suggestion buttons
+    suggested = []
+    if not selected:
+        for t in TREATMENTS:
+            if t["name"] in reply:
+                suggested.append({"id": t["id"], "name": t["name"], "category": t["category"]})
+        suggested = suggested[:3]
 
-        picked_goal = _norm(ctx.goal) if ctx.goal else ""
-        if not picked_goal:
-            for g, words in goal_keywords.items():
-                if any(w.lower() in msg for w in words):
-                    picked_goal = g
-                    break
+    return ChatResponse(
+        reply=reply,
+        suggested_treatments=suggested if suggested else None,
+    )
 
-        def allowed(t: Treatment) -> bool:
-            if ctx.pregnant:
-                pb = _norm(t.pregnancy_breastfeeding or "")
-                if "לא מומלץ" in pb:
-                    return False
-            return True
 
-        scored = []
-        for t in treatments:
-            if not allowed(t):
-                continue
+# ------------------------------------------------------------
+# Appointments DB
+# ------------------------------------------------------------
+APPOINTMENTS_DB = EXCEL_DIR / "appointments.db"
 
-            text = " ".join([
-                t.name or "",
-                t.category or "",
-                t.keywords or "",
-                t.results_timing or "",
-                t.medical_limitations or "",
-            ]).lower()
 
-            score = 0
-            if picked_goal:
-                if any(w.lower() in text for w in goal_keywords.get(picked_goal, [])):
-                    score += 4
+def get_db():
+    conn = sqlite3.connect(str(APPOINTMENTS_DB))
+    conn.row_factory = sqlite3.Row
+    return conn
 
-            for token in msg.split():
-                if token and token in text:
-                    score += 1
 
-            if score > 0:
-                scored.append((score, t))
-
-        scored.sort(key=lambda x: x[0], reverse=True)
-        top = [t for _, t in scored[:3]]
-
-        if not top:
-            return ChatResponse(
-                reply="أهلاً! قوليلي شو هدفك؟ (لחות / זוהר / אקנה / anti-aging / تهدئة). وإذا بشرتك حساسة أو في حمل/رضاعة احكيلي كمان 🙂"
-            )
-
-        suggestions = [{"id": t.id, "name": t.name, "category": t.category} for t in top]
-
-        follow = None
-        if ctx.pregnant is None:
-            follow = {"type": "yesno", "question": "هل في حمل/رضاعة؟ (Yes/No)"}
-        elif ctx.sensitive is None:
-            follow = {"type": "yesno", "question": "هل بشرتك حساسة؟ (Yes/No)"}
-
-        return ChatResponse(
-            reply="تمام! هاي علاجات قريبة للي طلبتي:\n- " + "\n- ".join([f"{t.name} ({t.category or '—'})" for t in top]),
-            follow_up=follow,
-            suggested_treatments=suggestions
+def init_db():
+    conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS appointments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            client_name TEXT NOT NULL,
+            client_phone TEXT,
+            treatment_id TEXT NOT NULL,
+            treatment_name TEXT NOT NULL,
+            date TEXT NOT NULL,
+            time TEXT NOT NULL,
+            end_time TEXT,
+            notes TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
-    finally:
-        db.close()
-
-
-@app.post("/admin/import-excel")
-async def import_excel(file: UploadFile = File(...)):
-    # 1) validate extension
-    if not file.filename.lower().endswith((".xlsx", ".xls")):
-        raise HTTPException(status_code=400, detail="Upload an Excel file (.xlsx/.xls)")
-
-    # 2) read bytes and load dataframe
-    content = await file.read()
+    """)
+    # Add end_time column if it doesn't exist (migration for existing DB)
     try:
-        df = pd.read_excel(BytesIO(content))
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Failed to read Excel: {e}")
+        conn.execute("ALTER TABLE appointments ADD COLUMN end_time TEXT")
+    except Exception:
+        pass
+    conn.commit()
+    conn.close()
 
-    db: Session = SessionLocal()
-    try:
-        db.query(FAQ).delete()
-        db.query(Treatment).delete()
-        db.commit()
 
-        base_cols = [
-            "סוג הטיפול",
-            "מילות מפתח",
-            "מתאים לכל סוגי העור?",
-            "לאילו גילאים?",
-            "מתי רואים תוצאות?",
-            "מוצרים משלימים?",
-            "הנחיות לאחר טיפול",
-            "האם נדרש ייעוץ?",
-            "תדירות מומלצת",
-            "היריון/הנקה",
-            "הגבלות רפואיות",
-        ]
+init_db()
 
-        CLASS_NAME = "טיפולי קוסמטיקה"
 
-        for i in range(len(df)):
-            name = to_text(df.loc[i, "סוג הטיפול"]) if "סוג הטיפול" in df.columns else ""
-            if not name:
-                continue
+class AppointmentCreate(BaseModel):
+    client_name: str
+    client_phone: Optional[str] = None
+    treatment_id: str
+    treatment_name: str
+    date: str
+    time: str
+    end_time: Optional[str] = None
+    notes: Optional[str] = None
 
-            t = Treatment(
-                id=f"excel_{i}",
-                name=name,
-                class_name=CLASS_NAME,
-                category="",
-                keywords=to_text(df.loc[i, "מילות מפתח"]) if "מילות מפתח" in df.columns else "",
-                suitable_for_all_skins=to_text(df.loc[i, "מתאים לכל סוגי העור?"]) if "מתאים לכל סוגי העור?" in df.columns else "",
-                ages=to_text(df.loc[i, "לאילו גילאים?"]) if "לאילו גילאים?" in df.columns else "",
-                results_timing=to_text(df.loc[i, "מתי רואים תוצאות?"]) if "מתי רואים תוצאות?" in df.columns else "",
-                complementary_products=to_text(df.loc[i, "מוצרים משלימים?"]) if "מוצרים משלימים?" in df.columns else "",
-                aftercare=to_text(df.loc[i, "הנחיות לאחר טיפול"]) if "הנחיות לאחר טיפול" in df.columns else "",
-                consultation_required=to_text(df.loc[i, "האם נדרש ייעוץ?"]) if "האם נדרש ייעוץ?" in df.columns else "",
-                recommended_frequency=to_text(df.loc[i, "תדירות מומלצת"]) if "תדירות מומלצת" in df.columns else "",
-                pregnancy_breastfeeding=to_text(df.loc[i, "היריון/הנקה"]) if "היריון/הנקה" in df.columns else "",
-                medical_limitations=to_text(df.loc[i, "הגבלות רפואיות"]) if "הגבלות רפואיות" in df.columns else "",
-            )
 
-            if "קטגוריה" in df.columns:
-                t.category = to_text(df.loc[i, "קטגוריה"])
-            elif "Category" in df.columns:
-                t.category = to_text(df.loc[i, "Category"])
+@app.get("/appointments")
+def list_appointments():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM appointments ORDER BY date, time"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
-            db.add(t)
-            db.flush()
 
-            for c in df.columns:
-                if c in base_cols or c in ["קטגוריה", "Category"]:
-                    continue
-                q = to_text(c)
-                a = to_text(df.loc[i, c])
-                if a:
-                    db.add(FAQ(treatment_id=t.id, question=q, answer=a))
+@app.post("/appointments")
+def create_appointment(appt: AppointmentCreate):
+    conn = get_db()
+    cursor = conn.execute(
+        """INSERT INTO appointments
+           (client_name, client_phone, treatment_id, treatment_name, date, time, end_time, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (appt.client_name, appt.client_phone, appt.treatment_id,
+         appt.treatment_name, appt.date, appt.time, appt.end_time, appt.notes),
+    )
+    conn.commit()
+    new_id = cursor.lastrowid
+    conn.close()
+    return {"id": new_id, **appt.model_dump()}
 
-        db.commit()
-        return {"rows_in_excel": len(df), "status": "imported"}
-    finally:
-        db.close()
+
+@app.delete("/appointments/{appt_id}")
+def delete_appointment(appt_id: int):
+    conn = get_db()
+    conn.execute("DELETE FROM appointments WHERE id = ?", (appt_id,))
+    conn.commit()
+    conn.close()
+    return {"ok": True}
+
+
+class AppointmentReschedule(BaseModel):
+    date: str
+    time: str
+    end_time: Optional[str] = None
+
+
+@app.patch("/appointments/{appt_id}")
+def reschedule_appointment(appt_id: int, data: AppointmentReschedule):
+    conn = get_db()
+    conn.execute(
+        "UPDATE appointments SET date = ?, time = ?, end_time = ? WHERE id = ?",
+        (data.date, data.time, data.end_time, appt_id),
+    )
+    conn.commit()
+    row = conn.execute("SELECT * FROM appointments WHERE id = ?", (appt_id,)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    return dict(row)
+
+
+@app.get("/appointments/analytics")
+def get_analytics():
+    conn = get_db()
+
+    total = conn.execute("SELECT COUNT(*) as c FROM appointments").fetchone()["c"]
+
+    by_treatment = conn.execute("""
+        SELECT treatment_name, COUNT(*) as count
+        FROM appointments
+        GROUP BY treatment_name
+        ORDER BY count DESC
+        LIMIT 10
+    """).fetchall()
+
+    by_day = conn.execute("""
+        SELECT strftime('%w', date) as day_num, COUNT(*) as count
+        FROM appointments
+        GROUP BY day_num
+        ORDER BY day_num
+    """).fetchall()
+
+    by_hour = conn.execute("""
+        SELECT substr(time, 1, 2) as hour, COUNT(*) as count
+        FROM appointments
+        GROUP BY hour
+        ORDER BY hour
+    """).fetchall()
+
+    recent = conn.execute("""
+        SELECT * FROM appointments ORDER BY created_at DESC LIMIT 5
+    """).fetchall()
+
+    conn.close()
+
+    day_names = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
+
+    return {
+        "total": total,
+        "by_treatment": [{"name": r["treatment_name"], "count":r["count"]} for r in by_treatment],
+        "by_day": [{"day": day_names[int(r["day_num"])], "count": r["count"]} for r in by_day],
+        "by_hour": [{"hour": f"{r['hour']}:00", "count": r["count"]} for r in by_hour],
+        "recent": [dict(r) for r in recent],
+    }
+
+
+# Run server
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="127.0.0.1", port=8000)
