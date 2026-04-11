@@ -406,3 +406,7 @@ def get_analytics():
         "by_hour": [{"hour": f"{r['hour']}:00", "count": r["count"]} for r in by_hour],
         "recent": [dict(r) for r in recent],
     }
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

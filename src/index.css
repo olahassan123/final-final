@@ -1,3 +1,5 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,400;0,500;0,600;0,700;1,400;1,500;1,600;1,700&family=Heebo:wght@300;400;500;600;700&display=swap');
+
 /* פקודות הבסיס של Tailwind */
 @tailwind base;
 @tailwind components;
@@ -5,7 +7,7 @@
 
 /* הגדרות בסיסיות לאתר MeDay */
 :root {
-  font-family: 'Assistant', system-ui, -apple-system, sans-serif;
+  font-family: 'Heebo', 'Assistant', system-ui, -apple-system, sans-serif;
 }
 
 body {
@@ -13,9 +15,15 @@ body {
   padding: 0;
   min-height: 100vh;
   /* ביטול המרכוז הכפוי של Vite */
-  display: block; 
+  display: block;
   background-color: #ffffff;
   color: #1a1a1a;
+  font-family: 'Heebo', 'Assistant', system-ui, -apple-system, sans-serif;
+}
+
+@keyframes badge-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
 }
 
 /* הבטחת כיוון כתיבה לימין עבור העברית */
