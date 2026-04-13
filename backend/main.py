@@ -9,7 +9,9 @@ import sqlite3
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+EXCEL_DIR = Path(__file__).parent
+ENV_PATH = EXCEL_DIR / ".env"
+load_dotenv(ENV_PATH)
 
 # ------------------------------------------------------------
 # App setup
@@ -30,12 +32,15 @@ app.add_middleware(
 # ------------------------------------------------------------
 # Groq setup
 # ------------------------------------------------------------
-groq = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+groq = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+if not GROQ_API_KEY:
+    print(f"WARNING: GROQ_API_KEY was not loaded from {ENV_PATH}")
 
 # ------------------------------------------------------------
 # Load Excel data once on startup
 # ------------------------------------------------------------
-EXCEL_DIR = Path(__file__).parent
 
 
 def to_text(x):
@@ -116,7 +121,15 @@ TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {
+        "ok": True,
+        "services": {
+            "chat": {
+                "configured": bool(GROQ_API_KEY),
+                "provider": "groq",
+            }
+        },
+    }
 
 
 @app.get("/treatments")
@@ -229,6 +242,12 @@ def build_prompt(
 def chat(req: ChatRequest):
     ctx = req.context or ChatContext()
     selected = TREATMENT_MAP.get(req.selected_treatment_id) if req.selected_treatment_id else None
+
+    if not GROQ_API_KEY or groq is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"GROQ_API_KEY is missing or was not loaded from {ENV_PATH}",
+        )
 
     prompt = build_prompt(req.message, selected, ctx, req.history or [])
 
