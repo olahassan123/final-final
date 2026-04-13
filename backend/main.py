@@ -9,9 +9,7 @@ import sqlite3
 from pathlib import Path
 from dotenv import load_dotenv
 
-EXCEL_DIR = Path(__file__).parent
-ENV_PATH = EXCEL_DIR / ".env"
-load_dotenv(ENV_PATH)
+load_dotenv()
 
 # ------------------------------------------------------------
 # App setup
@@ -165,89 +163,15 @@ class ChatResponse(BaseModel):
     reply: str
     follow_up: Optional[Dict] = None
     suggested_treatments: Optional[List[Dict]] = None
-    sources: Optional[List[Dict]] = None
 
+def _norm(s: str) -> str:
+    return (s or "").strip().lower()
 
-# ------------------------------------------------------------
-# Prompt builder
-# ------------------------------------------------------------
-def build_prompt(
-    message: str,
-    selected: Optional[Dict],
-    ctx: ChatContext,
-    history: List[Dict],
-) -> str:
-    system = (
-        "אתה עוזרת AI של MeDay - קליניקת יופי וטיפולים קוסמטיים.\n"
-        "תפקידך לעזור ללקוחות לבחור טיפולים מתאימים ולענות על שאלות לגבי הטיפולים.\n"
-        "ענה תמיד בעברית בצורה חמה, מקצועית ומזמינה.\n"
-        "בסס את תשובותיך אך ורק על המידע שנמסר לך - אל תמציא מידע שאינו ברשימה.\n"
-    )
-
-    if selected:
-        faq_text = "\n".join(
-            [f"ש: {q}\nת: {a}" for q, a in selected.get("faq", {}).items()]
-        )
-        knowledge = (
-            f"\nהמשתמשת צופה כרגע בטיפול: {selected['name']}\n\n"
-            f"פרטי הטיפול:\n"
-            f"- קטגוריה: {selected['class_name']} / {selected['category']}\n"
-            f"- תיאור: {selected['aftercare']}\n"
-            f"- תוצאות: {selected['results_timing']}\n"
-            f"- למי מתאים: {selected['suitable_for_all_skins']}\n"
-            f"- למי לא מתאים: {selected['medical_limitations']}\n"
-            f"- הריון והנקה: {selected['pregnancy_breastfeeding']}\n"
-            f"- תדירות מומלצת: {selected['recommended_frequency']}\n"
-            f"- הערות: {selected['keywords']}\n\n"
-            f"שאלות ותשובות נפוצות:\n{faq_text or 'אין שאלות נפוצות.'}\n\n"
-            "ענה על שאלות המשתמשת לגבי טיפול זה בהתבסס על המידע הנ\"ל.\n"
-        )
-    else:
-        ctx_notes = []
-        if ctx.pregnant:
-            ctx_notes.append("המשתמשת בהריון/מניקה - המלץ רק טיפולים מתאימים")
-        if ctx.sensitive:
-            ctx_notes.append("לעור רגיש")
-        if ctx.goal:
-            ctx_notes.append(f"מטרה: {ctx.goal}")
-
-        ctx_line = " | ".join(ctx_notes) if ctx_notes else ""
-
-        treatments_list = "\n".join([
-            f"- {t['name']} ({t['category']}): "
-            f"{(t['suitable_for_all_skins'] or t['aftercare'])[:100]}"
-            for t in TREATMENTS
-        ])
-
-        knowledge = (
-            f"\n{f'הקשר: {ctx_line}' if ctx_line else ''}\n\n"
-            f"טיפולים זמינים בקליניקה:\n{treatments_list}\n\n"
-            "עזרי למשתמשת לבחור טיפול מתאים. "
-            "כשתמליצי על טיפולים, ציין את שמות הטיפולים בדיוק כפי שהם מופיעים ברשימה.\n"
-        )
-
-    # Conversation history (last 8 messages)
-    history_text = ""
-    for msg in history[-8:]:
-        role = "משתמשת" if msg.get("from") == "user" else "עוזרת"
-        history_text += f"{role}: {msg.get('text', '')}\n"
-
-    return f"{system}{knowledge}\nשיחה:\n{history_text}משתמשת: {message}\nעוזרת:"
-
-
-# ------------------------------------------------------------
-# Chat endpoint
-# ------------------------------------------------------------
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
+    msg = _norm(req.message)
     ctx = req.context or ChatContext()
     selected = TREATMENT_MAP.get(req.selected_treatment_id) if req.selected_treatment_id else None
-
-    if not GROQ_API_KEY or groq is None:
-        raise HTTPException(
-            status_code=503,
-            detail=f"GROQ_API_KEY is missing or was not loaded from {ENV_PATH}",
-        )
 
     prompt = build_prompt(req.message, selected, ctx, req.history or [])
 
@@ -425,7 +349,3 @@ def get_analytics():
         "by_hour": [{"hour": f"{r['hour']}:00", "count": r["count"]} for r in by_hour],
         "recent": [dict(r) for r in recent],
     }
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
