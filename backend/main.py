@@ -1,12 +1,19 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
-from fastapi import UploadFile, File, HTTPException
+from pydantic import BaseModel
+from sqlalchemy.orm import Session
+from pathlib import Path
+from typing import List, Dict, Optional
+from groq import Groq
+from dotenv import load_dotenv
 from io import BytesIO
-
+import os
+import pandas as pd
 
 from db import SessionLocal, engine, Base
 from models import Treatment, FAQ
+
+load_dotenv()
 
 app = FastAPI(title="MeDay Backend")
 
