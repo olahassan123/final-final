@@ -477,7 +477,8 @@ export default function SecretaryPage() {
 
   const today = toISO(new Date());
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
-  const weekLabel = `${displayDate(weekStart)} – ${displayDate(addDays(weekStart, 6))}`;
+  const weekEnd = addDays(weekStart, 6);
+  const weekLabel = `${weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${weekEnd.getFullYear()}`;
   const weekDayStrings = weekDays.map(toISO);
   const allWeekAppts = appointments.filter((a) => weekDayStrings.includes(a.date));
   const weekAppts = activeCategory
@@ -561,7 +562,12 @@ export default function SecretaryPage() {
   );
 
   return (
-    <div dir="rtl" className="min-h-screen" style={{ background: "#F9F7F4" }}>
+    <div dir="rtl" className="min-h-screen" style={{
+      backgroundImage: "url('/salon-bg.png')",
+      backgroundSize: "cover",
+      backgroundPosition: "center",
+      backgroundAttachment: "fixed",
+    }}>
       <AppointmentModal
         appt={selectedAppt}
         onClose={() => setSelectedAppt(null)}
@@ -570,7 +576,7 @@ export default function SecretaryPage() {
 
       {/* Header */}
       <div className="px-8 py-4 flex items-center justify-between relative overflow-hidden"
-        style={{ background: "#FAF6F1", boxShadow: "0 4px 12px rgba(0,0,0,0.05)", borderBottom: "1px solid #EADFD5" }}>
+        style={{ background: "rgba(253,249,246,0.72)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", borderBottom: "1px solid rgba(240,232,223,0.6)" }}>
 
         {/* Animated radiant glow from logo side */}
         <div className="absolute inset-0 pointer-events-none">
@@ -616,22 +622,33 @@ export default function SecretaryPage() {
 
         <div className="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full border relative z-10"
           style={{ color: "#8b6f52", background: "rgba(201,162,126,0.12)", borderColor: "rgba(201,162,126,0.35)" }}>
-          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500"></div>
+          <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" style={{ animation: "badge-pulse 2s ease-in-out infinite" }}></div>
           מחובר
         </div>
       </div>
 
-      <div className="flex h-[calc(100vh-65px)]">
+      <div className="flex h-[calc(100vh-65px)] relative">
 
         {/* ── Left panel ─────────────────────────────────────── */}
-        <div className="w-72 min-w-[272px] border-l border-gray-100 overflow-y-auto flex flex-col shadow-sm relative"
-          style={{
-            backgroundImage: "url('/salon-bg.png')",
-            backgroundSize: "cover",
-            backgroundPosition: "center",
-          }}>
+        <div className="w-72 min-w-[272px] border-l border-gray-100 overflow-y-auto flex flex-col shadow-sm relative">
           {/* Faded white overlay */}
           <div className="absolute inset-0 pointer-events-none" style={{ background: "rgba(255,255,255,0.62)" }} />
+
+          {/* Vertical brand name */}
+          <div className="absolute inset-0 pointer-events-none flex items-center justify-center z-0 overflow-hidden">
+            <p style={{
+              fontFamily: "'Cormorant Garamond', Georgia, serif",
+              fontSize: "92px",
+              fontWeight: 700,
+              fontStyle: "italic",
+              letterSpacing: "0.18em",
+              color: "rgba(160,110,75,0.13)",
+              writingMode: "vertical-rl",
+              textOrientation: "mixed",
+              userSelect: "none",
+              lineHeight: 1,
+            }}>Meday</p>
+          </div>
 
           {/* Toggle button */}
           <div className="p-4 border-b border-gray-50 relative z-10">
@@ -640,10 +657,10 @@ export default function SecretaryPage() {
               onClick={() => setFormOpen((o) => !o)}
               className="w-full rounded-2xl transition-all duration-200 group overflow-hidden"
               style={{
-                background: "linear-gradient(135deg, #e8b4c0, #d4899a)",
+                background: "linear-gradient(135deg, #EDE0D0, #DCCAB5)",
                 border: "none",
                 borderRadius: "12px",
-                boxShadow: "0 8px 20px rgba(212,137,154,0.25)",
+                boxShadow: "0 8px 20px rgba(220,202,181,0.3)",
               }}
             >
               <div className="px-5 py-4 flex items-center justify-between">
@@ -651,16 +668,16 @@ export default function SecretaryPage() {
                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-sm transition-transform duration-300
                     ${formOpen ? "rotate-45" : "bg-white group-hover:scale-110"}`}
                     style={{ background: "rgba(255,255,255,0.25)", boxShadow: "none" }}>
-                    <Plus size={18} className={formOpen ? "rotate-45 transition-transform duration-300" : "transition-transform duration-300"} style={{ color: "#FFFFFF" }} />
+                    <Plus size={18} className={formOpen ? "rotate-45 transition-transform duration-300" : "transition-transform duration-300"} style={{ color: "#6b4f35" }} />
                   </div>
                   <div className="text-right">
-                    <p className="font-bold text-sm leading-tight text-white">קביעת תור חדש</p>
-                    <p className="text-[10px] mt-0.5 text-white/70">{formOpen ? "לחצי לסגירה" : "לחצי לפתיחה"}</p>
+                    <p className="font-bold text-sm leading-tight" style={{ color: "#111111" }}>קביעת תור חדש</p>
+                    <p className="text-[10px] mt-0.5" style={{ color: "#555555" }}>{formOpen ? "לחצי לסגירה" : "לחצי לפתיחה"}</p>
                   </div>
                 </div>
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center transition-transform duration-300 ${formOpen ? "rotate-180" : ""}`}
-                  style={{ background: "rgba(255,255,255,0.2)" }}>
-                  <ChevronLeft size={13} className="text-white -rotate-90" />
+                  style={{ background: "rgba(107,79,53,0.12)" }}>
+                  <ChevronLeft size={13} style={{ color: "#6b4f35" }} className="-rotate-90" />
                 </div>
               </div>
               <div className="h-px bg-gradient-to-l from-transparent via-white/30 to-transparent" />
@@ -823,7 +840,9 @@ export default function SecretaryPage() {
         </div>
 
         {/* ── Right panel: Calendar ─────────────────────────── */}
-        <div className="flex-1 flex items-stretch relative overflow-hidden" style={{ background: "#F9F7F4" }}>
+        <div className="flex-1 flex items-stretch relative overflow-hidden">
+          {/* Light overlay over the shared background */}
+          <div className="absolute inset-0 pointer-events-none" style={{ background: "rgba(249,247,244,0.78)" }} />
 
           {/* Left arrow — next week (hidden in year view) */}
           {viewMode === "week" && (
@@ -871,10 +890,10 @@ export default function SecretaryPage() {
               100% { background: transparent; box-shadow: 0 0 0 0px rgba(201,162,126,0); }
             }
             @keyframes rescheduleGlow {
-              0%   { box-shadow: 0 0 0 0px rgba(201,162,126,0); }
-              20%  { box-shadow: 0 0 0 5px rgba(201,162,126,0.65); background-color: #fef3e2; }
-              65%  { box-shadow: 0 0 0 4px rgba(201,162,126,0.45); background-color: #fef3e2; }
-              100% { box-shadow: 0 0 0 0px rgba(201,162,126,0); }
+              0%   { box-shadow: 0 0 0 0px rgba(107,162,146,0); }
+              20%  { box-shadow: 0 0 0 5px rgba(107,162,146,0.55); background-color: #b8dfd5; }
+              65%  { box-shadow: 0 0 0 4px rgba(107,162,146,0.35); background-color: #b8dfd5; }
+              100% { box-shadow: 0 0 0 0px rgba(107,162,146,0); }
             }
             @keyframes columnHighlight {
               0%   { background: transparent; }
@@ -893,10 +912,10 @@ export default function SecretaryPage() {
               to   { opacity: 1; transform: scale(1); }
             }
             @keyframes newBookingPulse {
-              0%   { box-shadow: 0 0 0 0px rgba(201,162,126,0); background-color: #fef9c3; }
-              18%  { box-shadow: 0 0 0 7px rgba(201,162,126,0.75); background-color: #fde8b4; }
-              60%  { box-shadow: 0 0 0 5px rgba(201,162,126,0.45); background-color: #fde8b4; }
-              100% { box-shadow: 0 0 0 0px rgba(201,162,126,0); background-color: #fef9c3; }
+              0%   { box-shadow: 0 0 0 0px rgba(107,162,146,0); background-color: #d4ede6; }
+              18%  { box-shadow: 0 0 0 7px rgba(107,162,146,0.6); background-color: #a8d5c8; }
+              60%  { box-shadow: 0 0 0 5px rgba(107,162,146,0.35); background-color: #a8d5c8; }
+              100% { box-shadow: 0 0 0 0px rgba(107,162,146,0); background-color: #d4ede6; }
             }
           `}</style>
 
@@ -920,7 +939,7 @@ export default function SecretaryPage() {
             >
               {/* Calendar header */}
               <div className="border-b px-6 py-3.5 flex items-center justify-between flex-shrink-0"
-                style={{ background: "#d9c4aa", borderBottomColor: "#c8ad8e" }}>
+                style={{ background: "#EDE0D0", borderBottomColor: "#DCCAB5" }}>
                 <div className="flex items-center gap-3">
                   <div className="flex gap-1">
                     {[...Array(3)].map((_, i) => (
@@ -930,26 +949,30 @@ export default function SecretaryPage() {
                   <span className="text-xs pr-3" style={{ color: "#8b6f52", borderRight: "1px solid #c8ad8e" }}>
                     {viewMode === "week" ? "יומן שבועי" : "תצוגה שנתית"}
                   </span>
-                  <button
-                    onClick={() => {
-                      if (viewMode === "week") { setYearViewYear(weekStart.getFullYear()); setViewMode("year"); }
-                      else setViewMode("week");
-                    }}
-                    title={viewMode === "week" ? "תצוגה שנתית" : "חזרה לשבועי"}
-                    className="flex items-center gap-1 text-[11px] font-semibold px-2 py-1 rounded-lg border transition-all hover:shadow-sm active:scale-95"
-                    style={{ color: "#6b4f35", background: "rgba(255,255,255,0.6)", borderColor: "#c8ad8e" }}
-                  >
-                    <LayoutGrid size={12} style={{ color: "#C9A27E" }} />
-                  </button>
                 </div>
                 <div className="text-center">
                   {viewMode === "week" ? (
                     <>
-                      <p className="font-bold text-sm" style={{ color: "#3d2e1a" }}>{weekLabel}</p>
-                      <p className="text-xs mt-0.5" style={{ color: "#8b6f52" }}>{weekAppts.length} תורים השבוע</p>
+                      <p style={{
+                        fontFamily: "'Cormorant Garamond', Georgia, serif",
+                        fontSize: "20px",
+                        fontWeight: 700,
+                        fontStyle: "italic",
+                        letterSpacing: "0.04em",
+                        color: "#3d2e1a",
+                        lineHeight: 1,
+                      }}>{weekLabel}</p>
+                      <p className="text-xs mt-1 text-center" style={{ color: "#8b6f52", direction: "ltr" }}>{weekAppts.length} appointments this week</p>
                     </>
                   ) : (
-                    <p className="font-bold text-sm" style={{ color: "#3d2e1a", fontFamily: "Georgia, serif" }}>{yearViewYear}</p>
+                    <p style={{
+                      fontFamily: "'Cormorant Garamond', Georgia, serif",
+                      fontSize: "22px",
+                      fontWeight: 700,
+                      fontStyle: "italic",
+                      letterSpacing: "0.06em",
+                      color: "#3d2e1a",
+                    }}>{yearViewYear}</p>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
@@ -1086,11 +1109,11 @@ export default function SecretaryPage() {
               {viewMode === "week" && <div className={`flex-1 min-h-0 flex flex-col overflow-hidden bg-white relative ${isPastWeek ? "opacity-75" : ""}`} style={{ animation: "fadeInView 0.25s ease" }}>
 
                 {isPastWeek && (
-                  <div className="absolute inset-0 z-20 flex items-center justify-center">
+                  <div className="absolute inset-0 z-20 flex items-center justify-center pointer-events-none">
                     {pastLabelVisible && (
                       <span
                         onClick={() => setPastLabelVisible(false)}
-                        className="cursor-pointer bg-white/90 backdrop-blur-sm text-gray-500 text-xs font-medium px-4 py-2 rounded-full shadow-lg hover:bg-white transition-all border border-gray-200"
+                        className="pointer-events-auto cursor-pointer bg-white/90 backdrop-blur-sm text-gray-500 text-xs font-medium px-4 py-2 rounded-full shadow-lg hover:bg-white transition-all border border-gray-200"
                       >
                         צפייה בלבד
                       </span>
@@ -1110,7 +1133,7 @@ export default function SecretaryPage() {
                         const isToday = iso === today;
                         return (
                           <div key={i}
-                            className={`text-center py-3 ${iso < today ? "blur-[1.5px]" : ""}`}
+                            className={`text-center py-3 ${iso < today && !isCurrentWeek ? "blur-[1.5px]" : ""}`}
                             style={{ background: "#eddfc9", borderBottom: "2px solid #c8ad8e", borderRight: "1px solid #c8ad8e", position: "sticky", top: 0, zIndex: 30, animation: iso === highlightedDateCol ? "columnHeaderHighlight 1.8s ease forwards" : undefined }}>
                             <p className="text-[11px] font-semibold uppercase tracking-wider"
                               style={{ color: isToday ? "#6BA292" : "#7A7A7A" }}>
@@ -1166,7 +1189,7 @@ export default function SecretaryPage() {
                                 onMouseEnter={() => { handleDragEnter(iso, hour); handleRescheduleEnter(iso, hour); }}
                                 onMouseUp={handleDragEnd}
                                 className={`absolute w-full select-none transition-colors
-                                  ${isPastDay ? "blur-[1.5px] cursor-not-allowed" : "cursor-pointer"}
+                                  ${isPastDay && !isCurrentWeek ? "blur-[1.5px] cursor-not-allowed" : isPastDay ? "cursor-not-allowed" : "cursor-pointer"}
                                   ${!isPastDay && isDragCell ? "bg-yellow-50" : ""}
                                   ${!isPastDay && isRescheduleTarget ? "bg-[#F4EFEA]" : ""}
                                   ${!isPastDay && !isDragCell && !isRescheduleTarget ? "hover:bg-yellow-50/70" : ""}`}
@@ -1202,28 +1225,31 @@ export default function SecretaryPage() {
                                 onMouseDown={(e) => { if (isApptFuture) handleRescheduleStart(a, e); }}
                                 onMouseEnter={() => setHoveredApptId(a.id)}
                                 onMouseLeave={() => setHoveredApptId(null)}
-                                className={`absolute text-[10px] px-1.5 pt-1 leading-tight rounded-lg border z-10 overflow-hidden transition-opacity
+                                className={`absolute text-[10px] px-1.5 pt-1 leading-tight rounded-lg border z-10 overflow-hidden transition-all duration-150
                                   ${isApptFuture && !isBeingDragged ? "cursor-grab" : "cursor-pointer"}
                                   ${isBeingDragged ? "opacity-25" : "opacity-100"}
-                                  ${!isBeingDragged && isHovered ? "bg-yellow-100 border-yellow-400 shadow-sm" : "bg-yellow-50 border-yellow-300"}`}
+                                  ${!isBeingDragged && isHovered ? "shadow-md" : "shadow-sm"}
+                                  ${isPastDay ? "blur-[1.5px] opacity-70" : ""}`}
                                 style={{
                                   top: `${pos.top + 2}px`,
                                   height: `${pos.height - 4}px`,
                                   left: `${leftPct}%`,
                                   width: `${widthPct}%`,
                                   pointerEvents: "auto",
+                                  backgroundColor: !isBeingDragged && isHovered ? "#bfddd6" : "#d4ede6",
+                                  borderColor: !isBeingDragged && isHovered ? "rgba(107,162,146,0.6)" : "rgba(107,162,146,0.35)",
                                   animation: isJustRescheduled
                                     ? "rescheduleGlow 2s ease forwards"
                                     : a.id === newlyBookedId
                                     ? "newBookingPulse 2.5s ease forwards"
                                     : undefined,
                                 }}>
-                                <div className="font-bold truncate text-yellow-900">{a.client_name}</div>
+                                <div className="font-bold truncate text-[#2d5a4f]">{a.client_name}</div>
                                 {pos.height > 30 && (
-                                  <div className="truncate text-yellow-600 text-[9px]">{a.treatment_name}</div>
+                                  <div className="truncate text-[#5a9a8a] text-[9px]">{a.treatment_name}</div>
                                 )}
                                 {pos.height > 44 && (
-                                  <div className="text-[9px] text-yellow-500">{a.time}{a.end_time ? `–${a.end_time}` : ""}</div>
+                                  <div className="text-[9px] text-[#6BA292]">{a.time}{a.end_time ? `–${a.end_time}` : ""}</div>
                                 )}
                               </div>
                             );
@@ -1268,6 +1294,30 @@ export default function SecretaryPage() {
               </div>}
 
             </div>
+
+          {/* ── Floating view-toggle button ───────────────────── */}
+          <button
+            onClick={() => {
+              if (viewMode === "week") { setYearViewYear(weekStart.getFullYear()); setViewMode("year"); }
+              else setViewMode("week");
+            }}
+            title={viewMode === "week" ? "תצוגה שנתית" : "חזרה לשבועי"}
+            className="absolute bottom-6 right-6 z-40 flex items-center gap-2 text-[12px] font-semibold px-4 py-2.5 rounded-2xl transition-all duration-200 hover:shadow-lg active:scale-95"
+            style={{
+              color: "#6b4f35",
+              background: "rgba(255,252,248,0.85)",
+              backdropFilter: "blur(10px)",
+              WebkitBackdropFilter: "blur(10px)",
+              border: "1px solid rgba(200,173,142,0.5)",
+              boxShadow: "0 4px 20px rgba(139,111,82,0.15), 0 1px 4px rgba(139,111,82,0.1)",
+            }}
+          >
+            {viewMode === "week"
+              ? <><LayoutGrid size={14} style={{ color: "#C9A27E" }} /><span>zoom out</span></>
+              : <><CalendarDays size={14} style={{ color: "#C9A27E" }} /><span>zoom in</span></>
+            }
+          </button>
+
           </div>
         </div>
       </div>
