@@ -7,8 +7,10 @@ from typing import List, Dict, Optional
 from groq import Groq
 from dotenv import load_dotenv
 from io import BytesIO
+from datetime import datetime, timedelta
 import os
 import pandas as pd
+from zoneinfo import ZoneInfo
 
 from db import SessionLocal, engine, Base
 from models import Treatment, FAQ
@@ -26,7 +28,40 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
+from pathlib import Path
+import pandas as pd
 
+EXCEL_DIR = Path(__file__).parent
+BUSINESS_TZ = ZoneInfo("Asia/Jerusalem")
+MAX_ADVANCE_BOOKING_DAYS = 365
+
+def load_treatments():
+    treatments_df = pd.read_excel(EXCEL_DIR / "Treatments.xlsx")
+
+
+def parse_appointment_datetime(date_str: str, time_str: str) -> datetime:
+    try:
+        parsed = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid appointment date or time") from exc
+    return parsed.replace(tzinfo=BUSINESS_TZ)
+
+
+def validate_appointment_slot(date_str: str, start_time: str, end_time: Optional[str] = None) -> None:
+    start_dt = parse_appointment_datetime(date_str, start_time)
+    now = datetime.now(BUSINESS_TZ).replace(second=0, microsecond=0)
+    max_booking_date = (now + timedelta(days=MAX_ADVANCE_BOOKING_DAYS)).date()
+
+    if start_dt <= now:
+        raise HTTPException(status_code=400, detail="Cannot book a past appointment slot")
+
+    if start_dt.date() > max_booking_date:
+        raise HTTPException(status_code=400, detail="Appointment date is too far in the future")
+
+    if end_time:
+        end_dt = parse_appointment_datetime(date_str, end_time)
+        if end_dt <= start_dt:
+            raise HTTPException(status_code=400, detail="Appointment end time must be after start time")
 # ------------------------------------------------------------
 # App setup
 # -----------------------------------------------------------
@@ -51,7 +86,7 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
 groq = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
 
 if not GROQ_API_KEY:
-    print(f"WARNING: GROQ_API_KEY was not loaded from {ENV_PATH}")
+    print("WARNING: GROQ_API_KEY was not loaded")
 
 # ------------------------------------------------------------
 # Load Excel data once on startup
@@ -114,11 +149,38 @@ TREATMENTS = load_treatments()
 
 # ── Hardcoded extra categories not yet in the Excel ──────────
 _EXTRA_TREATMENTS = [
-    {"id": "manicure_1", "name": "מניקור",                               "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_2", "name": "לק גל",                                "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_3", "name": "עיצוב ופיסול ציפורן",                  "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_4", "name": "פדיקור אסתטי+ לק גל",                 "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_5", "name": "פדיקור טיפולי+ לק\\לק גל",            "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_1", "name": "מניקור",                               "class_name": "מניקור ופדיקור", "category": "מניקור", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_2", "name": "לק ג’ל",                               "class_name": "מניקור ופדיקור", "category": "מניקור", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_3", "name": "עיצוב ופיסול ציפורן",                  "class_name": "מניקור ופדיקור", "category": "מניקור", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_4", "name": "פדיקור אסתטי + מריחת לק",              "class_name": "מניקור ופדיקור", "category": "פדיקור", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_5", "name": "פדיקור אסתטי + לק ג'ל",                "class_name": "מניקור ופדיקור", "category": "פדיקור", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_6", "name": "פדיקור טיפולי + לק/לק ג'ל",            "class_name": "מניקור ופדיקור", "category": "פדיקור", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_1",     "name": "עיסוי שוודי",                           "class_name": "טיפולי גוף",     "category": "עיסוי גוף",    "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_2",     "name": "עיסוי באבנים חמות",                    "class_name": "טיפולי גוף",     "category": "עיסוי גוף",    "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_3",     "name": "שיאצו",                                 "class_name": "טיפולי גוף",     "category": "עיסוי גוף",    "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_4",     "name": "עיסוי תאילנדי",                         "class_name": "טיפולי גוף",     "category": "עיסוי גוף",    "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_5",     "name": "עיסוי רקמות עמוק",                      "class_name": "טיפולי גוף",     "category": "עיסוי גוף",    "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_6",     "name": "עיסוי קצוות",                           "class_name": "טיפולי גוף",     "category": "עיסוי גוף",    "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_7",     "name": "עיסוי כתפיים, גב וצוואר",               "class_name": "טיפולי גוף",     "category": "עיסוי ממוקד",  "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_8",     "name": "עיסוי פנים וקרקפת",                     "class_name": "טיפולי גוף",     "category": "עיסוי ממוקד",  "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_9",     "name": "עיסוי כפות רגליים",                     "class_name": "טיפולי גוף",     "category": "עיסוי ממוקד",  "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_10",    "name": "עיסוי ספורטאים",                        "class_name": "טיפולי גוף",     "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_11",    "name": "עיסוי לנשים בהריון",                    "class_name": "טיפולי גוף",     "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_12",    "name": "עיסוי משולב",                           "class_name": "טיפולי גוף",     "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_13",    "name": "רפלקסולוגיה",                           "class_name": "טיפולי גוף",     "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_1",      "name": "גבות שיטת השערה",                       "class_name": "איפור קבוע ועיצוב גבות", "category": "גבות",        "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_2",      "name": "גבות שיטת הפודרה",                      "class_name": "איפור קבוע ועיצוב גבות", "category": "גבות",        "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_3",      "name": "גבות שיטה משולבת",                      "class_name": "איפור קבוע ועיצוב גבות", "category": "גבות",        "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_4",      "name": "הדגשת קו ריסים תחתון",                  "class_name": "איפור קבוע ועיצוב גבות", "category": "תיחום עיניים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_5",      "name": "הדגשת קו ריסים עליון",                  "class_name": "איפור קבוע ועיצוב גבות", "category": "תיחום עיניים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_6",      "name": "אייליינר עליון",                        "class_name": "איפור קבוע ועיצוב גבות", "category": "תיחום עיניים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_7",      "name": "תיחום שפתיים בקו טבעי",                 "class_name": "איפור קבוע ועיצוב גבות", "category": "שפתיים",      "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_8",      "name": "מילוי שפתיים + תיחום",                  "class_name": "איפור קבוע ועיצוב גבות", "category": "שפתיים",      "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_9",      "name": "מילוי קרקפת אישה",                      "class_name": "איפור קבוע ועיצוב גבות", "category": "ראש",         "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_10",     "name": "מילוי קרקפת גבר",                       "class_name": "איפור קבוע ועיצוב גבות", "category": "ראש",         "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_11",     "name": "נקודת חן",                              "class_name": "איפור קבוע ועיצוב גבות", "category": "ראש",         "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "styling_1",  "name": "מפגש תדמית 2.5 שעות",                  "class_name": "סטיילינג אישי",  "category": "",            "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "styling_2",  "name": "מפגש תדמית 4 שעות",                    "class_name": "סטיילינג אישי",  "category": "",            "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
 ]
 
 # Only add if not already present (safe to restart server repeatedly)
@@ -237,6 +299,8 @@ def init_db():
             client_phone TEXT,
             treatment_id TEXT NOT NULL,
             treatment_name TEXT NOT NULL,
+            treatment_category TEXT,
+            treatment_subcategory TEXT,
             date TEXT NOT NULL,
             time TEXT NOT NULL,
             end_time TEXT,
@@ -247,6 +311,14 @@ def init_db():
     # Add end_time column if it doesn't exist (migration for existing DB)
     try:
         conn.execute("ALTER TABLE appointments ADD COLUMN end_time TEXT")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE appointments ADD COLUMN treatment_category TEXT")
+    except Exception:
+        pass
+    try:
+        conn.execute("ALTER TABLE appointments ADD COLUMN treatment_subcategory TEXT")
     except Exception:
         pass
     conn.commit()
@@ -261,6 +333,8 @@ class AppointmentCreate(BaseModel):
     client_phone: Optional[str] = None
     treatment_id: str
     treatment_name: str
+    treatment_category: Optional[str] = None
+    treatment_subcategory: Optional[str] = None
     date: str
     time: str
     end_time: Optional[str] = None
@@ -279,13 +353,14 @@ def list_appointments():
 
 @app.post("/appointments")
 def create_appointment(appt: AppointmentCreate):
+    validate_appointment_slot(appt.date, appt.time, appt.end_time)
     conn = get_db()
     cursor = conn.execute(
         """INSERT INTO appointments
-           (client_name, client_phone, treatment_id, treatment_name, date, time, end_time, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+           (client_name, client_phone, treatment_id, treatment_name, treatment_category, treatment_subcategory, date, time, end_time, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (appt.client_name, appt.client_phone, appt.treatment_id,
-         appt.treatment_name, appt.date, appt.time, appt.end_time, appt.notes),
+         appt.treatment_name, appt.treatment_category, appt.treatment_subcategory, appt.date, appt.time, appt.end_time, appt.notes),
     )
     conn.commit()
     new_id = cursor.lastrowid
@@ -310,6 +385,7 @@ class AppointmentReschedule(BaseModel):
 
 @app.patch("/appointments/{appt_id}")
 def reschedule_appointment(appt_id: int, data: AppointmentReschedule):
+    validate_appointment_slot(data.date, data.time, data.end_time)
     conn = get_db()
     conn.execute(
         "UPDATE appointments SET date = ?, time = ?, end_time = ? WHERE id = ?",

@@ -11,6 +11,132 @@ const MONTH_NAMES_HE = ["ינואר","פברואר","מרץ","אפריל","מא�
 const MINI_DAY_HEADS = ["א׳","ב׳","ג׳","ד׳","ה׳","ו׳","ש׳"]; // Sun→Sat
 const ROW_HEIGHT = 80; // px per hour row
 const FIRST_HOUR = 8;
+const BUSINESS_TIME_ZONE = "Asia/Jerusalem";
+const MAX_ADVANCE_BOOKING_DAYS = 365;
+const SECRETARY_CATEGORY_OPTIONS = [
+  "מניקור ופדיקור",
+  "עיצוב שיער",
+  "טיפולי קוסמטיקה",
+  "טיפולי גוף",
+  "הסרת שיער",
+  "איפור מקצועי",
+  "איפור קבוע ועיצוב גבות",
+  "סטיילינג אישי",
+  "טיפולי אסתטיקה",
+];
+
+const SECRETARY_CATEGORY_PRESETS = {
+  "מניקור ופדיקור": {
+    subcategories: {
+      "מניקור": [
+        "מניקור",
+        "לק ג’ל",
+        "עיצוב ופיסול ציפורן",
+      ],
+      "פדיקור": [
+        "פדיקור אסתטי + מריחת לק",
+        "פדיקור אסתטי + לק ג'ל",
+        "פדיקור טיפולי + לק/לק ג'ל",
+      ],
+    },
+  },
+  "טיפולי קוסמטיקה": {
+    subcategories: {
+      "טיפולי פנים קלאסיים": [
+        "מידיי קלאסי",
+        "מידיי קלאסי לגבר Man T",
+      ],
+      "טיפולי פנים מפנקים": [
+        "מידיי FACE SCULPT עיסוי מעצב",
+        "מידיי PARTY",
+      ],
+      "טיפולי פנים טכנולוגיים מיוחדים": [
+        "מידיי MESO PRO",
+        "מידיי LIFTING PRO",
+        "מידיי COLLAGEN + קולגן פלוס",
+        "אקנה סטופ STOP ACNE",
+        "מידיי CLEAR SKIN + ניקוי העור פלוס",
+        "פילינג סדרתי NEW SKIN",
+        "הצערת העור SKIN BOOSTER",
+      ],
+    },
+  },
+  "טיפולי גוף": {
+    subcategories: {
+      "עיסוי גוף": [
+        "עיסוי שוודי",
+        "עיסוי באבנים חמות",
+        "שיאצו",
+        "עיסוי תאילנדי",
+        "עיסוי רקמות עמוק",
+        "עיסוי קצוות",
+      ],
+      "עיסוי ממוקד": [
+        "עיסוי כתפיים, גב וצוואר",
+        "עיסוי פנים וקרקפת",
+        "עיסוי כפות רגליים",
+      ],
+      "עיסויים מיוחדים": [
+        "עיסוי ספורטאים",
+        "עיסוי לנשים בהריון",
+        "עיסוי משולב",
+        "רפלקסולוגיה",
+      ],
+    },
+  },
+  "איפור קבוע ועיצוב גבות": {
+    subcategories: {
+      "גבות": [
+        "גבות שיטת השערה",
+        "גבות שיטת הפודרה",
+        "גבות שיטה משולבת",
+      ],
+      "תיחום עיניים": [
+        "הדגשת קו ריסים תחתון",
+        "הדגשת קו ריסים עליון",
+        "אייליינר עליון",
+      ],
+      "שפתיים": [
+        "תיחום שפתיים בקו טבעי",
+        "מילוי שפתיים + תיחום",
+      ],
+      "ראש": [
+        "מילוי קרקפת אישה",
+        "מילוי קרקפת גבר",
+        "נקודת חן",
+      ],
+    },
+  },
+};
+
+const SECRETARY_LOCAL_TREATMENTS = [
+  { id: "body_1", name: "עיסוי שוודי", class_name: "טיפולי גוף", category: "עיסוי גוף" },
+  { id: "body_2", name: "עיסוי באבנים חמות", class_name: "טיפולי גוף", category: "עיסוי גוף" },
+  { id: "body_3", name: "שיאצו", class_name: "טיפולי גוף", category: "עיסוי גוף" },
+  { id: "body_4", name: "עיסוי תאילנדי", class_name: "טיפולי גוף", category: "עיסוי גוף" },
+  { id: "body_5", name: "עיסוי רקמות עמוק", class_name: "טיפולי גוף", category: "עיסוי גוף" },
+  { id: "body_6", name: "עיסוי קצוות", class_name: "טיפולי גוף", category: "עיסוי גוף" },
+  { id: "body_7", name: "עיסוי כתפיים, גב וצוואר", class_name: "טיפולי גוף", category: "עיסוי ממוקד" },
+  { id: "body_8", name: "עיסוי פנים וקרקפת", class_name: "טיפולי גוף", category: "עיסוי ממוקד" },
+  { id: "body_9", name: "עיסוי כפות רגליים", class_name: "טיפולי גוף", category: "עיסוי ממוקד" },
+  { id: "body_10", name: "עיסוי ספורטאים", class_name: "טיפולי גוף", category: "עיסויים מיוחדים" },
+  { id: "body_11", name: "עיסוי לנשים בהריון", class_name: "טיפולי גוף", category: "עיסויים מיוחדים" },
+  { id: "body_12", name: "עיסוי משולב", class_name: "טיפולי גוף", category: "עיסויים מיוחדים" },
+  { id: "body_13", name: "רפלקסולוגיה", class_name: "טיפולי גוף", category: "עיסויים מיוחדים" },
+  { id: "pmu_1", name: "גבות שיטת השערה", class_name: "איפור קבוע ועיצוב גבות", category: "גבות" },
+  { id: "pmu_2", name: "גבות שיטת הפודרה", class_name: "איפור קבוע ועיצוב גבות", category: "גבות" },
+  { id: "pmu_3", name: "גבות שיטה משולבת", class_name: "איפור קבוע ועיצוב גבות", category: "גבות" },
+  { id: "pmu_4", name: "הדגשת קו ריסים תחתון", class_name: "איפור קבוע ועיצוב גבות", category: "תיחום עיניים" },
+  { id: "pmu_5", name: "הדגשת קו ריסים עליון", class_name: "איפור קבוע ועיצוב גבות", category: "תיחום עיניים" },
+  { id: "pmu_6", name: "אייליינר עליון", class_name: "איפור קבוע ועיצוב גבות", category: "תיחום עיניים" },
+  { id: "pmu_7", name: "תיחום שפתיים בקו טבעי", class_name: "איפור קבוע ועיצוב גבות", category: "שפתיים" },
+  { id: "pmu_8", name: "מילוי שפתיים + תיחום", class_name: "איפור קבוע ועיצוב גבות", category: "שפתיים" },
+  { id: "pmu_9", name: "מילוי קרקפת אישה", class_name: "איפור קבוע ועיצוב גבות", category: "ראש" },
+  { id: "pmu_10", name: "מילוי קרקפת גבר", class_name: "איפור קבוע ועיצוב גבות", category: "ראש" },
+  { id: "pmu_11", name: "נקודת חן", class_name: "איפור קבוע ועיצוב גבות", category: "ראש" },
+  { id: "styling_1", name: "מפגש תדמית 2.5 שעות", class_name: "סטיילינג אישי", category: "" },
+  { id: "styling_2", name: "מפגש תדמית 4 שעות", class_name: "סטיילינג אישי", category: "" },
+];
 
 function getWeekStart(date) {
   const d = new Date(date);
@@ -39,6 +165,160 @@ function displayDate(date) {
 function timeToMinutes(time) {
   const [h, m] = (time || "00:00").split(":").map(Number);
   return h * 60 + m;
+}
+
+function getBusinessNowParts() {
+  const formatter = new Intl.DateTimeFormat("en-GB", {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  const parts = Object.fromEntries(
+    formatter
+      .formatToParts(new Date())
+      .filter((part) => part.type !== "literal")
+      .map((part) => [part.type, part.value])
+  );
+
+  return {
+    date: `${parts.year}-${parts.month}-${parts.day}`,
+    time: `${parts.hour}:${parts.minute}`,
+  };
+}
+
+function getPastSelectionError(date, time) {
+  if (!date || !time) return null;
+  const now = getBusinessNowParts();
+  if (date < now.date) return "past_date";
+  if (date === now.date && time <= now.time) return "past_time";
+  return null;
+}
+
+function hasFourDigitYear(dateValue = "") {
+  if (!dateValue) return false;
+  const [year = ""] = dateValue.split("-");
+  return /^\d{4}$/.test(year);
+}
+
+function normalizeDateInput(value = "") {
+  if (!value) return "";
+  const [year = "", month = "", day = ""] = value.split("-");
+  if (!year) return value;
+  const normalizedYear = year.slice(0, 4);
+  if (!month || !day) return value;
+  return `${normalizedYear}-${month}-${day}`;
+}
+
+function addDaysToISO(isoDate, days) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  const nextYear = date.getUTCFullYear();
+  const nextMonth = String(date.getUTCMonth() + 1).padStart(2, "0");
+  const nextDay = String(date.getUTCDate()).padStart(2, "0");
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+function hasLogicalBookingYear(dateValue, minDate, maxDate) {
+  if (!dateValue || !hasFourDigitYear(dateValue)) return false;
+  return dateValue >= minDate && dateValue <= maxDate;
+}
+
+function normalizeTreatmentLabel(value = "") {
+  return value
+    .trim()
+    .replace(/[׳’‘`´]/g, "'")
+    .replace(/\s*\+\s*/g, " + ")
+    .replace(/\s*\/\s*/g, "/")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+function getTreatmentByName(treatments, treatmentName) {
+  const treatmentKey = normalizeTreatmentLabel(treatmentName);
+  return treatments.find((t) => normalizeTreatmentLabel(t.name) === treatmentKey) || null;
+}
+
+function createImplicitTreatmentId(categoryName, subcategoryName = "") {
+  const categoryPart = encodeURIComponent(categoryName || "");
+  const subcategoryPart = encodeURIComponent(subcategoryName || "");
+  return subcategoryPart
+    ? `secretary::${categoryPart}::${subcategoryPart}`
+    : `secretary::${categoryPart}`;
+}
+
+function parseImplicitTreatmentId(treatmentId) {
+  if (!treatmentId || !treatmentId.startsWith("secretary::")) return null;
+  const [, rawCategory = "", rawSubcategory = ""] = treatmentId.split("::");
+  try {
+    return {
+      category: decodeURIComponent(rawCategory),
+      subcategory: rawSubcategory ? decodeURIComponent(rawSubcategory) : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function getAppointmentCategory(appt, treatments) {
+  if (appt.treatment_category) return appt.treatment_category;
+  const treatment = treatments.find((item) => item.id === appt.treatment_id);
+  if (treatment?.class_name) return treatment.class_name;
+  return parseImplicitTreatmentId(appt.treatment_id)?.category || "";
+}
+
+function getCategoryStructure(treatments, className) {
+  if (!className) {
+    return { subcategories: [], treatments: [] };
+  }
+
+  const preset = SECRETARY_CATEGORY_PRESETS[className];
+  if (preset) {
+    return {
+      subcategories: Object.entries(preset.subcategories).map(([name, treatmentNames]) => ({
+        name,
+        treatments: treatmentNames
+          .map((treatmentName) => getTreatmentByName(treatments, treatmentName))
+          .filter(Boolean),
+      })),
+      treatments: [],
+    };
+  }
+
+  const categoryMap = new Map();
+  const directTreatments = [];
+
+  treatments
+    .filter((t) => t.class_name === className)
+    .forEach((treatment) => {
+      const subcategory = (treatment.category || "").trim();
+      if (!subcategory) {
+        directTreatments.push(treatment);
+        return;
+      }
+      if (!categoryMap.has(subcategory)) categoryMap.set(subcategory, []);
+      categoryMap.get(subcategory).push(treatment);
+    });
+
+  return {
+    subcategories: Array.from(categoryMap, ([name, items]) => ({ name, treatments: items })),
+    treatments: directTreatments,
+  };
+}
+
+function mergeSecretaryTreatments(apiTreatments) {
+  const byId = new Map((apiTreatments || []).map((treatment) => [treatment.id, treatment]));
+  SECRETARY_LOCAL_TREATMENTS.forEach((treatment) => {
+    if (!byId.has(treatment.id)) {
+      byId.set(treatment.id, treatment);
+    }
+  });
+  return Array.from(byId.values());
 }
 
 // Returns layout info for each appt: { top, height, left, width }
@@ -205,7 +485,7 @@ export default function SecretaryPage() {
   }
 
   // Field order determines which is "first" when scrolling to errors
-  const FIELD_ORDER = ["client_name", "client_phone", "treatment_id", "date", "time", "end_time"];
+  const FIELD_ORDER = ["client_name", "client_phone", "treatment_category", "treatment_subcategory", "treatment_id", "date", "time", "end_time"];
 
   function scrollToFirstError(invalidFields) {
     const first = FIELD_ORDER.find((f) => invalidFields.includes(f));
@@ -217,6 +497,23 @@ export default function SecretaryPage() {
   function clearFieldError(field) {
     setFieldErrors((prev) => ({ ...prev, [field]: false }));
     setFieldFlash((prev) => ({ ...prev, [field]: false }));
+  }
+
+  function clearPastTimingErrors() {
+    setFieldErrors((prev) => ({ ...prev, past_date: false, past_time: false }));
+  }
+
+  function showPastSelectionFeedback(date, hour) {
+    const errorKey = date < today || (typeof hour === "number" && !isFutureSlot(date, hour))
+      ? (date < today ? "past_date" : "past_time")
+      : null;
+
+    if (!errorKey) return;
+
+    setFormOpen(true);
+    setFieldErrors((prev) => ({ ...prev, [errorKey]: true }));
+    triggerFlash(["date", "time"]);
+    setTimeout(() => scrollToFirstError(["date", "time"]), 120);
   }
 
   function handlePhoneChange(e) {
@@ -251,9 +548,13 @@ export default function SecretaryPage() {
     treatment_id: "", treatment_name: "",
     date: "", time: "", end_time: "", notes: "",
   });
+  const [selectedTreatmentCategory, setSelectedTreatmentCategory] = useState("");
+  const [selectedTreatmentSubcategory, setSelectedTreatmentSubcategory] = useState("");
 
   useEffect(() => {
-    fetchTreatments().then(setTreatments).catch(console.error);
+    fetchTreatments()
+      .then((data) => setTreatments(mergeSecretaryTreatments(data)))
+      .catch(console.error);
     load();
   }, []);
 
@@ -270,16 +571,69 @@ export default function SecretaryPage() {
     fetchAppointments().then(setAppointments).catch(console.error);
   }
 
-  const grouped = treatments.reduce((acc, t) => {
-    const cat = t.class_name || "כללי";
-    if (!acc[cat]) acc[cat] = [];
-    acc[cat].push(t);
-    return acc;
-  }, {});
+  const selectedCategoryStructure = getCategoryStructure(treatments, selectedTreatmentCategory);
+  const selectedSubcategoryGroup = selectedCategoryStructure.subcategories.find(
+    (group) => group.name === selectedTreatmentSubcategory
+  ) || null;
+  const showTreatmentSubcategory = !!selectedTreatmentCategory && selectedCategoryStructure.subcategories.length > 0;
+  const treatmentOptions = selectedSubcategoryGroup
+    ? selectedSubcategoryGroup.treatments
+    : showTreatmentSubcategory
+    ? []
+    : selectedCategoryStructure.treatments;
+  const requiresSubcategory = showTreatmentSubcategory;
+  const requiresTreatment = !!selectedTreatmentCategory && (!requiresSubcategory || !!selectedTreatmentSubcategory) && treatmentOptions.length > 0;
+  const showTreatmentSelect = requiresTreatment;
 
   function handleTreatmentChange(e) {
     const t = treatments.find((x) => x.id === e.target.value);
     setForm((f) => ({ ...f, treatment_id: t?.id || "", treatment_name: t?.name || "" }));
+  }
+
+  function resetSelectedTreatment() {
+    setForm((f) => ({ ...f, treatment_id: "", treatment_name: "" }));
+  }
+
+  function handleTreatmentCategoryChange(e) {
+    setSelectedTreatmentCategory(e.target.value);
+    setSelectedTreatmentSubcategory("");
+    resetSelectedTreatment();
+    clearFieldError("treatment_category");
+    clearFieldError("treatment_subcategory");
+    clearFieldError("treatment_id");
+  }
+
+  function handleTreatmentSubcategoryChange(e) {
+    setSelectedTreatmentSubcategory(e.target.value);
+    resetSelectedTreatment();
+    clearFieldError("treatment_subcategory");
+    clearFieldError("treatment_id");
+  }
+
+  function buildAppointmentTreatmentPayload() {
+    const categoryName = selectedTreatmentCategory.trim();
+    const subcategoryName = selectedTreatmentSubcategory.trim();
+    const selectedTreatment = treatments.find((x) => x.id === form.treatment_id);
+
+    if (selectedTreatment) {
+      return {
+        treatment_id: selectedTreatment.id,
+        treatment_name: selectedTreatment.name,
+        treatment_category: categoryName,
+        treatment_subcategory: subcategoryName || null,
+      };
+    }
+
+    const implicitName = subcategoryName
+      ? `${categoryName} - ${subcategoryName}`
+      : categoryName;
+
+    return {
+      treatment_id: createImplicitTreatmentId(categoryName, subcategoryName),
+      treatment_name: implicitName,
+      treatment_category: categoryName,
+      treatment_subcategory: subcategoryName || null,
+    };
   }
 
   async function handleSubmit(e) {
@@ -287,7 +641,9 @@ export default function SecretaryPage() {
     const required = {
       client_name: !!form.client_name.trim(),
       client_phone: !!form.client_phone.trim() && isValidPhone(form.client_phone),
-      treatment_id: !!form.treatment_id,
+      treatment_category: !!selectedTreatmentCategory.trim(),
+      treatment_subcategory: !requiresSubcategory || !!selectedTreatmentSubcategory.trim(),
+      treatment_id: !requiresTreatment || !!form.treatment_id,
       date: !!form.date,
       time: !!form.time,
       end_time: !!form.end_time,
@@ -301,25 +657,45 @@ export default function SecretaryPage() {
       scrollToFirstError(invalid);
       return;
     }
+    if (!hasLogicalBookingYear(form.date, today, maxBookableDate)) {
+      setFieldErrors((prev) => ({ ...prev, date_year: true }));
+      triggerFlash(["date"]);
+      scrollToFirstError(["date"]);
+      return;
+    }
     if (form.end_time <= form.time) {
       setFieldErrors((prev) => ({ ...prev, time_order: true }));
       triggerFlash(["time", "end_time"]);
       scrollToFirstError(["time"]);
       return;
     }
+    const pastSelectionError = getPastSelectionError(form.date, form.time);
+    if (pastSelectionError) {
+      setFieldErrors((prev) => ({ ...prev, [pastSelectionError]: true }));
+      triggerFlash(["date", "time"]);
+      scrollToFirstError(["date", "time"]);
+      return;
+    }
     setSaving(true);
     try {
-      const result = await createAppointment(form);
+      const appointmentTreatment = buildAppointmentTreatmentPayload();
+      const payload = {
+        ...form,
+        ...appointmentTreatment,
+      };
+      const result = await createAppointment(payload);
       const bookedDate = form.date;
       const bookedTime = form.time;
-      const bookedTreatmentId = form.treatment_id;
+      const bookedTreatmentId = payload.treatment_id;
       setForm({ client_name: "", client_phone: "", treatment_id: "", treatment_name: "", date: "", time: "", end_time: "", notes: "" });
+      setSelectedTreatmentCategory("");
+      setSelectedTreatmentSubcategory("");
       setFieldErrors({});
       setFieldFlash({});
       setSuccess(true);
       setTimeout(() => setSuccess(false), 3000);
       // Switch filter to the booked treatment's category (uses existing fade transition)
-      const bookedCat = treatments.find((t) => t.id === bookedTreatmentId)?.class_name || null;
+      const bookedCat = appointmentTreatment.treatment_category || treatments.find((t) => t.id === bookedTreatmentId)?.class_name || null;
       switchCategory(bookedCat);
       // Navigate to the booked week
       setWeekStart(getWeekStart(new Date(bookedDate)));
@@ -349,9 +725,11 @@ export default function SecretaryPage() {
 
   // ── Reschedule helpers ────────────────────────────────────
   function isFutureSlot(date, hour) {
-    const now = new Date();
-    const slot = new Date(`${date}T${String(hour).padStart(2, "0")}:00`);
-    return slot > now;
+    const now = getBusinessNowParts();
+    const slotTime = `${String(hour).padStart(2, "0")}:00`;
+    if (date > now.date) return true;
+    if (date < now.date) return false;
+    return slotTime > now.time;
   }
 
   function handleRescheduleStart(appt, e) {
@@ -424,20 +802,29 @@ export default function SecretaryPage() {
   function handleCellClick(date, hour) {
     if (isDragging) return;
     if (rescheduleRef.current) return;
-    if (date < today) return;
+    if (!isFutureSlot(date, hour)) {
+      showPastSelectionFeedback(date, hour);
+      return;
+    }
     const h = String(hour).padStart(2, "0");
     const endH = String(hour + 1).padStart(2, "0");
     setForm((f) => ({ ...f, date, time: `${h}:00`, end_time: `${endH}:00` }));
+    clearFieldError("date_year");
+    clearPastTimingErrors();
   }
 
   function handleDragStart(date, hour) {
     if (rescheduleRef.current) return;
-    if (date < today) return;
+    if (!isFutureSlot(date, hour)) {
+      showPastSelectionFeedback(date, hour);
+      return;
+    }
     setDrag({ date, startHour: hour, endHour: hour });
   }
 
   function handleDragEnter(date, hour) {
     if (!drag || drag.date !== date) return;
+    if (!isFutureSlot(date, hour)) return;
     setDrag((d) => ({ ...d, endHour: hour }));
   }
 
@@ -448,6 +835,7 @@ export default function SecretaryPage() {
     const h = String(start).padStart(2, "0");
     const endH = String(end).padStart(2, "0");
     setForm((f) => ({ ...f, date: drag.date, time: `${h}:00`, end_time: `${endH}:00` }));
+    clearFieldError("date_year");
     setFormOpen(true);
     setDrag(null);
     setFlashFields(true);
@@ -475,17 +863,15 @@ export default function SecretaryPage() {
     }, 220);
   }
 
-  const today = toISO(new Date());
+  const today = getBusinessNowParts().date;
+  const maxBookableDate = addDaysToISO(today, MAX_ADVANCE_BOOKING_DAYS);
   const weekDays = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i));
   const weekEnd = addDays(weekStart, 6);
   const weekLabel = `${weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${weekEnd.getFullYear()}`;
   const weekDayStrings = weekDays.map(toISO);
   const allWeekAppts = appointments.filter((a) => weekDayStrings.includes(a.date));
   const weekAppts = activeCategory
-    ? allWeekAppts.filter((a) => {
-        const t = treatments.find((x) => x.id === a.treatment_id);
-        return t?.class_name === activeCategory;
-      })
+    ? allWeekAppts.filter((a) => getAppointmentCategory(a, treatments) === activeCategory)
     : allWeekAppts;
   const isPastWeek = toISO(addDays(weekStart, 6)) < today;
   const isCurrentWeek = toISO(weekStart) === toISO(getWeekStart(new Date()));
@@ -526,33 +912,42 @@ export default function SecretaryPage() {
       setWeekStart(currentWeekStart);
       setAnimating(false);
       setFlipDir(null);
-      // Scroll to current hour after animation
+      // Return to the top of the current week view.
       setTimeout(() => {
         if (calendarScrollRef.current) {
-          const nowHour = Math.min(Math.max(new Date().getHours(), FIRST_HOUR), 22);
-          calendarScrollRef.current.scrollTo({ top: Math.max(0, (nowHour - FIRST_HOUR) * ROW_HEIGHT - 60), behavior: "smooth" });
+          calendarScrollRef.current.scrollTo({ top: 0, behavior: "smooth" });
         }
       }, 60);
     }, 350);
   }
 
   // Derive ordered category list from loaded treatments
-  const categories = Array.from(new Set(treatments.map((t) => t.class_name).filter(Boolean)));
+  const loadedCategories = Array.from(new Set(treatments.map((t) => t.class_name).filter(Boolean)));
+  const categories = [
+    ...SECRETARY_CATEGORY_OPTIONS,
+    ...loadedCategories.filter((cat) => !SECRETARY_CATEGORY_OPTIONS.includes(cat)),
+  ];
 
   function inputCls(field) {
-    const base = "w-full pr-8 pl-2 py-2.5 bg-white rounded-xl text-sm focus:outline-none focus:ring-2 transition-all placeholder-gray-300 shadow-sm border text-[#2C2C2C]";
+    const base = "w-full pr-8 pl-2 py-2.5 bg-white rounded-xl text-sm font-medium focus:outline-none focus:ring-2 transition-all placeholder-[#7C6A57] shadow-[0_8px_20px_rgba(73,47,27,0.08)] border text-[#111111]";
+    const hasTimingError = field === "date"
+      ? fieldErrors.past_date || fieldErrors.past_time || fieldErrors.date_year
+      : field === "time"
+      ? fieldErrors.past_date || fieldErrors.past_time
+      : false;
     if (fieldFlash[field]) return base + " border-red-400 focus:ring-red-200 focus:border-red-400";
-    if (fieldErrors[field]) return base + " border-red-300 focus:ring-red-200 focus:border-red-300";
-    return base + " border-[#EADFD5] focus:ring-[#C9A27E]/40 focus:border-[#C9A27E]";
+    if (fieldErrors[field] || hasTimingError) return base + " border-red-300 focus:ring-red-200 focus:border-red-300";
+    return base + " border-[#D6B99A] focus:ring-[#C9A27E]/45 focus:border-[#B88656]";
   }
   function selectCls(field) {
-    const base = "w-full px-3 py-2.5 bg-white rounded-xl text-sm focus:outline-none focus:ring-2 transition-all shadow-sm text-[#2C2C2C] border";
+    const base = "w-full px-3 py-2.5 bg-white rounded-xl text-sm font-medium focus:outline-none focus:ring-2 transition-all shadow-[0_8px_20px_rgba(73,47,27,0.08)] text-[#111111] border";
     if (fieldFlash[field]) return base + " border-red-400 focus:ring-red-200 focus:border-red-400";
     if (fieldErrors[field]) return base + " border-red-300 focus:ring-red-200 focus:border-red-300";
-    return base + " border-[#EADFD5] focus:ring-[#C9A27E]/40 focus:border-[#C9A27E]";
+    return base + " border-[#D6B99A] focus:ring-[#C9A27E]/45 focus:border-[#B88656]";
   }
-  const labelCls = "block text-[11px] font-semibold uppercase tracking-widest mb-1.5 text-[#7A7A7A]";
-  const Star = () => <span className="text-red-300 font-normal normal-case tracking-normal ml-0.5">*</span>;
+  const labelCls = "block text-[12px] font-bold uppercase tracking-widest mb-1.5 text-[#1B130C]";
+  const fieldIconCls = "absolute right-3 top-1/2 -translate-y-1/2 text-[#6A4B2D]";
+  const Star = () => <span className="text-[#C63B3B] font-black text-[15px] leading-none normal-case tracking-normal ml-1 inline-block align-middle">*</span>;
   const FieldError = ({ show, message = "שדה חובה." }) => (
     <div className="flex items-center gap-1 mt-1 overflow-hidden"
       style={{ maxHeight: show ? "24px" : "0px", opacity: show ? 1 : 0, transition: "max-height 0.3s ease, opacity 0.3s ease" }}>
@@ -692,7 +1087,7 @@ export default function SecretaryPage() {
             <div>
               <label className={labelCls}>שם הלקוחה <Star /></label>
               <div className="relative">
-                <User size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300" />
+                <User size={13} className={fieldIconCls} />
                 <input type="text" value={form.client_name}
                   ref={(el) => { fieldRefs.current.client_name = el; }}
                   onChange={(e) => {
@@ -708,7 +1103,7 @@ export default function SecretaryPage() {
             <div>
               <label className={labelCls}>טלפון <Star /></label>
               <div className="relative">
-                <Phone size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300" />
+                <Phone size={13} className={fieldIconCls} />
                 <input type="tel" value={form.client_phone}
                   ref={(el) => { fieldRefs.current.client_phone = el; }}
                   onChange={handlePhoneChange}
@@ -721,25 +1116,65 @@ export default function SecretaryPage() {
             <div className="h-px bg-gray-100" />
 
             {/* טיפול */}
-            <div>
-              <label className={labelCls}>טיפול <Star /></label>
-              <select value={form.treatment_id}
-                ref={(el) => { fieldRefs.current.treatment_id = el; }}
-                onChange={(e) => {
-                  handleTreatmentChange(e);
-                  if (e.target.value) clearFieldError("treatment_id");
-                }}
-                className={selectCls("treatment_id")}>
-                <option value="">בחרי טיפול...</option>
-                {Object.entries(grouped).map(([cat, items]) => (
-                  <optgroup key={cat} label={cat}>
-                    {items.map((t) => (
-                      <option key={t.id} value={t.id}>{t.name}</option>
+            <div
+              ref={(el) => { fieldRefs.current.treatment_id = el; }}
+              className="space-y-3"
+            >
+              <div>
+                <label className={labelCls}>סוגי טיפולים <Star /></label>
+                <select
+                  ref={(el) => { fieldRefs.current.treatment_category = el; }}
+                  value={selectedTreatmentCategory}
+                  onChange={handleTreatmentCategoryChange}
+                  className={selectCls("treatment_category")}
+                >
+                  <option value="">בחרי סוג טיפול...</option>
+                  {SECRETARY_CATEGORY_OPTIONS.map((categoryName) => (
+                    <option key={categoryName} value={categoryName}>{categoryName}</option>
+                  ))}
+                </select>
+                <FieldError show={fieldErrors.treatment_category} />
+              </div>
+
+              {showTreatmentSubcategory && (
+                <div>
+                  <label className={labelCls}>תת קטגוריה <Star /></label>
+                  <select
+                    ref={(el) => { fieldRefs.current.treatment_subcategory = el; }}
+                    value={selectedTreatmentSubcategory}
+                    onChange={handleTreatmentSubcategoryChange}
+                    className={selectCls("treatment_subcategory")}
+                  >
+                    <option value="">בחרי תת קטגוריה...</option>
+                    {selectedCategoryStructure.subcategories.map((group) => (
+                      <option key={group.name} value={group.name}>{group.name}</option>
                     ))}
-                  </optgroup>
-                ))}
-              </select>
-              <FieldError show={fieldErrors.treatment_id} />
+                  </select>
+                  <FieldError show={fieldErrors.treatment_subcategory} />
+                </div>
+              )}
+
+              {showTreatmentSelect && (
+                <div>
+                  <label className={labelCls}>טיפול <Star /></label>
+                  <select
+                    ref={(el) => { fieldRefs.current.treatment_id = el; }}
+                    value={form.treatment_id}
+                    onChange={(e) => {
+                      handleTreatmentChange(e);
+                      if (e.target.value) clearFieldError("treatment_id");
+                    }}
+                    className={selectCls("treatment_id")}
+                  >
+                    <option value="">בחרי טיפול...</option>
+                    {treatmentOptions.map((treatment) => (
+                      <option key={treatment.id} value={treatment.id}>{treatment.name}</option>
+                    ))}
+                  </select>
+                  <FieldError show={fieldErrors.treatment_id} />
+                </div>
+              )}
+
             </div>
 
             {/* תאריך */}
@@ -749,16 +1184,25 @@ export default function SecretaryPage() {
             >
               <label className={labelCls}>תאריך <Star /></label>
               <div className="relative">
-                <CalendarDays size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300" />
-                <input type="date" min={today} value={form.date}
+                <CalendarDays size={13} className={fieldIconCls} />
+                <input
+                  type="date"
+                  min={today}
+                  max={maxBookableDate}
+                  value={form.date}
                   ref={(el) => { fieldRefs.current.date = el; }}
                   onChange={(e) => {
-                    setForm((f) => ({ ...f, date: e.target.value }));
-                    if (e.target.value) clearFieldError("date");
+                    const nextValue = normalizeDateInput(e.target.value);
+                    setForm((f) => ({ ...f, date: nextValue }));
+                    if (nextValue) clearFieldError("date");
+                    clearFieldError("date_year");
+                    clearPastTimingErrors();
                   }}
-                  className={inputCls("date")} />
+                  className={inputCls("date")}
+                />
               </div>
               <FieldError show={fieldErrors.date} />
+              <FieldError show={fieldErrors.date_year} message="השנה הזו אינה תקינה" />
             </div>
 
             {/* שעות */}
@@ -769,40 +1213,50 @@ export default function SecretaryPage() {
               <label className={labelCls}>שעות <Star /></label>
               <div className="grid grid-cols-2 gap-2">
                 <div className="relative">
-                  <Clock size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300" />
-                  <input type="time" value={form.time}
+                  <Clock size={13} className={fieldIconCls} />
+                  <input
+                    type="time"
+                    value={form.time}
                     ref={(el) => { fieldRefs.current.time = el; }}
                     onChange={(e) => {
                       const val = e.target.value;
                       setForm((f) => {
                         if (val) clearFieldError("time");
                         if (val && f.end_time && val < f.end_time) clearFieldError("time_order");
+                        clearPastTimingErrors();
                         return { ...f, time: val };
                       });
                     }}
-                    className={inputCls("time")} />
+                    className={inputCls("time")}
+                  />
                 </div>
                 <div className="relative">
-                  <Clock size={13} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-300" />
-                  <input type="time" value={form.end_time}
+                  <Clock size={13} className={fieldIconCls} />
+                  <input
+                    type="time"
+                    value={form.end_time}
                     ref={(el) => { fieldRefs.current.end_time = el; }}
                     onChange={(e) => {
                       const val = e.target.value;
                       setForm((f) => {
                         if (val) clearFieldError("end_time");
                         if (val && f.time && f.time < val) clearFieldError("time_order");
+                        clearPastTimingErrors();
                         return { ...f, end_time: val };
                       });
                     }}
-                    className={inputCls("end_time")} />
+                    className={inputCls("end_time")}
+                  />
                 </div>
               </div>
-              <div className="flex justify-between text-[10px] text-gray-300 mt-1 px-1">
+              <div className="flex justify-between text-[10px] text-[#111111] font-semibold mt-1 px-1">
                 <span>התחלה</span>
                 <span>סיום</span>
               </div>
               <FieldError show={fieldErrors.time || fieldErrors.end_time} />
               <FieldError show={fieldErrors.time_order} message="שעת ההתחלה חייבת להיות מוקדמת משעת הסיום" />
+              <FieldError show={fieldErrors.past_date} message="לא ניתן לקבוע תור לתאריך שכבר עבר" />
+              <FieldError show={fieldErrors.past_time} message="לא ניתן לקבוע תור לשעה שכבר עברה" />
             </div>
 
             {/* הערות */}
@@ -811,7 +1265,7 @@ export default function SecretaryPage() {
               <textarea rows={2} value={form.notes}
                 onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
                 placeholder="הערות נוספות..."
-                className="w-full px-3 py-2.5 bg-white rounded-xl text-sm focus:outline-none focus:ring-2 transition-all resize-none shadow-sm text-[#2C2C2C] border border-[#EADFD5] focus:ring-[#C9A27E]/40 focus:border-[#C9A27E] placeholder-[#B5B5B5]" />
+                className="w-full px-3 py-2.5 bg-white rounded-xl text-sm font-medium focus:outline-none focus:ring-2 transition-all resize-none shadow-[0_8px_20px_rgba(73,47,27,0.08)] text-[#111111] border border-[#D6B99A] focus:ring-[#C9A27E]/45 focus:border-[#B88656] placeholder-[#7C6A57]" />
             </div>
 
             <button type="submit" disabled={saving}
@@ -1045,7 +1499,7 @@ export default function SecretaryPage() {
                     </button>
                   </div>
 
-                  {/* 4 × 3 month grid — LTR so Jan is top-left */}
+                  {/* 4 × 3 month grid — keep months LTR, but each month calendar is RTL */}
                   <div className="grid grid-cols-4 gap-3 px-4 pb-4" dir="ltr">
                     {Array.from({ length: 12 }, (_, monthIdx) => {
                       const cells = buildMonthGrid(yearViewYear, monthIdx);
@@ -1058,13 +1512,13 @@ export default function SecretaryPage() {
                             </span>
                           </div>
                           {/* Day-of-week headers */}
-                          <div className="grid grid-cols-7 px-1 pt-1.5">
+                          <div className="grid grid-cols-7 px-1 pt-1.5" dir="rtl">
                             {MINI_DAY_HEADS.map((h, i) => (
                               <div key={i} className="text-center text-[8px] font-semibold pb-1" style={{ color: i >= 5 ? "#C9A27E" : "#b09070" }}>{h}</div>
                             ))}
                           </div>
                           {/* Day cells */}
-                          <div className="grid grid-cols-7 px-1 pb-2">
+                          <div className="grid grid-cols-7 px-1 pb-2" dir="rtl">
                             {cells.map((day, ci) => {
                               if (!day) return <div key={ci} />;
                               const colIdx = ci % 7;
@@ -1182,6 +1636,7 @@ export default function SecretaryPage() {
                             const dragMax = drag ? Math.max(drag.startHour, drag.endHour) : null;
                             const isDragCell = drag && drag.date === iso && hour >= dragMin && hour <= dragMax;
                             const isRescheduleTarget = reschedule && reschedule.targetDate === iso && reschedule.targetHour === hour;
+                            const isPastSlot = !isFutureSlot(iso, hour);
                             return (
                               <div key={hour}
                                 onClick={() => handleCellClick(iso, hour)}
@@ -1189,10 +1644,10 @@ export default function SecretaryPage() {
                                 onMouseEnter={() => { handleDragEnter(iso, hour); handleRescheduleEnter(iso, hour); }}
                                 onMouseUp={handleDragEnd}
                                 className={`absolute w-full select-none transition-colors
-                                  ${isPastDay && !isCurrentWeek ? "blur-[1.5px] cursor-not-allowed" : isPastDay ? "cursor-not-allowed" : "cursor-pointer"}
-                                  ${!isPastDay && isDragCell ? "bg-yellow-50" : ""}
-                                  ${!isPastDay && isRescheduleTarget ? "bg-[#F4EFEA]" : ""}
-                                  ${!isPastDay && !isDragCell && !isRescheduleTarget ? "hover:bg-yellow-50/70" : ""}`}
+                                  ${isPastSlot ? (isPastDay && !isCurrentWeek ? "blur-[1.5px] cursor-not-allowed" : "cursor-not-allowed") : "cursor-pointer"}
+                                  ${!isPastSlot && isDragCell ? "bg-yellow-50" : ""}
+                                  ${!isPastSlot && isRescheduleTarget ? "bg-[#F4EFEA]" : ""}
+                                  ${!isPastSlot && !isDragCell && !isRescheduleTarget ? "hover:bg-yellow-50/70" : ""}`}
                                 style={{
                                   top: `${(hour - FIRST_HOUR) * ROW_HEIGHT}px`,
                                   height: `${ROW_HEIGHT}px`,
