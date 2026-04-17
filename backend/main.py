@@ -1,15 +1,17 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import pandas as pd
-from typing import Optional, List, Dict
 from pydantic import BaseModel
+from typing import List, Dict, Optional
 from groq import Groq
+from dotenv import load_dotenv
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 import os
+import pandas as pd
 import sqlite3
 import json
 import re
 from pathlib import Path
-from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -32,13 +34,51 @@ app.add_middleware(
 # ------------------------------------------------------------
 # Groq setup
 # ------------------------------------------------------------
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip()
+groq_client = Groq(api_key=GROQ_API_KEY) if GROQ_API_KEY else None
+
+if not GROQ_API_KEY:
+    print("WARNING: GROQ_API_KEY was not loaded")
+
+# ------------------------------------------------------------
+# Constants
+# ------------------------------------------------------------
+EXCEL_DIR = Path(__file__).parent
+BUSINESS_TZ = ZoneInfo("Asia/Jerusalem")
+MAX_ADVANCE_BOOKING_DAYS = 365
+
+# ------------------------------------------------------------
+# Appointment slot validation (from partner branch)
+# ------------------------------------------------------------
+
+def parse_appointment_datetime(date_str: str, time_str: str) -> datetime:
+    try:
+        parsed = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid appointment date or time") from exc
+    return parsed.replace(tzinfo=BUSINESS_TZ)
+
+
+def validate_appointment_slot(date_str: str, start_time: str, end_time: Optional[str] = None) -> None:
+    start_dt = parse_appointment_datetime(date_str, start_time)
+    now = datetime.now(BUSINESS_TZ).replace(second=0, microsecond=0)
+    max_booking_date = (now + timedelta(days=MAX_ADVANCE_BOOKING_DAYS)).date()
+
+    if start_dt <= now:
+        raise HTTPException(status_code=400, detail="Cannot book a past appointment slot")
+
+    if start_dt.date() > max_booking_date:
+        raise HTTPException(status_code=400, detail="Appointment date is too far in the future")
+
+    if end_time:
+        end_dt = parse_appointment_datetime(date_str, end_time)
+        if end_dt <= start_dt:
+            raise HTTPException(status_code=400, detail="Appointment end time must be after start time")
+
 
 # ------------------------------------------------------------
 # Load Excel data once on startup
 # ------------------------------------------------------------
-EXCEL_DIR = Path(__file__).parent
-
 
 def to_text(x):
     if x is None:
@@ -93,12 +133,44 @@ def load_treatments() -> List[Dict]:
 
 TREATMENTS = load_treatments()
 
+# ── Extra treatments (hardcoded until Excel is complete) ──────
 _EXTRA_TREATMENTS = [
-    {"id": "manicure_1", "name": "מניקור",                               "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_2", "name": "לק גל",                                "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_3", "name": "עיצוב ופיסול ציפורן",                  "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_4", "name": "פדיקור אסתטי+ לק גל",                 "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_5", "name": "פדיקור טיפולי+ לק\\לק גל",            "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    # מניקור ופדיקור
+    {"id": "manicure_1", "name": "מניקור",                               "class_name": "מניקור ופדיקור", "category": "מניקור",           "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_2", "name": "לק ג'ל",                               "class_name": "מניקור ופדיקור", "category": "מניקור",           "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_3", "name": "עיצוב ופיסול ציפורן",                  "class_name": "מניקור ופדיקור", "category": "מניקור",           "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_4", "name": "פדיקור אסתטי + מריחת לק",              "class_name": "מניקור ופדיקור", "category": "פדיקור",           "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_5", "name": "פדיקור אסתטי + לק ג'ל",                "class_name": "מניקור ופדיקור", "category": "פדיקור",           "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "manicure_6", "name": "פדיקור טיפולי + לק/לק ג'ל",            "class_name": "מניקור ופדיקור", "category": "פדיקור",           "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    # טיפולי גוף
+    {"id": "body_1",  "name": "עיסוי שוודי",              "class_name": "טיפולי גוף", "category": "עיסוי גוף",        "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_2",  "name": "עיסוי באבנים חמות",         "class_name": "טיפולי גוף", "category": "עיסוי גוף",        "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_3",  "name": "שיאצו",                    "class_name": "טיפולי גוף", "category": "עיסוי גוף",        "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_4",  "name": "עיסוי תאילנדי",             "class_name": "טיפולי גוף", "category": "עיסוי גוף",        "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_5",  "name": "עיסוי רקמות עמוק",          "class_name": "טיפולי גוף", "category": "עיסוי גוף",        "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_6",  "name": "עיסוי קצוות",               "class_name": "טיפולי גוף", "category": "עיסוי גוף",        "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_7",  "name": "עיסוי כתפיים, גב וצוואר",   "class_name": "טיפולי גוף", "category": "עיסוי ממוקד",      "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_8",  "name": "עיסוי פנים וקרקפת",          "class_name": "טיפולי גוף", "category": "עיסוי ממוקד",      "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_9",  "name": "עיסוי כפות רגליים",          "class_name": "טיפולי גוף", "category": "עיסוי ממוקד",      "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_10", "name": "עיסוי ספורטאים",             "class_name": "טיפולי גוף", "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_11", "name": "עיסוי לנשים בהריון",         "class_name": "טיפולי גוף", "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "מתאים", "medical_limitations": "", "faq": {}},
+    {"id": "body_12", "name": "עיסוי משולב",                "class_name": "טיפולי גוף", "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_13", "name": "רפלקסולוגיה",                "class_name": "טיפולי גוף", "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    # איפור קבוע ועיצוב גבות
+    {"id": "pmu_1",  "name": "גבות שיטת השערה",            "class_name": "איפור קבוע ועיצוב גבות", "category": "גבות",        "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_2",  "name": "גבות שיטת הפודרה",           "class_name": "איפור קבוע ועיצוב גבות", "category": "גבות",        "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_3",  "name": "גבות שיטה משולבת",           "class_name": "איפור קבוע ועיצוב גבות", "category": "גבות",        "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_4",  "name": "הדגשת קו ריסים תחתון",       "class_name": "איפור קבוע ועיצוב גבות", "category": "תיחום עיניים","keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_5",  "name": "הדגשת קו ריסים עליון",       "class_name": "איפור קבוע ועיצוב גבות", "category": "תיחום עיניים","keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_6",  "name": "אייליינר עליון",              "class_name": "איפור קבוע ועיצוב גבות", "category": "תיחום עיניים","keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_7",  "name": "תיחום שפתיים בקו טבעי",      "class_name": "איפור קבוע ועיצוב גבות", "category": "שפתיים",      "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_8",  "name": "מילוי שפתיים + תיחום",       "class_name": "איפור קבוע ועיצוב גבות", "category": "שפתיים",      "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_9",  "name": "מילוי קרקפת אישה",           "class_name": "איפור קבוע ועיצוב גבות", "category": "ראש",         "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_10", "name": "מילוי קרקפת גבר",            "class_name": "איפור קבוע ועיצוב גבות", "category": "ראש",         "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_11", "name": "נקודת חן",                   "class_name": "איפור קבוע ועיצוב גבות", "category": "ראש",         "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    # סטיילינג אישי
+    {"id": "styling_1", "name": "מפגש תדמית 2.5 שעות", "class_name": "סטיילינג אישי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "styling_2", "name": "מפגש תדמית 4 שעות",   "class_name": "סטיילינג אישי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
 ]
 
 _existing_ids = {t["id"] for t in TREATMENTS}
@@ -115,98 +187,41 @@ TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
 # ------------------------------------------------------------
 CATEGORY_FIELDS: Dict[str, List[Dict]] = {
     "טיפולי פנים": [
-        {
-            "field": "goal",
-            "priority": "high",
-            "question": "מה המטרה הראשית שלך?",
-            "options": ["אקנה", "לחות", "זוהר", "אנטי-אייג'ינג", "פיגמנטציה", "ריענון כללי"],
-            "guidance": None,
-        },
-        {
-            "field": "skin_type",
-            "priority": "high",
-            "question": "מה סוג העור שלך?",
-            "options": ["שמן", "יבש", "מעורב", "רגיש", "נורמלי"],
-            "guidance": "שאלי על תחושת העור אחרי שטיפת פנים, האם יש ברק אחרי שעה-שעתיים, ואם יש נטייה לקשקשים או אודם",
-        },
-        {
-            "field": "age_range",
-            "priority": "medium",
-            "question": "מה טווח הגיל שלך?",
-            "options": ["עד 25", "25-40", "40+"],
-            "guidance": None,
-        },
-        {
-            "field": "pregnant",
-            "priority": "critical",
-            "question": "את בהריון או מניקה כרגע?",
-            "options": ["כן", "לא"],
-            "guidance": None,
-        },
+        {"field": "goal",      "priority": "high",     "question": "מה המטרה הראשית שלך?",            "options": ["אקנה", "לחות", "זוהר", "אנטי-אייג'ינג", "פיגמנטציה", "ריענון כללי"], "guidance": None},
+        {"field": "skin_type", "priority": "high",     "question": "מה סוג העור שלך?",                "options": ["שמן", "יבש", "מעורב", "רגיש", "נורמלי"],                             "guidance": "שאלי על תחושת העור אחרי שטיפת פנים, האם יש ברק אחרי שעה-שעתיים, ואם יש נטייה לקשקשים או אודם"},
+        {"field": "age_range", "priority": "medium",   "question": "מה טווח הגיל שלך?",               "options": ["עד 25", "25-40", "40+"],                                              "guidance": None},
+        {"field": "pregnant",  "priority": "critical", "question": "את בהריון או מניקה כרגע?",        "options": ["כן", "לא"],                                                           "guidance": None},
     ],
     "לייזר": [
-        {
-            "field": "area",
-            "priority": "high",
-            "question": "באיזה אזור מעוניינת בטיפול לייזר?",
-            "options": ["פנים", "גוף", "ביקיני", "רגליים", "בית שחי"],
-            "guidance": None,
-        },
-        {
-            "field": "skin_tone",
-            "priority": "high",
-            "question": "מה גוון העור שלך?",
-            "options": ["בהיר מאוד", "בהיר", "בינוני", "כהה"],
-            "guidance": "שאלי האם העור משחיר בקלות בשמש, ומה קורה אחרי חשיפה לשמש - האם משחיר ואז מחוויר או נשאר כהה",
-        },
-        {
-            "field": "hair_color",
-            "priority": "high",
-            "question": "מה צבע השיער באזור הטיפול?",
-            "options": ["שחור / כהה מאוד", "חום כהה", "חום בהיר", "בלונד / אדמוני / אפור"],
-            "guidance": None,
-        },
-        {
-            "field": "pregnant",
-            "priority": "critical",
-            "question": "את בהריון או מניקה כרגע?",
-            "options": ["כן", "לא"],
-            "guidance": None,
-        },
+        {"field": "area",       "priority": "high",     "question": "באיזה אזור מעוניינת בטיפול לייזר?", "options": ["פנים", "גוף", "ביקיני", "רגליים", "בית שחי"],                          "guidance": None},
+        {"field": "skin_tone",  "priority": "high",     "question": "מה גוון העור שלך?",                 "options": ["בהיר מאוד", "בהיר", "בינוני", "כהה"],                                  "guidance": "שאלי האם העור משחיר בקלות בשמש, ומה קורה אחרי חשיפה לשמש"},
+        {"field": "hair_color", "priority": "high",     "question": "מה צבע השיער באזור הטיפול?",        "options": ["שחור / כהה מאוד", "חום כהה", "חום בהיר", "בלונד / אדמוני / אפור"],     "guidance": None},
+        {"field": "pregnant",   "priority": "critical", "question": "את בהריון או מניקה כרגע?",          "options": ["כן", "לא"],                                                             "guidance": None},
     ],
     "מניקור ופדיקור": [
-        {
-            "field": "service_type",
-            "priority": "high",
-            "question": "מה את מחפשת?",
-            "options": ["מניקור רגיל", "לק גל", "עיצוב ציפורניים", "פדיקור אסתטי", "פדיקור טיפולי"],
-            "guidance": None,
-        },
+        {"field": "service_type", "priority": "high", "question": "מה את מחפשת?", "options": ["מניקור רגיל", "לק גל", "עיצוב ציפורניים", "פדיקור אסתטי", "פדיקור טיפולי"], "guidance": None},
+    ],
+    "טיפולי גוף": [
+        {"field": "massage_type", "priority": "high",   "question": "איזה סוג עיסוי מעניין אותך?",  "options": ["הרפיה", "כאבי גב/צוואר", "ספורט", "הריון", "רפלקסולוגיה"], "guidance": None},
+        {"field": "pregnant",     "priority": "critical","question": "את בהריון כרגע?",              "options": ["כן", "לא"],                                                   "guidance": None},
+    ],
+    "איפור קבוע ועיצוב גבות": [
+        {"field": "pmu_area", "priority": "high", "question": "באיזה אזור מעוניינת?", "options": ["גבות", "עיניים", "שפתיים", "קרקפת"], "guidance": None},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?", "options": ["כן", "לא"], "guidance": None},
     ],
     "_default": [
-        {
-            "field": "goal",
-            "priority": "high",
-            "question": "מה המטרה שלך?",
-            "options": [],
-            "guidance": None,
-        },
-        {
-            "field": "pregnant",
-            "priority": "critical",
-            "question": "את בהריון או מניקה?",
-            "options": ["כן", "לא"],
-            "guidance": None,
-        },
+        {"field": "goal",     "priority": "high",     "question": "מה המטרה שלך?",      "options": [],         "guidance": None},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?", "options": ["כן", "לא"], "guidance": None},
     ],
 }
 
-# Minimum fields that must be filled before a recommendation is made
 MINIMUM_FIELDS: Dict[str, List[str]] = {
-    "טיפולי פנים": ["goal", "pregnant"],
-    "לייזר": ["area", "pregnant"],
-    "מניקור ופדיקור": ["service_type"],
-    "_default": ["goal"],
+    "טיפולי פנים":           ["goal", "pregnant"],
+    "לייזר":                 ["area", "pregnant"],
+    "מניקור ופדיקור":        ["service_type"],
+    "טיפולי גוף":            ["massage_type", "pregnant"],
+    "איפור קבוע ועיצוב גבות": ["pmu_area", "pregnant"],
+    "_default":              ["goal"],
 }
 
 
@@ -218,7 +233,6 @@ def get_fields_for_category(category: str) -> List[Dict]:
 
 
 def get_next_field(category: str, profile: Dict) -> Optional[Dict]:
-    """Return the next most important field that hasn't been collected yet."""
     fields = get_fields_for_category(category)
     for priority in ("critical", "high", "medium"):
         for f in fields:
@@ -244,12 +258,11 @@ def field_chips(field_info: Dict) -> List[str]:
 # ------------------------------------------------------------
 
 def classify_intent(message: str, history: List[Dict]) -> Dict:
-    """
-    Call 1 — Intent Router.
-    Returns {"intent": "general"|"recommendation", "category": str|None}
-    """
-    categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
+    """Call 1 — Intent Router. Returns intent + category."""
+    if not groq_client:
+        return {"intent": "general", "category": None}
 
+    categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
     history_text = ""
     for msg in history[-4:]:
         role = "User" if msg.get("from") == "user" else "Assistant"
@@ -280,24 +293,19 @@ Respond ONLY with valid JSON on one line, no explanation:
             max_tokens=60,
         )
         result = json.loads(resp.choices[0].message.content)
-        return {
-            "intent": result.get("intent", "general"),
-            "category": result.get("category"),
-        }
+        return {"intent": result.get("intent", "general"), "category": result.get("category")}
     except Exception as e:
         print(f"[Intent router error] {e}")
         return {"intent": "general", "category": None}
 
 
 def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) -> str:
-    """
-    Call 2A — Pure conversation, no flow logic.
-    Handles general questions and treatment-specific questions.
-    """
+    """Call 2A — Pure conversation for general questions."""
+    if not groq_client:
+        raise HTTPException(status_code=503, detail="Chat service not configured")
+
     if selected:
-        faq_text = "\n".join(
-            [f"ש: {q}\nת: {a}" for q, a in selected.get("faq", {}).items()]
-        )
+        faq_text = "\n".join([f"ש: {q}\nת: {a}" for q, a in selected.get("faq", {}).items()])
         context = (
             f"המשתמשת צופה בטיפול: {selected['name']}\n\n"
             f"פרטי הטיפול:\n"
@@ -318,8 +326,7 @@ def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) 
     system = (
         "אתה עוזרת AI של MeDay - קליניקת יופי וטיפולים קוסמטיים.\n"
         "ענה תמיד בעברית בצורה חמה, מקצועית ומזמינה.\n"
-        "בסס את תשובותיך על המידע שנמסר לך בלבד.\n\n"
-        + context
+        "בסס את תשובותיך על המידע שנמסר לך בלבד.\n\n" + context
     )
 
     messages = [{"role": "system", "content": system}]
@@ -329,29 +336,18 @@ def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) 
     messages.append({"role": "user", "content": message})
 
     try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.7,
-        )
+        resp = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=messages, temperature=0.7)
         return resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"[General answer error] {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
-def guided_conversation(
-    message: str,
-    history: List[Dict],
-    profile: Dict,
-    category: str,
-    next_field_info: Optional[Dict],
-) -> Dict:
-    """
-    Call 2B — Guided recommendation flow with free-text input.
-    The LLM knows what field to ask next and extracts profile updates.
-    Returns {"reply": str, "profile_update": dict, "ready_to_recommend": bool}
-    """
+def guided_conversation(message: str, history: List[Dict], profile: Dict, category: str, next_field_info: Optional[Dict]) -> Dict:
+    """Call 2B — Guided flow, extracts profile fields from free text."""
+    if not groq_client:
+        raise HTTPException(status_code=503, detail="Chat service not configured")
+
     known = "\n".join([f"- {k}: {v}" for k, v in profile.items()]) or "עדיין לא נאסף מידע"
 
     if next_field_info:
@@ -390,9 +386,7 @@ def guided_conversation(
 
     try:
         resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.7,
+            model="llama-3.3-70b-versatile", messages=messages, temperature=0.7,
             response_format={"type": "json_object"},
         )
         result = json.loads(resp.choices[0].message.content)
@@ -403,23 +397,14 @@ def guided_conversation(
         }
     except Exception as e:
         print(f"[Guided conversation error] {e}")
-        return {
-            "reply": "מצטערת, יש לי תקלה קטנה. אנא נסי שוב.",
-            "profile_update": {},
-            "ready_to_recommend": False,
-        }
+        return {"reply": "מצטערת, יש לי תקלה קטנה. אנא נסי שוב.", "profile_update": {}, "ready_to_recommend": False}
 
 
-def sub_discovery(
-    message: str,
-    field: str,
-    category: str,
-    history: List[Dict],
-) -> str:
-    """
-    Sub-discovery call — helps the client figure out an answer they don't know.
-    When resolved, the reply contains [RESOLVED: value] which the backend strips.
-    """
+def sub_discovery(message: str, field: str, category: str, history: List[Dict]) -> str:
+    """Sub-discovery — helps client figure out an answer. Ends with [RESOLVED: value]."""
+    if not groq_client:
+        raise HTTPException(status_code=503, detail="Chat service not configured")
+
     fields = get_fields_for_category(category)
     field_info = next((f for f in fields if f["field"] == field), None)
     guidance = field_info["guidance"] if field_info else None
@@ -442,11 +427,7 @@ def sub_discovery(
     messages.append({"role": "user", "content": message})
 
     try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.7,
-        )
+        resp = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=messages, temperature=0.7)
         return resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"[Sub-discovery error] {e}")
@@ -454,10 +435,10 @@ def sub_discovery(
 
 
 def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> Dict:
-    """
-    Final recommendation call — filters treatments to category, picks best matches.
-    Returns {"reply": str, "suggested_treatments": list}
-    """
+    """Final recommendation — filters treatments to category, picks best matches."""
+    if not groq_client:
+        raise HTTPException(status_code=503, detail="Chat service not configured")
+
     category_treatments = [t for t in TREATMENTS if t.get("class_name") == category]
     if not category_treatments:
         category_treatments = TREATMENTS[:10]
@@ -468,7 +449,6 @@ def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> D
         f" | הריון/הנקה: {t['pregnancy_breastfeeding'][:60]}"
         for t in category_treatments
     ])
-
     profile_text = "\n".join([f"- {k}: {v}" for k, v in profile.items()])
 
     system = (
@@ -488,11 +468,7 @@ def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> D
     messages.append({"role": "user", "content": "על סמך כל מה שסיפרתי, מה הטיפולים המומלצים לי?"})
 
     try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.7,
-        )
+        resp = groq_client.chat.completions.create(model="llama-3.3-70b-versatile", messages=messages, temperature=0.7)
         reply = resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"[Recommendation error] {e}")
@@ -502,9 +478,8 @@ def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> D
     for t in category_treatments:
         if t["name"] in reply:
             suggested.append({"id": t["id"], "name": t["name"], "category": t["category"]})
-    suggested = suggested[:3]
 
-    return {"reply": reply, "suggested_treatments": suggested}
+    return {"reply": reply, "suggested_treatments": suggested[:3]}
 
 
 # ------------------------------------------------------------
@@ -513,7 +488,12 @@ def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> D
 
 @app.get("/health")
 def health():
-    return {"ok": True}
+    return {
+        "ok": True,
+        "services": {
+            "chat": {"configured": bool(GROQ_API_KEY), "provider": "groq"}
+        },
+    }
 
 
 @app.get("/treatments")
@@ -537,14 +517,12 @@ class ChatRequest(BaseModel):
     message: str
     history: Optional[List[Dict]] = None
     selected_treatment_id: Optional[str] = None
-    # Flow state (persisted by frontend, sent each turn)
     profile: Optional[Dict] = None
-    mode: Optional[str] = "idle"       # idle | questioning | sub_discovery | recommending
+    mode: Optional[str] = "idle"
     category: Optional[str] = None
     current_field: Optional[str] = None
-    # Chip tap signals
     chip_field: Optional[str] = None
-    chip_value: Optional[str] = None   # "dont_know" or the actual answer
+    chip_value: Optional[str] = None
 
 
 class ChatResponse(BaseModel):
@@ -569,157 +547,73 @@ def chat(req: ChatRequest):
     history = req.history or []
     current_field = req.current_field
 
-    # ── 0. Treatment-page context (existing behavior, unchanged) ──
+    # ── 0. Treatment-page context ──────────────────────────────
     selected = TREATMENT_MAP.get(req.selected_treatment_id) if req.selected_treatment_id else None
     if selected:
         reply = general_answer(req.message, history, selected)
         return ChatResponse(reply=reply, mode="idle", profile=profile)
 
-    # ── 1. Chip tap: real answer (no LLM needed) ──────────────────
+    # ── 1. Chip tap: real answer ───────────────────────────────
     if req.chip_value and req.chip_field and req.chip_value != "dont_know":
         profile[req.chip_field] = req.chip_value
-
-        if can_recommend(category, profile):
-            next_field = get_next_field(category, profile)
-            if next_field is None:
-                rec = build_recommendation(profile, category, history)
-                return ChatResponse(
-                    reply=rec["reply"],
-                    mode="recommending",
-                    profile=profile,
-                    category=category,
-                    suggested_treatments=rec["suggested_treatments"] or None,
-                )
-
         next_field = get_next_field(category, profile)
-        if next_field is None:
+        if next_field is None or can_recommend(category, profile):
             rec = build_recommendation(profile, category, history)
-            return ChatResponse(
-                reply=rec["reply"],
-                mode="recommending",
-                profile=profile,
-                category=category,
-                suggested_treatments=rec["suggested_treatments"] or None,
-            )
+            return ChatResponse(reply=rec["reply"], mode="recommending", profile=profile, category=category, suggested_treatments=rec["suggested_treatments"] or None)
+        return ChatResponse(reply=next_field["question"], mode="questioning", profile=profile, category=category, current_field=next_field["field"], quick_replies=field_chips(next_field))
 
-        return ChatResponse(
-            reply=next_field["question"],
-            mode="questioning",
-            profile=profile,
-            category=category,
-            current_field=next_field["field"],
-            quick_replies=field_chips(next_field),
-        )
-
-    # ── 2. Chip tap: "I don't know" → sub-discovery ───────────────
+    # ── 2. Chip tap: "I don't know" → sub-discovery ───────────
     if req.chip_value == "dont_know" and req.chip_field:
         reply = sub_discovery(req.message, req.chip_field, category, history)
         resolved = re.search(r'\[RESOLVED:\s*(.+?)\]', reply)
         clean_reply = re.sub(r'\[RESOLVED:\s*.+?\]', '', reply).strip()
-
         if resolved:
             profile[req.chip_field] = resolved.group(1).strip()
             next_field = get_next_field(category, profile)
             if next_field is None or can_recommend(category, profile):
                 rec = build_recommendation(profile, category, history)
-                return ChatResponse(
-                    reply=clean_reply + "\n\n" + rec["reply"],
-                    mode="recommending",
-                    profile=profile,
-                    category=category,
-                    suggested_treatments=rec["suggested_treatments"] or None,
-                )
-            return ChatResponse(
-                reply=clean_reply,
-                mode="questioning",
-                profile=profile,
-                category=category,
-                current_field=next_field["field"],
-                quick_replies=field_chips(next_field),
-            )
+                return ChatResponse(reply=clean_reply + "\n\n" + rec["reply"], mode="recommending", profile=profile, category=category, suggested_treatments=rec["suggested_treatments"] or None)
+            return ChatResponse(reply=clean_reply, mode="questioning", profile=profile, category=category, current_field=next_field["field"], quick_replies=field_chips(next_field))
+        return ChatResponse(reply=clean_reply, mode="sub_discovery", profile=profile, category=category, current_field=req.chip_field)
 
-        return ChatResponse(
-            reply=clean_reply,
-            mode="sub_discovery",
-            profile=profile,
-            category=category,
-            current_field=req.chip_field,
-        )
-
-    # ── 3. Continuing sub-discovery with free text ────────────────
+    # ── 3. Continuing sub-discovery with free text ────────────
     if mode == "sub_discovery" and current_field:
         reply = sub_discovery(req.message, current_field, category, history)
         resolved = re.search(r'\[RESOLVED:\s*(.+?)\]', reply)
         clean_reply = re.sub(r'\[RESOLVED:\s*.+?\]', '', reply).strip()
-
         if resolved:
             profile[current_field] = resolved.group(1).strip()
             next_field = get_next_field(category, profile)
             if next_field is None or can_recommend(category, profile):
                 rec = build_recommendation(profile, category, history)
-                return ChatResponse(
-                    reply=clean_reply + "\n\n" + rec["reply"],
-                    mode="recommending",
-                    profile=profile,
-                    category=category,
-                    suggested_treatments=rec["suggested_treatments"] or None,
-                )
-            return ChatResponse(
-                reply=clean_reply,
-                mode="questioning",
-                profile=profile,
-                category=category,
-                current_field=next_field["field"],
-                quick_replies=field_chips(next_field),
-            )
+                return ChatResponse(reply=clean_reply + "\n\n" + rec["reply"], mode="recommending", profile=profile, category=category, suggested_treatments=rec["suggested_treatments"] or None)
+            return ChatResponse(reply=clean_reply, mode="questioning", profile=profile, category=category, current_field=next_field["field"], quick_replies=field_chips(next_field))
+        return ChatResponse(reply=clean_reply, mode="sub_discovery", profile=profile, category=category, current_field=current_field)
 
-        return ChatResponse(
-            reply=clean_reply,
-            mode="sub_discovery",
-            profile=profile,
-            category=category,
-            current_field=current_field,
-        )
-
-    # ── 4. Intent classification (only when category not yet detected) ──
+    # ── 4. Intent classification ───────────────────────────────
     if not category:
         classification = classify_intent(req.message, history)
         if classification["intent"] == "recommendation" and classification.get("category"):
             category = classification["category"]
             mode = "questioning"
 
-    # ── 5. General answer (no recommendation intent) ──────────────
+    # ── 5. General answer ──────────────────────────────────────
     if mode == "idle" or not category:
         reply = general_answer(req.message, history, None)
         return ChatResponse(reply=reply, mode="idle", profile=profile, category=category)
 
-    # ── 6. Guided conversation (free text in recommendation flow) ──
+    # ── 6. Guided conversation (free text in recommendation flow)
     next_field = get_next_field(category, profile)
     result = guided_conversation(req.message, history, profile, category, next_field)
-
     profile.update(result.get("profile_update", {}))
-
-    # Re-evaluate after profile update
     next_field = get_next_field(category, profile)
 
     if (result.get("ready_to_recommend") or next_field is None) and can_recommend(category, profile):
         rec = build_recommendation(profile, category, history)
-        return ChatResponse(
-            reply=result["reply"] + ("\n\n" + rec["reply"] if result["reply"] else rec["reply"]),
-            mode="recommending",
-            profile=profile,
-            category=category,
-            suggested_treatments=rec["suggested_treatments"] or None,
-        )
+        combined = (result["reply"] + "\n\n" + rec["reply"]) if result["reply"] else rec["reply"]
+        return ChatResponse(reply=combined, mode="recommending", profile=profile, category=category, suggested_treatments=rec["suggested_treatments"] or None)
 
-    return ChatResponse(
-        reply=result["reply"],
-        mode="questioning",
-        profile=profile,
-        category=category,
-        current_field=next_field["field"] if next_field else None,
-        quick_replies=field_chips(next_field) if next_field else None,
-    )
+    return ChatResponse(reply=result["reply"], mode="questioning", profile=profile, category=category, current_field=next_field["field"] if next_field else None, quick_replies=field_chips(next_field) if next_field else None)
 
 
 # ------------------------------------------------------------
@@ -743,6 +637,8 @@ def init_db():
             client_phone TEXT,
             treatment_id TEXT NOT NULL,
             treatment_name TEXT NOT NULL,
+            treatment_category TEXT,
+            treatment_subcategory TEXT,
             date TEXT NOT NULL,
             time TEXT NOT NULL,
             end_time TEXT,
@@ -750,10 +646,11 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    try:
-        conn.execute("ALTER TABLE appointments ADD COLUMN end_time TEXT")
-    except Exception:
-        pass
+    for col in ("end_time TEXT", "treatment_category TEXT", "treatment_subcategory TEXT"):
+        try:
+            conn.execute(f"ALTER TABLE appointments ADD COLUMN {col}")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -766,6 +663,8 @@ class AppointmentCreate(BaseModel):
     client_phone: Optional[str] = None
     treatment_id: str
     treatment_name: str
+    treatment_category: Optional[str] = None
+    treatment_subcategory: Optional[str] = None
     date: str
     time: str
     end_time: Optional[str] = None
@@ -775,22 +674,21 @@ class AppointmentCreate(BaseModel):
 @app.get("/appointments")
 def list_appointments():
     conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM appointments ORDER BY date, time"
-    ).fetchall()
+    rows = conn.execute("SELECT * FROM appointments ORDER BY date, time").fetchall()
     conn.close()
     return [dict(r) for r in rows]
 
 
 @app.post("/appointments")
 def create_appointment(appt: AppointmentCreate):
+    validate_appointment_slot(appt.date, appt.time, appt.end_time)
     conn = get_db()
     cursor = conn.execute(
         """INSERT INTO appointments
-           (client_name, client_phone, treatment_id, treatment_name, date, time, end_time, notes)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-        (appt.client_name, appt.client_phone, appt.treatment_id,
-         appt.treatment_name, appt.date, appt.time, appt.end_time, appt.notes),
+           (client_name, client_phone, treatment_id, treatment_name, treatment_category, treatment_subcategory, date, time, end_time, notes)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (appt.client_name, appt.client_phone, appt.treatment_id, appt.treatment_name,
+         appt.treatment_category, appt.treatment_subcategory, appt.date, appt.time, appt.end_time, appt.notes),
     )
     conn.commit()
     new_id = cursor.lastrowid
@@ -815,6 +713,7 @@ class AppointmentReschedule(BaseModel):
 
 @app.patch("/appointments/{appt_id}")
 def reschedule_appointment(appt_id: int, data: AppointmentReschedule):
+    validate_appointment_slot(data.date, data.time, data.end_time)
     conn = get_db()
     conn.execute(
         "UPDATE appointments SET date = ?, time = ?, end_time = ? WHERE id = ?",
@@ -831,39 +730,14 @@ def reschedule_appointment(appt_id: int, data: AppointmentReschedule):
 @app.get("/appointments/analytics")
 def get_analytics():
     conn = get_db()
-
     total = conn.execute("SELECT COUNT(*) as c FROM appointments").fetchone()["c"]
-
-    by_treatment = conn.execute("""
-        SELECT treatment_name, COUNT(*) as count
-        FROM appointments
-        GROUP BY treatment_name
-        ORDER BY count DESC
-        LIMIT 10
-    """).fetchall()
-
-    by_day = conn.execute("""
-        SELECT strftime('%w', date) as day_num, COUNT(*) as count
-        FROM appointments
-        GROUP BY day_num
-        ORDER BY day_num
-    """).fetchall()
-
-    by_hour = conn.execute("""
-        SELECT substr(time, 1, 2) as hour, COUNT(*) as count
-        FROM appointments
-        GROUP BY hour
-        ORDER BY hour
-    """).fetchall()
-
-    recent = conn.execute("""
-        SELECT * FROM appointments ORDER BY created_at DESC LIMIT 5
-    """).fetchall()
-
+    by_treatment = conn.execute("SELECT treatment_name, COUNT(*) as count FROM appointments GROUP BY treatment_name ORDER BY count DESC LIMIT 10").fetchall()
+    by_day = conn.execute("SELECT strftime('%w', date) as day_num, COUNT(*) as count FROM appointments GROUP BY day_num ORDER BY day_num").fetchall()
+    by_hour = conn.execute("SELECT substr(time, 1, 2) as hour, COUNT(*) as count FROM appointments GROUP BY hour ORDER BY hour").fetchall()
+    recent = conn.execute("SELECT * FROM appointments ORDER BY created_at DESC LIMIT 5").fetchall()
     conn.close()
 
     day_names = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
-
     return {
         "total": total,
         "by_treatment": [{"name": r["treatment_name"], "count": r["count"]} for r in by_treatment],
