@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
+import ReactMarkdown from "react-markdown";
 import { sendChat } from "../api/medayApi";
 import {
   MessageCircle,
@@ -7,105 +8,175 @@ import {
   Send,
   RotateCcw,
   Sparkles,
-  ChevronDown,
-  ChevronUp,
 } from "lucide-react";
 import { cn } from "../lib/utils";
 
+// ── Initial greeting + quick-start chips ─────────────────────
 const INITIAL_BOT_MSG =
-  "היי! אני העוזרת האישית של MeDay 💬\nספרי לי מה המטרה שלך היום? (לחות, זוהר, אקנה, אנטי-אייג'ינג...)";
+  "היי! אני העוזרת האישית של MeDay 💬\nאיך אני יכולה לעזור לך היום?";
+
+const INITIAL_CHIPS = [
+  "טיפולי קוסמטיקה",
+  "מניקור ופדיקור",
+  "עיצוב שיער",
+  "טיפולי גוף",
+  "הסרת שיער",
+  "איפור מקצועי",
+  "איפור קבוע ועיצוב גבות",
+  "סטיילינג אישי",
+  "טיפולי אסתטיקה",
+  "שאלה כללית",
+];
+
+// ── Flow state shape ──────────────────────────────────────────
+const DEFAULT_FLOW = {
+  profile: {},
+  mode: "idle",
+  category: null,
+  currentField: null,
+};
 
 export default function ChatWidget() {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const scrollRef = useRef(null);
+  const inputRef = useRef(null);
 
-  // Profile management (goal/sensitive/pregnant)
-  const [profile, setProfile] = useState({ goal: null, sensitive: null, pregnant: null });
-
-  // CONTEXT: Tracks the treatment the user is currently viewing
+  const [flowState, setFlowState] = useState(DEFAULT_FLOW);
   const [selectedTreatment, setSelectedTreatment] = useState(null);
-
   const [loading, setLoading] = useState(false);
-  const [showSources, setShowSources] = useState(false);
+
   const [messages, setMessages] = useState([
-    { from: "bot", text: INITIAL_BOT_MSG },
+    {
+      from: "bot",
+      text: INITIAL_BOT_MSG,
+      chips: INITIAL_CHIPS,
+      chipField: null, // null = initial chips, not tied to a specific field
+    },
   ]);
 
-  // --- NEW: Global Event Listeners for Page Sync ---
+  // ── Sync treatment context from treatment pages ───────────────
   useEffect(() => {
-    // Listens for the 'treatmentSelected' event from TreatmentDetailsPage
-    const handleTreatmentSelection = (e) => {
-      setSelectedTreatment(e.detail); // e.detail is {id, name}
-    };
-
-    // Listens for 'openChatWithQuestion' event to trigger automatic chat
+    const handleTreatmentSelection = (e) => setSelectedTreatment(e.detail);
     const handleOpenWithQuestion = (e) => {
       setOpen(true);
-      handleUserText(e.detail); 
+      handleSend(e.detail, {}, {});
     };
-
-    window.addEventListener('treatmentSelected', handleTreatmentSelection);
-    window.addEventListener('openChatWithQuestion', handleOpenWithQuestion);
-
+    window.addEventListener("treatmentSelected", handleTreatmentSelection);
+    window.addEventListener("openChatWithQuestion", handleOpenWithQuestion);
     return () => {
-      window.removeEventListener('treatmentSelected', handleTreatmentSelection);
-      window.removeEventListener('openChatWithQuestion', handleOpenWithQuestion);
+      window.removeEventListener("treatmentSelected", handleTreatmentSelection);
+      window.removeEventListener("openChatWithQuestion", handleOpenWithQuestion);
     };
   }, []);
 
+  // ── Auto-scroll ───────────────────────────────────────────────
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
   }, [messages, loading]);
 
-  function addMessage(from, text, recs = null, meta = null) {
-    setMessages((m) => [...m, { from, text, recs, meta }]);
-  }
+  // ── Focus input when chat opens ───────────────────────────────
+  useEffect(() => {
+    if (open) setTimeout(() => inputRef.current?.focus(), 150);
+  }, [open]);
 
-  async function handleUserText(text) {
+  // ── Core send function ────────────────────────────────────────
+  async function handleSend(text, chipData = {}, overrideFlowState = null) {
     if (!text.trim() || loading) return;
 
-    addMessage("user", text);
+    const currentFlow = overrideFlowState ?? flowState;
+
+    // Add user message to UI
+    setMessages((m) => [...m, { from: "user", text }]);
     setLoading(true);
 
     try {
-      // Passes text, profile, and the selected treatment ID as context to the API
-      const resp = await sendChat(text, profile, selectedTreatment, messages);
+      const resp = await sendChat(
+        text,
+        currentFlow,
+        chipData,
+        selectedTreatment?.id ?? null,
+        messages
+      );
 
-      if (resp?.reply) {
-        addMessage("bot", resp.reply, resp.suggested_treatments, {
-          confidence: resp.confidence,
-          sources: resp.sources,
-        });
-      }
+      if (!resp?.reply) return;
 
-      // Display follow-up clarifying questions if returned by backend
-      if (resp?.follow_up) {
-        // Handle both object and string formats for follow-up questions
-        const followUpText = typeof resp.follow_up === 'object' 
-          ? resp.follow_up.question 
-          : resp.follow_up;
-        addMessage("bot", followUpText);
-      }
-    } catch (e) {
-      addMessage("bot", "מצטערת, יש לי תקלה קטנה בחיבור. נסי שוב מאוחר יותר.");
+      // Update flow state from response
+      const updatedFlow = {
+        profile: resp.profile ?? {},
+        mode: resp.mode ?? "idle",
+        category: resp.category ?? null,
+        currentField: resp.current_field ?? null,
+      };
+      setFlowState(updatedFlow);
+
+      // Build bot message with chips if returned
+      const botMsg = {
+        from: "bot",
+        text: resp.reply,
+        chips: resp.quick_replies ?? null,
+        chipField: resp.current_field ?? null,
+        recs: resp.suggested_treatments ?? null,
+        questionNumber: resp.question_number ?? null,
+        totalQuestions: resp.total_questions ?? null,
+      };
+      setMessages((m) => [...m, botMsg]);
+    } catch {
+      setMessages((m) => [
+        ...m,
+        { from: "bot", text: "מצטערת, יש לי תקלה קטנה בחיבור. נסי שוב מאוחר יותר." },
+      ]);
     } finally {
       setLoading(false);
     }
   }
 
-  function resetChat() {
-    setProfile({ goal: null, sensitive: null, pregnant: null });
-    setSelectedTreatment(null);
-    setMessages([{ from: "bot", text: INITIAL_BOT_MSG }]);
-    setShowSources(false);
+  // ── Chip tap handler ──────────────────────────────────────────
+  function handleChipTap(chipLabel, chipField) {
+    if (loading) return;
+
+    const isDontKnow = chipLabel === "לא יודעת";
+
+    // If it's an initial chip (chipField is null), send as plain text
+    if (chipField === null) {
+      handleSend(chipLabel, {}, flowState);
+      return;
+    }
+
+    const chipData = {
+      chip_field: chipField,
+      chip_value: isDontKnow ? "dont_know" : chipLabel,
+    };
+
+    handleSend(chipLabel, chipData, flowState);
   }
+
+  // ── Reset ─────────────────────────────────────────────────────
+  function resetChat() {
+    setFlowState(DEFAULT_FLOW);
+    setSelectedTreatment(null);
+    setMessages([
+      {
+        from: "bot",
+        text: INITIAL_BOT_MSG,
+        chips: INITIAL_CHIPS,
+        chipField: null,
+      },
+    ]);
+  }
+
+  // ── Mode badge ────────────────────────────────────────────────
+  const modeBadge = {
+    questioning: "ממצאת את הטיפול המתאים לך ✨",
+    sub_discovery: "בואי נבין ביחד 🔍",
+    recommending: "ההמלצות שלי עבורך 💛",
+  }[flowState.mode];
 
   return (
     <div className="fixed bottom-6 left-6 z-[100] font-sans" dir="rtl">
-      {/* Floating Action Button */}
+      {/* Floating button */}
       <button
         onClick={() => setOpen(!open)}
         className={cn(
@@ -116,83 +187,114 @@ export default function ChatWidget() {
         {open ? <X size={28} /> : <MessageCircle size={28} />}
       </button>
 
-      {/* Chat Window */}
+      {/* Chat window */}
       {open && (
-        <div className="absolute bottom-20 left-0 w-[380px] max-w-[90vw] h-[600px] bg-white rounded-3xl shadow-2xl border border-pink-50 overflow-hidden flex flex-col animate-in slide-in-from-bottom-5">
-          
+        <div className="absolute bottom-20 left-0 w-[400px] max-w-[92vw] h-[620px] bg-white rounded-3xl shadow-2xl border border-pink-50 overflow-hidden flex flex-col animate-in slide-in-from-bottom-5">
+
           {/* Header */}
-          <div className="bg-gradient-to-l from-primary to-pink-300 p-6 text-white">
+          <div className="bg-gradient-to-l from-primary to-pink-300 p-5 text-white">
             <div className="flex justify-between items-center">
               <div>
                 <h3 className="font-bold text-xl flex items-center gap-2">
                   <Sparkles size={18} />
                   MeDay AI
                 </h3>
-                <p className="text-pink-50 text-xs opacity-90 mt-1">
-                  ייעוץ חכם בהתאמה אישית
+                <p className="text-pink-50 text-xs opacity-90 mt-0.5">
+                  {modeBadge ?? "ייעוץ חכם בהתאמה אישית"}
                 </p>
 
-                {/* Context Display */}
                 {selectedTreatment?.name && (
-                  <p className="text-pink-50 text-[11px] font-medium bg-white/10 rounded-full px-2 py-0.5 mt-2 inline-block">
+                  <p className="text-pink-50 text-[11px] font-medium bg-white/10 rounded-full px-2 py-0.5 mt-1.5 inline-block">
                     הקשר: {selectedTreatment.name}
                   </p>
                 )}
               </div>
 
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => setShowSources((s) => !s)}
-                  className="p-2 hover:bg-white/20 rounded-full transition-colors"
-                  title="מקורות (דיבאג)"
-                >
-                  {showSources ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-                </button>
-
-                <button
-                  onClick={resetChat}
-                  className="p-2 hover:bg-white/20 rounded-full transition-colors"
-                  title="איפוס"
-                >
-                  <RotateCcw size={18} />
-                </button>
-              </div>
+              <button
+                onClick={resetChat}
+                className="p-2 hover:bg-white/20 rounded-full transition-colors"
+                title="התחלה מחדש"
+              >
+                <RotateCcw size={18} />
+              </button>
             </div>
           </div>
 
-          {/* Messages Area */}
-          <div ref={scrollRef} className="flex-1 overflow-y-auto p-4 bg-gray-50/50 space-y-4">
+          {/* Messages */}
+          <div
+            ref={scrollRef}
+            className="flex-1 overflow-y-auto p-4 bg-gray-50/50 space-y-4"
+          >
             {messages.map((m, idx) => (
               <div
                 key={idx}
-                className={cn("flex flex-col", m.from === "user" ? "items-end" : "items-start")}
+                className={cn(
+                  "flex flex-col",
+                  m.from === "user" ? "items-end" : "items-start"
+                )}
               >
+                {/* Bubble */}
                 <div
                   className={cn(
-                    "max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed",
+                    "max-w-[88%] p-4 rounded-2xl text-sm leading-relaxed",
                     m.from === "user"
                       ? "bg-primary text-white rounded-tl-none shadow-md"
-                      : "bg-white text-gray-800 border border-pink-100 rounded-tr-none shadow-sm"
+                      : "bg-white text-gray-800 border border-pink-100 rounded-tr-none shadow-sm prose prose-sm max-w-none"
                   )}
                 >
-                  {m.text}
+                  {m.from === "bot" ? (
+                    <ReactMarkdown>{m.text}</ReactMarkdown>
+                  ) : (
+                    m.text
+                  )}
                 </div>
 
-                {/* Debug Sources UI */}
-                {showSources && m?.meta?.sources?.length > 0 && (
-                  <div className="mt-2 max-w-[85%] text-[10px] text-gray-500 bg-white border border-gray-100 rounded-xl p-2 font-mono">
-                    <div className="font-bold text-gray-700 mb-1 border-b pb-1">DATABASE SOURCES:</div>
-                    <ul className="list-disc pr-4 space-y-1">
-                      {m.meta.sources.map((s, i) => (
-                        <li key={i}>
-                          <span className="uppercase text-[9px] font-bold">{s.type}</span>: {s.title}
-                        </li>
+                {/* Progress indicator */}
+                {m.questionNumber && m.totalQuestions && m.from === "bot" && (
+                  <div className="mt-2 flex items-center gap-2 max-w-[88%]">
+                    <div className="flex gap-1">
+                      {Array.from({ length: m.totalQuestions }).map((_, i) => (
+                        <div
+                          key={i}
+                          className={cn(
+                            "w-2 h-2 rounded-full transition-all duration-300",
+                            i < m.questionNumber
+                              ? "bg-primary"
+                              : "bg-gray-200"
+                          )}
+                        />
                       ))}
-                    </ul>
+                    </div>
+                    <span className="text-[10px] text-gray-400">
+                      שאלה {m.questionNumber} מתוך {m.totalQuestions}
+                    </span>
                   </div>
                 )}
 
-                {/* Treatment Recommendations Buttons */}
+                {/* Quick-reply chips */}
+                {m.chips && m.from === "bot" && (
+                  <div className="mt-2 flex flex-wrap gap-2 max-w-[88%]">
+                    {m.chips.map((chip) => (
+                      <button
+                        key={chip}
+                        onClick={() => handleChipTap(chip, m.chipField)}
+                        disabled={loading || idx !== messages.length - 1}
+                        className={cn(
+                          "px-3 py-1.5 rounded-full text-xs font-medium border transition-all",
+                          chip === "לא יודעת"
+                            ? "border-gray-300 text-gray-500 hover:bg-gray-100"
+                            : "border-primary/40 text-primary bg-pink-50 hover:bg-primary hover:text-white",
+                          (loading || idx !== messages.length - 1) &&
+                            "opacity-40 cursor-not-allowed"
+                        )}
+                      >
+                        {chip}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Treatment recommendation buttons */}
                 {m.recs && (
                   <div className="mt-3 w-full space-y-2">
                     {m.recs.map((r) => (
@@ -204,8 +306,11 @@ export default function ChatWidget() {
                         }}
                         className="w-full bg-white hover:bg-pink-50 border border-pink-200 p-3 rounded-xl text-right text-sm font-medium text-primary transition-all flex justify-between items-center group shadow-sm"
                       >
-                        <span>טיפול מומלץ: {r.name}</span>
-                        <Sparkles size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
+                        <span>💆 {r.name}</span>
+                        <Sparkles
+                          size={14}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity"
+                        />
                       </button>
                     ))}
                   </div>
@@ -213,18 +318,23 @@ export default function ChatWidget() {
               </div>
             ))}
 
+            {/* Typing indicator */}
             {loading && (
               <div className="flex gap-1 items-center p-2 text-gray-400">
-                <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce"></span>
-                <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:0.2s]"></span>
-                <span className="w-1.5 h-1.5 bg-gray-300 rounded-full animate-bounce [animation-delay:0.4s]"></span>
+                <span className="w-2 h-2 bg-pink-300 rounded-full animate-bounce" />
+                <span className="w-2 h-2 bg-pink-300 rounded-full animate-bounce [animation-delay:0.15s]" />
+                <span className="w-2 h-2 bg-pink-300 rounded-full animate-bounce [animation-delay:0.3s]" />
               </div>
             )}
           </div>
 
-          {/* Input Area */}
+          {/* Input */}
           <div className="p-4 bg-white border-t border-gray-100">
-            <ChatInput onSend={handleUserText} disabled={loading} />
+            <ChatInput
+              ref={inputRef}
+              onSend={(text) => handleSend(text, {}, flowState)}
+              disabled={loading}
+            />
           </div>
         </div>
       )}
@@ -232,7 +342,10 @@ export default function ChatWidget() {
   );
 }
 
-function ChatInput({ onSend, disabled }) {
+// ── Input component ───────────────────────────────────────────
+import { forwardRef } from "react";
+
+const ChatInput = forwardRef(function ChatInput({ onSend, disabled }, ref) {
   const [val, setVal] = useState("");
 
   const submit = () => {
@@ -244,6 +357,7 @@ function ChatInput({ onSend, disabled }) {
   return (
     <div className="relative flex items-center">
       <input
+        ref={ref}
         type="text"
         value={val}
         onChange={(e) => setVal(e.target.value)}
@@ -261,4 +375,4 @@ function ChatInput({ onSend, disabled }) {
       </button>
     </div>
   );
-}
+});

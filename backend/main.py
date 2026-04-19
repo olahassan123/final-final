@@ -182,46 +182,209 @@ TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
 
 # ------------------------------------------------------------
 # Category field registry
-# Defines what to ask per category and how to guide "I don't know"
-# TODO: Replace with category_questions.xlsx once prepared
+# Each key matches class_name (for hardcoded) or sub-category (for Excel treatments)
+# All actual treatments from Excel live under class_name "קוסמטיקה"
+# Sub-categories: טיפולי פנים, טיפולים מעצבים, אקנה ושיקום עור, אנטי אייג'ינג, ניקוי והבהרה
+# Hardcoded categories: מניקור ופדיקור, טיפולי גוף, איפור קבוע ועיצוב גבות, סטיילינג אישי
 # ------------------------------------------------------------
 CATEGORY_FIELDS: Dict[str, List[Dict]] = {
+
+    # ── קוסמטיקה — sub-categories from Excel ─────────────────
+    # General cosmetics entry point (when category=קוסמטיקה before sub-cat is known)
+    "קוסמטיקה": [
+        {"field": "sub_category", "priority": "high", "question": "מה תחום הטיפול שמעניין אותך?",
+         "options": ["טיפולי פנים", "טיפולים מעצבים", "אקנה ושיקום עור", "אנטי אייג'ינג", "ניקוי והבהרה"],
+         "guidance": "שאלי על המטרה הכללית שלה — האם מחפשת ריענון, טיפול בבעיה ספציפית, שיקום עור, או הרמה ועיצוב"},
+        {"field": "skin_type", "priority": "high", "question": "מה סוג העור שלך?",
+         "options": ["שמן", "יבש", "מעורב", "רגיש", "נורמלי"],
+         "guidance": "שאלי על תחושת העור אחרי שטיפת פנים, האם יש ברק אחרי שעה, נטייה לקשקשים או אודם"},
+        {"field": "age_range", "priority": "medium", "question": "מה טווח הגיל שלך?",
+         "options": ["עד 25", "25-40", "40+"], "guidance": None},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה כרגע?",
+         "options": ["כן", "לא"], "guidance": None},
+    ],
+
+    # טיפולי פנים — general / maintenance facials
     "טיפולי פנים": [
-        {"field": "goal",      "priority": "high",     "question": "מה המטרה הראשית שלך?",            "options": ["אקנה", "לחות", "זוהר", "אנטי-אייג'ינג", "פיגמנטציה", "ריענון כללי"], "guidance": None},
-        {"field": "skin_type", "priority": "high",     "question": "מה סוג העור שלך?",                "options": ["שמן", "יבש", "מעורב", "רגיש", "נורמלי"],                             "guidance": "שאלי על תחושת העור אחרי שטיפת פנים, האם יש ברק אחרי שעה-שעתיים, ואם יש נטייה לקשקשים או אודם"},
-        {"field": "age_range", "priority": "medium",   "question": "מה טווח הגיל שלך?",               "options": ["עד 25", "25-40", "40+"],                                              "guidance": None},
-        {"field": "pregnant",  "priority": "critical", "question": "את בהריון או מניקה כרגע?",        "options": ["כן", "לא"],                                                           "guidance": None},
+        {"field": "skin_type", "priority": "high", "question": "מה סוג העור שלך?",
+         "options": ["שמן", "יבש", "מעורב", "רגיש", "נורמלי"],
+         "guidance": "שאלי על תחושת העור אחרי שטיפת פנים, האם יש ברק אחרי שעה, נטייה לקשקשים או אודם"},
+        {"field": "age_range", "priority": "medium", "question": "מה טווח הגיל שלך?",
+         "options": ["עד 25", "25-40", "40+"], "guidance": None},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה כרגע?",
+         "options": ["כן", "לא"], "guidance": None},
     ],
-    "לייזר": [
-        {"field": "area",       "priority": "high",     "question": "באיזה אזור מעוניינת בטיפול לייזר?", "options": ["פנים", "גוף", "ביקיני", "רגליים", "בית שחי"],                          "guidance": None},
-        {"field": "skin_tone",  "priority": "high",     "question": "מה גוון העור שלך?",                 "options": ["בהיר מאוד", "בהיר", "בינוני", "כהה"],                                  "guidance": "שאלי האם העור משחיר בקלות בשמש, ומה קורה אחרי חשיפה לשמש"},
-        {"field": "hair_color", "priority": "high",     "question": "מה צבע השיער באזור הטיפול?",        "options": ["שחור / כהה מאוד", "חום כהה", "חום בהיר", "בלונד / אדמוני / אפור"],     "guidance": None},
-        {"field": "pregnant",   "priority": "critical", "question": "את בהריון או מניקה כרגע?",          "options": ["כן", "לא"],                                                             "guidance": None},
+
+    # טיפולים מעצבים — sculpting / lifting treatments
+    "טיפולים מעצבים": [
+        {"field": "concern", "priority": "high", "question": "מה הדבר שהכי מפריע לך כרגע?",
+         "options": ["עור רפוי", "חוסר מתיחות", "עייפות בפנים", "קמטים", "אובדן נפח"],
+         "guidance": None},
+        {"field": "age_range", "priority": "high", "question": "מה טווח הגיל שלך?",
+         "options": ["עד 30", "30-45", "45+"], "guidance": None},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?",
+         "options": ["כן", "לא"], "guidance": None},
     ],
+
+    # אקנה ושיקום עור
+    "אקנה ושיקום עור": [
+        {"field": "acne_severity", "priority": "high", "question": "כמה חמורה הבעיה?",
+         "options": ["קלה — כמה פצעונים", "בינונית — פרצוף מלא", "חמורה — דלקתי"],
+         "guidance": "שאלי כמה זמן קיימת הבעיה, אם היה טיפול קודם, ואם יש צלקות"},
+        {"field": "skin_type", "priority": "high", "question": "מה סוג העור שלך?",
+         "options": ["שמן", "מעורב", "רגיש"], "guidance": None},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?",
+         "options": ["כן", "לא"], "guidance": None},
+    ],
+
+    # אנטי אייג'ינג
+    "אנטי אייג'ינג": [
+        {"field": "main_concern", "priority": "high", "question": "מה הדאגה העיקרית שלך?",
+         "options": ["קמטים עדינים", "קמטים עמוקים", "עור רפוי", "כתמי גיל", "חוסר זוהר"],
+         "guidance": None},
+        {"field": "age_range", "priority": "high", "question": "מה טווח הגיל שלך?",
+         "options": ["35-45", "45-55", "55+"], "guidance": None},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?",
+         "options": ["כן", "לא"], "guidance": None},
+    ],
+
+    # ניקוי והבהרה
+    "ניקוי והבהרה": [
+        {"field": "skin_issue", "priority": "high", "question": "מה הבעיה העיקרית שתרצי לטפל בה?",
+         "options": ["נקבוביות פתוחות", "עור עמום", "כתמים / פיגמנטציה", "עור לא אחיד", "ניקוי כללי"],
+         "guidance": None},
+        {"field": "skin_type", "priority": "high", "question": "מה סוג העור שלך?",
+         "options": ["שמן", "יבש", "מעורב", "רגיש", "נורמלי"],
+         "guidance": "שאלי על תחושת העור אחרי שטיפה, ברק, נטייה לקשקשים"},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?",
+         "options": ["כן", "לא"], "guidance": None},
+    ],
+
+    # ── מניקור ופדיקור ────────────────────────────────────────
     "מניקור ופדיקור": [
-        {"field": "service_type", "priority": "high", "question": "מה את מחפשת?", "options": ["מניקור רגיל", "לק גל", "עיצוב ציפורניים", "פדיקור אסתטי", "פדיקור טיפולי"], "guidance": None},
+        {"field": "nail_service", "priority": "high", "question": "מה את מחפשת?",
+         "options": ["מניקור רגיל", "לק ג'ל", "עיצוב ופיסול ציפורן", "פדיקור אסתטי", "פדיקור טיפולי"],
+         "guidance": None},
     ],
+
+    # ── טיפולי גוף ───────────────────────────────────────────
     "טיפולי גוף": [
-        {"field": "massage_type", "priority": "high",   "question": "איזה סוג עיסוי מעניין אותך?",  "options": ["הרפיה", "כאבי גב/צוואר", "ספורט", "הריון", "רפלקסולוגיה"], "guidance": None},
-        {"field": "pregnant",     "priority": "critical","question": "את בהריון כרגע?",              "options": ["כן", "לא"],                                                   "guidance": None},
+        {"field": "massage_goal", "priority": "high", "question": "מה מטרת העיסוי?",
+         "options": ["הרפיה וסטרס", "כאבי גב / צוואר / כתפיים", "ספורט ושיקום", "מהלך הריון", "רפלקסולוגיה"],
+         "guidance": "שאלי אם יש כאב ספציפי, מה רמת הפעילות הגופנית שלה, האם יש הריון"},
+        {"field": "intensity", "priority": "medium", "question": "עיסוי עדין או עמוק?",
+         "options": ["עדין ומרגיע", "עמוק ואינטנסיבי", "בינוני"],
+         "guidance": None},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון כרגע?",
+         "options": ["כן", "לא"], "guidance": None},
     ],
+
+    # ── איפור קבוע ועיצוב גבות ───────────────────────────────
     "איפור קבוע ועיצוב גבות": [
-        {"field": "pmu_area", "priority": "high", "question": "באיזה אזור מעוניינת?", "options": ["גבות", "עיניים", "שפתיים", "קרקפת"], "guidance": None},
-        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?", "options": ["כן", "לא"], "guidance": None},
+        {"field": "pmu_area", "priority": "high", "question": "באיזה אזור מעוניינת?",
+         "options": ["גבות", "עיניים / אייליינר", "שפתיים", "קרקפת"],
+         "guidance": None},
+        {"field": "pmu_style", "priority": "high", "question": "איזה סגנון מעניין אותך?",
+         "options": ["טבעי ועדין", "מודגש ומובהק", "לא בטוחה — עזרי לי לבחור"],
+         "guidance": "שאלי על הסגנון האישי שלה, אם היא מאפרת את עצמה בדרך כלל ואיך"},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?",
+         "options": ["כן", "לא"], "guidance": None},
     ],
+
+    # ── סטיילינג אישי ────────────────────────────────────────
+    "סטיילינג אישי": [
+        {"field": "styling_goal", "priority": "high", "question": "מה המטרה של מפגש הסטיילינג?",
+         "options": ["חידוש המראה הכללי", "לקראת אירוע / עסקי", "קניות וארגון ארון", "שינוי מוחלט"],
+         "guidance": None},
+        {"field": "session_length", "priority": "medium", "question": "כמה זמן יש לך?",
+         "options": ["2.5 שעות", "4 שעות"], "guidance": None},
+    ],
+
+    # ── טיפולי קוסמטיקה (alias for קוסמטיקה — frontend category name) ──
+    "טיפולי קוסמטיקה": [
+        {"field": "sub_category", "priority": "high", "question": "מה תחום הטיפול שמעניין אותך?",
+         "options": ["טיפולי פנים", "טיפולים מעצבים", "אקנה ושיקום עור", "אנטי אייג'ינג", "ניקוי והבהרה"],
+         "guidance": "שאלי על המטרה הכללית שלה — האם מחפשת ריענון, טיפול בבעיה ספציפית, שיקום עור, או הרמה ועיצוב"},
+        {"field": "skin_type", "priority": "high", "question": "מה סוג העור שלך?",
+         "options": ["שמן", "יבש", "מעורב", "רגיש", "נורמלי"],
+         "guidance": "שאלי על תחושת העור אחרי שטיפת פנים, האם יש ברק אחרי שעה, נטייה לקשקשים או אודם"},
+        {"field": "age_range", "priority": "medium", "question": "מה טווח הגיל שלך?",
+         "options": ["עד 25", "25-40", "40+"], "guidance": None},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה כרגע?",
+         "options": ["כן", "לא"], "guidance": None},
+    ],
+
+    # ── עיצוב שיער ───────────────────────────────────────────
+    "עיצוב שיער": [
+        {"field": "hair_service", "priority": "high", "question": "מה את מחפשת?",
+         "options": ["תספורת / עיצוב", "צביעה", "טיפול משקם", "החלקה / קרטין", "תסרוקת לאירוע"],
+         "guidance": "שאלי על מטרת הביקור — שינוי מראה, תחזוקה, טיפול בנזק, או הכנה לאירוע"},
+        {"field": "hair_length", "priority": "medium", "question": "מה אורך השיער שלך?",
+         "options": ["קצר", "בינוני", "ארוך"], "guidance": None},
+    ],
+
+    # ── הסרת שיער ────────────────────────────────────────────
+    "הסרת שיער": [
+        {"field": "removal_area", "priority": "high", "question": "באיזה אזור מעוניינת בהסרת שיער?",
+         "options": ["פנים", "בית שחי", "רגליים", "ביקיני", "גוף מלא"],
+         "guidance": "שאלי אם יש שיער בהיר / כהה ומה גוון העור, כי זה משפיע על סוג הלייזר המתאים"},
+        {"field": "skin_tone", "priority": "high", "question": "מה גוון העור שלך?",
+         "options": ["בהיר מאוד", "בהיר", "בינוני", "כהה"],
+         "guidance": "גוון עור כהה עם שיער בהיר דורש טכנולוגיה ספציפית — חשוב לדעת"},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?",
+         "options": ["כן", "לא"], "guidance": None},
+    ],
+
+    # ── איפור מקצועי ─────────────────────────────────────────
+    "איפור מקצועי": [
+        {"field": "occasion", "priority": "high", "question": "לאיזה אירוע את מעוניינת באיפור?",
+         "options": ["חתונה / כלה", "ערב / גאלה", "צילומים", "יומיומי / עסקי", "ספיישל אחר"],
+         "guidance": None},
+        {"field": "makeup_style", "priority": "high", "question": "איזה סגנון איפור מעניין אותך?",
+         "options": ["טבעי ועדין", "גלאם ומודגש", "ערבי / ספרדי", "לא בטוחה — עזרי לי לבחור"],
+         "guidance": "שאלי על הסגנון האישי שלה — האם היא מאפרת בעצמה, ומה הסגנון הרגיל שלה"},
+    ],
+
+    # ── טיפולי אסתטיקה ───────────────────────────────────────
+    "טיפולי אסתטיקה": [
+        {"field": "aesthetic_concern", "priority": "high", "question": "מה הדאגה המרכזית שאת רוצה לטפל בה?",
+         "options": ["קמטים", "כתמים / פיגמנטציה", "צלקות אקנה", "הידוק עור", "זוהר ורענון"],
+         "guidance": "שאלי כמה זמן הבעיה קיימת ואם עברה טיפולים קודמים"},
+        {"field": "skin_type", "priority": "high", "question": "מה סוג העור שלך?",
+         "options": ["שמן", "יבש", "מעורב", "רגיש", "נורמלי"],
+         "guidance": "שאלי על תחושת העור אחרי שטיפה, ברק, נטייה לקשקשים"},
+        {"field": "age_range", "priority": "medium", "question": "מה טווח הגיל שלך?",
+         "options": ["עד 30", "30-45", "45+"], "guidance": None},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?",
+         "options": ["כן", "לא"], "guidance": None},
+    ],
+
+    # ── fallback ──────────────────────────────────────────────
     "_default": [
-        {"field": "goal",     "priority": "high",     "question": "מה המטרה שלך?",      "options": [],         "guidance": None},
-        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?", "options": ["כן", "לא"], "guidance": None},
+        {"field": "goal",     "priority": "high",     "question": "מה המטרה שלך?",
+         "options": [], "guidance": None},
+        {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?",
+         "options": ["כן", "לא"], "guidance": None},
     ],
 }
 
 MINIMUM_FIELDS: Dict[str, List[str]] = {
-    "טיפולי פנים":           ["goal", "pregnant"],
-    "לייזר":                 ["area", "pregnant"],
-    "מניקור ופדיקור":        ["service_type"],
-    "טיפולי גוף":            ["massage_type", "pregnant"],
-    "איפור קבוע ועיצוב גבות": ["pmu_area", "pregnant"],
-    "_default":              ["goal"],
+    "קוסמטיקה":                ["sub_category", "skin_type", "pregnant"],
+    "טיפולי קוסמטיקה":         ["sub_category", "skin_type", "pregnant"],
+    "טיפולי פנים":             ["skin_type", "pregnant"],
+    "טיפולים מעצבים":          ["concern", "pregnant"],
+    "אקנה ושיקום עור":         ["acne_severity", "pregnant"],
+    "אנטי אייג'ינג":           ["main_concern", "pregnant"],
+    "ניקוי והבהרה":            ["skin_issue", "pregnant"],
+    "מניקור ופדיקור":          ["nail_service"],
+    "טיפולי גוף":              ["massage_goal", "pregnant"],
+    "איפור קבוע ועיצוב גבות":  ["pmu_area", "pregnant"],
+    "סטיילינג אישי":           ["styling_goal"],
+    "עיצוב שיער":              ["hair_service"],
+    "הסרת שיער":               ["removal_area", "pregnant"],
+    "איפור מקצועי":            ["occasion"],
+    "טיפולי אסתטיקה":          ["aesthetic_concern", "pregnant"],
+    "_default":                ["goal"],
 }
 
 
@@ -262,7 +425,7 @@ def classify_intent(message: str, history: List[Dict]) -> Dict:
     if not groq_client:
         return {"intent": "general", "category": None}
 
-    categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
+    categories = ALL_CATEGORIES
     history_text = ""
     for msg in history[-4:]:
         role = "User" if msg.get("from") == "user" else "Assistant"
@@ -299,7 +462,7 @@ Respond ONLY with valid JSON on one line, no explanation:
         return {"intent": "general", "category": None}
 
 
-def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) -> str:
+def general_answer(message: str, history: List[Dict], selected: Optional[Dict], post_recommendation: bool = False) -> str:
     """Call 2A — Pure conversation for general questions."""
     if not groq_client:
         raise HTTPException(status_code=503, detail="Chat service not configured")
@@ -320,14 +483,20 @@ def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) 
             f"שאלות ותשובות נפוצות:\n{faq_text or 'אין.'}"
         )
     else:
-        categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
-        context = f"קטגוריות טיפולים בקליניקה: {', '.join(categories)}"
+        context = f"קטגוריות טיפולים בקליניקה: {', '.join(ALL_CATEGORIES)}"
 
     system = (
         "אתה עוזרת AI של MeDay - קליניקת יופי וטיפולים קוסמטיים.\n"
         "ענה תמיד בעברית בצורה חמה, מקצועית ומזמינה.\n"
         "בסס את תשובותיך על המידע שנמסר לך בלבד.\n\n" + context
     )
+
+    if post_recommendation:
+        system += (
+            "\n\nשים לב: ההמלצות כבר ניתנו ללקוחה בהודעה הקודמת. "
+            "אל תחזרי על רשימת הטיפולים המומלצים ואל תציגי אותם שוב. "
+            "ענה רק על שאלת ההמשך הנוכחית בצורה קצרה וממוקדת."
+        )
 
     messages = [{"role": "system", "content": system}]
     for msg in history[-8:]:
@@ -363,17 +532,19 @@ def guided_conversation(message: str, history: List[Dict], profile: Dict, catego
     system = f"""אתה יועצת יופי חכמה של MeDay בקטגוריה: {category}.
 מנהלת שיחה אישית עם לקוחה כדי להמליץ על הטיפול הכי מתאים לה.
 
-מידע שכבר ידוע:
+מידע שכבר ידוע על הלקוחה:
 {known}
 
 {next_instruction}
 
-כללים:
-1. ענה בעברית חמה ואישית
-2. אם הלקוחה ענתה על שאלה קודמת — חלצי את הערך ל-profile_update
+כללים חשובים:
+1. ענה בעברית חמה ואישית — כמו חברה שמבינה יופי
+2. אם הלקוחה ענתה על שאלה קודמת — **הכירי בתשובה שלה בחום** לפני שתשאלי את השאלה הבאה
+   לדוגמה: "מעולה, עור מעורב — הבנתי 😊 ועכשיו..."
 3. אם הלקוחה שאלה שאלה כללית — ענה עליה בקצרה ואז המשיכי לשאלה הבאה
 4. {ready_instruction}
 5. אל תמציאי מידע רפואי שאינו מוצג לך
+6. אל תחזרי על שאלות שכבר נענו
 
 החזירי ONLY valid JSON:
 {{"reply": "...", "profile_update": {{}}, "ready_to_recommend": false}}"""
@@ -390,8 +561,11 @@ def guided_conversation(message: str, history: List[Dict], profile: Dict, catego
             response_format={"type": "json_object"},
         )
         result = json.loads(resp.choices[0].message.content)
+        reply_text = result.get("reply", "")
+        # Strip any leaked JSON field artifacts from the reply text
+        reply_text = re.sub(r'ready_to_recommend\s*:\s*(true|false)', '', reply_text, flags=re.IGNORECASE).strip()
         return {
-            "reply": result.get("reply", ""),
+            "reply": reply_text,
             "profile_update": result.get("profile_update", {}),
             "ready_to_recommend": bool(result.get("ready_to_recommend", False)),
         }
@@ -400,7 +574,7 @@ def guided_conversation(message: str, history: List[Dict], profile: Dict, catego
         return {"reply": "מצטערת, יש לי תקלה קטנה. אנא נסי שוב.", "profile_update": {}, "ready_to_recommend": False}
 
 
-def sub_discovery(message: str, field: str, category: str, history: List[Dict]) -> str:
+def sub_discovery(message: str, field: str, category: str, history: List[Dict], next_field_info: Optional[Dict] = None) -> str:
     """Sub-discovery — helps client figure out an answer. Ends with [RESOLVED: value]."""
     if not groq_client:
         raise HTTPException(status_code=503, detail="Chat service not configured")
@@ -410,6 +584,14 @@ def sub_discovery(message: str, field: str, category: str, history: List[Dict]) 
     guidance = field_info["guidance"] if field_info else None
     options = field_info["options"] if field_info else []
 
+    # If there is a next question to bridge into after resolving, tell the LLM
+    bridge_hint = ""
+    if next_field_info:
+        bridge_hint = (
+            f"\nאם סיימת לזהות את התשובה, לאחר ה-[RESOLVED:] הוסיפי משפט מעבר חם לשאלה הבאה: "
+            f'"{next_field_info["question"]}" — הסבירי במשפט אחד קצר למה זה חשוב לנו לדעת.'
+        )
+
     system = (
         f"אתה יועצת יופי של MeDay המנסה לעזור ללקוחה להבין מה ה-{field} שלה.\n\n"
         + (f"הנחיה לאבחון: {guidance}\n" if guidance else "")
@@ -418,6 +600,7 @@ def sub_discovery(message: str, field: str, category: str, history: List[Dict]) 
         "ברגע שאת בטוחה מה התשובה, ציני בסוף התשובה: [RESOLVED: הערך]\n"
         "לדוגמה: 'מעולה! נראה שיש לך עור שמן 😊 [RESOLVED: שמן]'\n"
         "אל תכתבי [RESOLVED:] עד שאת בטוחה לגמרי."
+        + bridge_hint
     )
 
     messages = [{"role": "system", "content": system}]
@@ -439,7 +622,20 @@ def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> D
     if not groq_client:
         raise HTTPException(status_code=503, detail="Chat service not configured")
 
-    category_treatments = [t for t in TREATMENTS if t.get("class_name") == category]
+    # Translate frontend category name → Excel class_name using the map
+    excel_class = CATEGORY_TO_CLASS.get(category, category)
+
+    # For קוסמטיקה sub-categories: filter by sub_category field in profile
+    sub_cat = profile.get("sub_category")
+    if sub_cat and sub_cat in CATEGORY_FIELDS:
+        # Filter Excel treatments by תת_קטגוריה matching the sub-category
+        category_treatments = [t for t in TREATMENTS if t.get("category") == sub_cat]
+    else:
+        category_treatments = [t for t in TREATMENTS if t.get("class_name") == excel_class]
+
+    if not category_treatments:
+        # Fallback: all treatments in class_name (try original category name too)
+        category_treatments = [t for t in TREATMENTS if t.get("class_name") == category]
     if not category_treatments:
         category_treatments = TREATMENTS[:10]
 
@@ -510,6 +706,69 @@ def get_treatment(treatment_id: str):
 
 
 # ------------------------------------------------------------
+# All clinic categories — must match serviceCatalog.js names exactly
+# ------------------------------------------------------------
+ALL_CATEGORIES = [
+    "טיפולי קוסמטיקה",
+    "מניקור ופדיקור",
+    "עיצוב שיער",
+    "טיפולי גוף",
+    "הסרת שיער",
+    "איפור מקצועי",
+    "איפור קבוע ועיצוב גבות",
+    "סטיילינג אישי",
+    "טיפולי אסתטיקה",
+]
+
+# Map category name → class_name used in TREATMENTS/Excel
+# (Excel uses "קוסמטיקה", frontend shows "טיפולי קוסמטיקה")
+CATEGORY_TO_CLASS: Dict[str, str] = {
+    "טיפולי קוסמטיקה":         "קוסמטיקה",
+    "מניקור ופדיקור":          "מניקור ופדיקור",
+    "עיצוב שיער":              "עיצוב שיער",
+    "טיפולי גוף":              "טיפולי גוף",
+    "הסרת שיער":               "הסרת שיער",
+    "איפור מקצועי":            "איפור מקצועי",
+    "איפור קבוע ועיצוב גבות":  "איפור קבוע ועיצוב גבות",
+    "סטיילינג אישי":           "סטיילינג אישי",
+    "טיפולי אסתטיקה":          "טיפולי אסתטיקה",
+}
+
+# ------------------------------------------------------------
+# Warm openers — one per category, shown before the first question
+# ------------------------------------------------------------
+WARM_OPENERS: Dict[str, str] = {
+    "טיפולי קוסמטיקה":         "נשמח לעזור לך למצוא את הטיפול הקוסמטי המתאים ביותר 💆‍♀️\nכמה שאלות קצרות ואני אדע בדיוק מה יעשה לך טוב —",
+    "מניקור ופדיקור":          "מניקור ופדיקור זה טיפול שנותן תוצאות מיידיות 💅\nמה את מחפשת היום?",
+    "עיצוב שיער":              "עיצוב שיער מקצועי יכול לשנות הכל ✂️\nספרי לי קצת על מה שאת מחפשת —",
+    "טיפולי גוף":              "עיסוי טוב הוא אחד הדברים הכי טובים שאפשר לעשות לגוף ולנפש 🌿\nבואי נמצא את העיסוי שהכי מתאים לך —",
+    "הסרת שיער":               "הסרת שיער בלייזר היא אחת ההחלטות הכי משחררות שתעשי 🌟\nכמה שאלות קצרות ואמצא לך את הטיפול המדויק —",
+    "איפור מקצועי":            "איפור מקצועי שמתאים לך בדיוק — זה האמנות שלנו 💄\nספרי לי קצת על האירוע או המטרה שלך —",
+    "איפור קבוע ועיצוב גבות":  "איפור קבוע הוא החלטה שמשנה את השגרה היומית לגמרי 🎨\nכמה שאלות ואמצא את הטיפול המדויק בשבילך —",
+    "סטיילינג אישי":           "מפגש סטיילינג הוא הזדמנות לגלות את הסגנון שלך 👗\nבואי נבין מה הכי מתאים לך —",
+    "טיפולי אסתטיקה":          "טיפולי אסתטיקה שלנו מותאמים לכל צורך וכל עור ✨\nכמה שאלות ואמצא לך את הפתרון הנכון —",
+    # Sub-categories of טיפולי קוסמטיקה
+    "טיפולי פנים קלאסיים":     "טיפולי פנים קלאסיים הם הבסיס לעור בריא ומטופח ✨\nבואי נמצא את הטיפול שהכי מתאים לעור שלך —",
+    "טיפולי פנים מפנקים":      "מגיע לך קצת פינוק 💛\nבואי נבין מה יגרום לך להרגיש הכי טוב —",
+    "טיפולי פנים טכנולוגיים מיוחדים": "טכנולוגיה מתקדמת לתוצאות אמיתיות ⭐\nכמה שאלות ואמצא לך את הטיפול המדויק —",
+}
+
+
+# ------------------------------------------------------------
+# Progress helpers
+# ------------------------------------------------------------
+def get_progress(category: str, profile: Dict) -> Dict:
+    """Returns current question number and total for the progress indicator."""
+    fields = get_fields_for_category(category)
+    minimums = MINIMUM_FIELDS.get(category, MINIMUM_FIELDS["_default"])
+    # Count only minimum fields for progress (don't show medium-priority extras)
+    minimum_fields_info = [f for f in fields if f["field"] in minimums]
+    total = len(minimum_fields_info)
+    answered = sum(1 for f in minimum_fields_info if f["field"] in profile)
+    return {"question_number": answered + 1, "total_questions": total}
+
+
+# ------------------------------------------------------------
 # Chat schemas
 # ------------------------------------------------------------
 
@@ -533,6 +792,8 @@ class ChatResponse(BaseModel):
     current_field: Optional[str] = None
     quick_replies: Optional[List[str]] = None
     suggested_treatments: Optional[List[Dict]] = None
+    question_number: Optional[int] = None
+    total_questions: Optional[int] = None
 
 
 # ------------------------------------------------------------
@@ -547,6 +808,33 @@ def chat(req: ChatRequest):
     history = req.history or []
     current_field = req.current_field
 
+    def make_question_response(next_field: Dict, reply_override: Optional[str] = None) -> ChatResponse:
+        """Build a questioning response with progress numbers."""
+        progress = get_progress(category, profile)
+        reply = reply_override if reply_override is not None else next_field["question"]
+        return ChatResponse(
+            reply=reply,
+            mode="questioning",
+            profile=profile,
+            category=category,
+            current_field=next_field["field"],
+            quick_replies=field_chips(next_field),
+            question_number=progress["question_number"],
+            total_questions=progress["total_questions"],
+        )
+
+    def make_recommendation_response(rec: Dict, prefix: str = "") -> ChatResponse:
+        """Build a recommendation response."""
+        reply = (prefix + "\n\n" + rec["reply"]).strip() if prefix else rec["reply"]
+        profile["recommendations_given"] = True
+        return ChatResponse(
+            reply=reply,
+            mode="recommending",
+            profile=profile,
+            category=category,
+            suggested_treatments=rec["suggested_treatments"] or None,
+        )
+
     # ── 0. Treatment-page context ──────────────────────────────
     selected = TREATMENT_MAP.get(req.selected_treatment_id) if req.selected_treatment_id else None
     if selected:
@@ -558,51 +846,80 @@ def chat(req: ChatRequest):
         profile[req.chip_field] = req.chip_value
         next_field = get_next_field(category, profile)
         if next_field is None or can_recommend(category, profile):
-            rec = build_recommendation(profile, category, history)
-            return ChatResponse(reply=rec["reply"], mode="recommending", profile=profile, category=category, suggested_treatments=rec["suggested_treatments"] or None)
-        return ChatResponse(reply=next_field["question"], mode="questioning", profile=profile, category=category, current_field=next_field["field"], quick_replies=field_chips(next_field))
+            return make_recommendation_response(build_recommendation(profile, category, history))
+        return make_question_response(next_field)
 
     # ── 2. Chip tap: "I don't know" → sub-discovery ───────────
     if req.chip_value == "dont_know" and req.chip_field:
-        reply = sub_discovery(req.message, req.chip_field, category, history)
+        # Pass next field so sub-discovery can bridge into it on resolve
+        temp_profile_after = {**profile}
+        # We don't know the resolved value yet, so peek at what comes after current field
+        peek_next = get_next_field(category, {**profile, req.chip_field: "__placeholder__"})
+        reply = sub_discovery(req.message, req.chip_field, category, history, next_field_info=peek_next)
         resolved = re.search(r'\[RESOLVED:\s*(.+?)\]', reply)
         clean_reply = re.sub(r'\[RESOLVED:\s*.+?\]', '', reply).strip()
         if resolved:
             profile[req.chip_field] = resolved.group(1).strip()
             next_field = get_next_field(category, profile)
             if next_field is None or can_recommend(category, profile):
-                rec = build_recommendation(profile, category, history)
-                return ChatResponse(reply=clean_reply + "\n\n" + rec["reply"], mode="recommending", profile=profile, category=category, suggested_treatments=rec["suggested_treatments"] or None)
-            return ChatResponse(reply=clean_reply, mode="questioning", profile=profile, category=category, current_field=next_field["field"], quick_replies=field_chips(next_field))
+                return make_recommendation_response(build_recommendation(profile, category, history), prefix=clean_reply)
+            return make_question_response(next_field, reply_override=clean_reply)
         return ChatResponse(reply=clean_reply, mode="sub_discovery", profile=profile, category=category, current_field=req.chip_field)
 
     # ── 3. Continuing sub-discovery with free text ────────────
     if mode == "sub_discovery" and current_field:
-        reply = sub_discovery(req.message, current_field, category, history)
+        peek_next = get_next_field(category, {**profile, current_field: "__placeholder__"})
+        reply = sub_discovery(req.message, current_field, category, history, next_field_info=peek_next)
         resolved = re.search(r'\[RESOLVED:\s*(.+?)\]', reply)
         clean_reply = re.sub(r'\[RESOLVED:\s*.+?\]', '', reply).strip()
         if resolved:
             profile[current_field] = resolved.group(1).strip()
             next_field = get_next_field(category, profile)
             if next_field is None or can_recommend(category, profile):
-                rec = build_recommendation(profile, category, history)
-                return ChatResponse(reply=clean_reply + "\n\n" + rec["reply"], mode="recommending", profile=profile, category=category, suggested_treatments=rec["suggested_treatments"] or None)
-            return ChatResponse(reply=clean_reply, mode="questioning", profile=profile, category=category, current_field=next_field["field"], quick_replies=field_chips(next_field))
+                return make_recommendation_response(build_recommendation(profile, category, history), prefix=clean_reply)
+            return make_question_response(next_field, reply_override=clean_reply)
         return ChatResponse(reply=clean_reply, mode="sub_discovery", profile=profile, category=category, current_field=current_field)
 
-    # ── 4. Intent classification ───────────────────────────────
+    # ── 4. Post-recommendation: user is just chatting ─────────
+    # Once a recommendation was already given, treat follow-up messages
+    # as general conversation — never re-trigger the guided flow.
+    # Check both mode and the profile flag so stale mode doesn't bypass this.
+    if mode == "recommending" or profile.get("recommendations_given"):
+        reply = general_answer(req.message, history, None, post_recommendation=True)
+        return ChatResponse(reply=reply, mode="recommending", profile=profile, category=category)
+
+    # ── 5. Intent classification ───────────────────────────────
+    is_first_question = False
     if not category:
         classification = classify_intent(req.message, history)
         if classification["intent"] == "recommendation" and classification.get("category"):
             category = classification["category"]
             mode = "questioning"
+            is_first_question = True
 
-    # ── 5. General answer ──────────────────────────────────────
+    # ── 6. General answer ──────────────────────────────────────
     if mode == "idle" or not category:
         reply = general_answer(req.message, history, None)
         return ChatResponse(reply=reply, mode="idle", profile=profile, category=category)
 
-    # ── 6. Guided conversation (free text in recommendation flow)
+    # ── 7. First question — prepend warm opener ────────────────
+    if is_first_question:
+        next_field = get_next_field(category, profile)
+        if next_field:
+            opener = WARM_OPENERS.get(category, "כמה שאלות קצרות ואמצא לך את הטיפול המתאים —")
+            progress = get_progress(category, profile)
+            return ChatResponse(
+                reply=f"{opener}\n\n{next_field['question']}",
+                mode="questioning",
+                profile=profile,
+                category=category,
+                current_field=next_field["field"],
+                quick_replies=field_chips(next_field),
+                question_number=progress["question_number"],
+                total_questions=progress["total_questions"],
+            )
+
+    # ── 8. Guided conversation (free text in recommendation flow)
     next_field = get_next_field(category, profile)
     result = guided_conversation(req.message, history, profile, category, next_field)
     profile.update(result.get("profile_update", {}))
@@ -610,10 +927,12 @@ def chat(req: ChatRequest):
 
     if (result.get("ready_to_recommend") or next_field is None) and can_recommend(category, profile):
         rec = build_recommendation(profile, category, history)
-        combined = (result["reply"] + "\n\n" + rec["reply"]) if result["reply"] else rec["reply"]
-        return ChatResponse(reply=combined, mode="recommending", profile=profile, category=category, suggested_treatments=rec["suggested_treatments"] or None)
+        return make_recommendation_response(rec, prefix=result["reply"])
 
-    return ChatResponse(reply=result["reply"], mode="questioning", profile=profile, category=category, current_field=next_field["field"] if next_field else None, quick_replies=field_chips(next_field) if next_field else None)
+    if next_field:
+        return make_question_response(next_field, reply_override=result["reply"])
+
+    return ChatResponse(reply=result["reply"], mode="questioning", profile=profile, category=category)
 
 
 # ------------------------------------------------------------
@@ -728,21 +1047,83 @@ def reschedule_appointment(appt_id: int, data: AppointmentReschedule):
 
 
 @app.get("/appointments/analytics")
-def get_analytics():
+def get_analytics(from_date: Optional[str] = None, to_date: Optional[str] = None):
     conn = get_db()
-    total = conn.execute("SELECT COUNT(*) as c FROM appointments").fetchone()["c"]
-    by_treatment = conn.execute("SELECT treatment_name, COUNT(*) as count FROM appointments GROUP BY treatment_name ORDER BY count DESC LIMIT 10").fetchall()
-    by_day = conn.execute("SELECT strftime('%w', date) as day_num, COUNT(*) as count FROM appointments GROUP BY day_num ORDER BY day_num").fetchall()
-    by_hour = conn.execute("SELECT substr(time, 1, 2) as hour, COUNT(*) as count FROM appointments GROUP BY hour ORDER BY hour").fetchall()
-    recent = conn.execute("SELECT * FROM appointments ORDER BY created_at DESC LIMIT 5").fetchall()
+
+    # Build optional date range filter
+    where_parts = []
+    params = []
+    if from_date:
+        where_parts.append("date >= ?")
+        params.append(from_date)
+    if to_date:
+        where_parts.append("date <= ?")
+        params.append(to_date)
+    where_clause = ("WHERE " + " AND ".join(where_parts)) if where_parts else ""
+
+    total = conn.execute(f"SELECT COUNT(*) as c FROM appointments {where_clause}", params).fetchone()["c"]
+
+    by_treatment = conn.execute(
+        f"SELECT treatment_name, COUNT(*) as count FROM appointments {where_clause} GROUP BY treatment_name ORDER BY count DESC LIMIT 10",
+        params,
+    ).fetchall()
+
+    by_day = conn.execute(
+        f"SELECT strftime('%w', date) as day_num, COUNT(*) as count FROM appointments {where_clause} GROUP BY day_num ORDER BY day_num",
+        params,
+    ).fetchall()
+
+    by_hour = conn.execute(
+        f"SELECT substr(time, 1, 2) as hour, COUNT(*) as count FROM appointments {where_clause} GROUP BY hour ORDER BY hour",
+        params,
+    ).fetchall()
+
+    recent = conn.execute(
+        f"SELECT * FROM appointments {where_clause} ORDER BY date DESC, time DESC LIMIT 10",
+        params,
+    ).fetchall()
+
+    # Today's count (always absolute, ignores date range filter)
+    today_count = conn.execute(
+        "SELECT COUNT(*) as c FROM appointments WHERE date = date('now', 'localtime')"
+    ).fetchone()["c"]
+
+    # This week's count (always absolute)
+    this_week_count = conn.execute(
+        "SELECT COUNT(*) as c FROM appointments WHERE strftime('%Y-%W', date) = strftime('%Y-%W', date('now', 'localtime'))"
+    ).fetchone()["c"]
+
+    # By category breakdown (respects date filter)
+    cat_where_parts = list(where_parts) + ["treatment_category IS NOT NULL", "treatment_category != ''"]
+    cat_where = "WHERE " + " AND ".join(cat_where_parts)
+    by_category = conn.execute(
+        f"SELECT treatment_category, COUNT(*) as count FROM appointments {cat_where} GROUP BY treatment_category ORDER BY count DESC",
+        params,
+    ).fetchall()
+
+    # Monthly trend — last 6 calendar months (always absolute)
+    monthly_trend = conn.execute(
+        """
+        SELECT strftime('%Y-%m', date) as month, COUNT(*) as count
+        FROM appointments
+        WHERE date >= date('now', 'localtime', '-5 months', 'start of month')
+        GROUP BY month
+        ORDER BY month
+        """
+    ).fetchall()
+
     conn.close()
 
     day_names = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
     return {
         "total": total,
+        "today": today_count,
+        "this_week": this_week_count,
         "by_treatment": [{"name": r["treatment_name"], "count": r["count"]} for r in by_treatment],
         "by_day": [{"day": day_names[int(r["day_num"])], "count": r["count"]} for r in by_day],
         "by_hour": [{"hour": f"{r['hour']}:00", "count": r["count"]} for r in by_hour],
+        "by_category": [{"category": r["treatment_category"], "count": r["count"]} for r in by_category],
+        "monthly_trend": [{"month": r["month"], "count": r["count"]} for r in monthly_trend],
         "recent": [dict(r) for r in recent],
     }
 
