@@ -110,6 +110,31 @@ body {
 .dark-scroll::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); }
 .dark-scroll::-webkit-scrollbar-thumb { background: rgba(139,92,246,0.4); border-radius: 99px; }
 
+/* ── Space scrollbar (completely hidden) ─────────────────────────────── */
+.space-scroll                          { scrollbar-width: none; }
+.space-scroll::-webkit-scrollbar       { display: none; }
+
+/* ── Shooting star keyframe ──────────────────────────────────────────── */
+@keyframes shoot {
+  0%   { transform: translateX(0) translateY(0) scaleX(0); opacity: 0; }
+  10%  { opacity: 1; transform: translateX(0) translateY(0) scaleX(1); }
+  90%  { opacity: 0.6; }
+  100% { transform: translateX(220px) translateY(220px) scaleX(0); opacity: 0; }
+}
+
+/* ── Space nebula pulse ───────────────────────────────────────────────── */
+@keyframes nebulaPulse {
+  0%, 100% { transform: scale(1)   rotate(0deg);   opacity: 0.18; }
+  33%       { transform: scale(1.08) rotate(3deg);   opacity: 0.26; }
+  66%       { transform: scale(0.95) rotate(-2deg);  opacity: 0.20; }
+}
+
+/* ── Planet orbit ─────────────────────────────────────────────────────── */
+@keyframes orbit {
+  from { transform: rotate(0deg)   translateX(120px) rotate(0deg); }
+  to   { transform: rotate(360deg) translateX(120px) rotate(-360deg); }
+}
+
 /* ── Gradient text variants ──────────────────────────────────────────── */
 .gradient-text-cyan {
   background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%);
