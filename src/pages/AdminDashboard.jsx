@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { fetchAnalytics } from "../api/medayApi";
 import { BarChart2, TrendingUp, Calendar, Clock, Sparkles, Users } from "lucide-react";
 
-function Bar({ label, count, max, color = "bg-pink-400" }) {
+function Bar({ label, count, max, color = "bg-primary" }) {
   const pct = max > 0 ? Math.round((count / max) * 100) : 0;
   return (
     <div className="flex items-center gap-3 text-sm">
@@ -69,7 +69,7 @@ export default function AdminDashboard() {
         {/* KPI Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 flex items-center gap-4">
-            <div className="w-12 h-12 bg-pink-50 rounded-xl flex items-center justify-center text-pink-500">
+            <div className="w-12 h-12 bg-accent-light rounded-xl flex items-center justify-center text-primary-dark">
               <Users size={22} />
             </div>
             <div>
@@ -104,7 +104,7 @@ export default function AdminDashboard() {
           {/* By Treatment */}
           <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6">
             <h2 className="text-base font-bold text-gray-800 mb-5 flex items-center gap-2">
-              <TrendingUp size={16} className="text-pink-500" />
+              <TrendingUp size={16} className="text-primary-dark" />
               טיפולים מבוקשים
             </h2>
             {data.by_treatment.length === 0 ? (
@@ -112,7 +112,7 @@ export default function AdminDashboard() {
             ) : (
               <div className="space-y-3">
                 {data.by_treatment.map((t) => (
-                  <Bar key={t.name} label={t.name} count={t.count} max={maxTreatment} color="bg-pink-400" />
+                  <Bar key={t.name} label={t.name} count={t.count} max={maxTreatment} color="bg-primary" />
                 ))}
               </div>
             )}

@@ -8,13 +8,17 @@ export default {
   theme: {
     extend: {
       colors: {
-        // הגדרת הצבעים המזוהים עם MeDay
+        // הגדרת הצבעים המזוהים עם MeDay - ירוק וביז
         primary: {
-          DEFAULT: "#e8a5b5", // הורוד של הלוגו והמיתוג
-          dark: "#d48fa0",
-          light: "#f5d6dd",
+          DEFAULT: "#5f8f6f", // ירוק סג
+          dark: "#3d6e4f",
+          light: "#a8d5a8",
         },
-        secondary: "#fcfaf9", // צבע רקע עדין
+        secondary: "#f3ede3", // צבע רקע בז וחם
+        accent: {
+          DEFAULT: "#4a7c59",
+          light: "#dceed6",
+        },
       },
       // הגדרת אנימציות (בשביל הצ'אט ודף הבית)
       animation: {

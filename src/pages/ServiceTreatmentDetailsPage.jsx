@@ -14,7 +14,7 @@ function InfoRow({ icon: Icon, label, value }) {
   if (!value) return null;
 
   return (
-    <div className="flex items-start gap-3 border-b border-pink-50 py-4 last:border-b-0">
+    <div className="flex items-start gap-3 border-b border-accent-light/30 py-4 last:border-b-0">
       <Icon className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
       <div className="space-y-1">
         <p className="text-sm font-bold text-gray-900">{label}</p>
@@ -26,13 +26,26 @@ function InfoRow({ icon: Icon, label, value }) {
 
 function VariantCard({ variant, treatmentName }) {
   return (
-    <article className="rounded-[2rem] border border-pink-100 bg-white p-7 shadow-sm">
+    <article className="rounded-[2rem] border border-accent-light bg-white p-7 shadow-sm">
       <div className="space-y-4">
-        <div>
-          <h3 className="text-2xl font-bold text-[#4f8d98]">{variant.name}</h3>
-          {variant.description ? (
-            <p className="mt-4 text-base leading-8 text-gray-700">{variant.description}</p>
-          ) : null}
+        <div className="flex items-start gap-4">
+          {/* Variant Image */}
+          {variant.image && (
+            <div className="flex-shrink-0">
+              <img
+                src={variant.image}
+                alt={variant.name}
+                className="w-16 h-16 object-cover rounded-lg shadow-sm"
+              />
+            </div>
+          )}
+
+          <div className="flex-1">
+            <h3 className="text-2xl font-bold text-[#4f8d98]">{variant.name}</h3>
+            {variant.description ? (
+              <p className="mt-4 text-base leading-8 text-gray-700">{variant.description}</p>
+            ) : null}
+          </div>
         </div>
 
         {variant.details?.length ? (
@@ -45,7 +58,7 @@ function VariantCard({ variant, treatmentName }) {
           </div>
         ) : null}
 
-        <div className="rounded-3xl bg-pink-50/50 p-5">
+        <div className="rounded-3xl bg-accent-light/50 p-5">
           <div className="space-y-3">
             {variant.idealFor ? (
               <div>
@@ -108,7 +121,7 @@ export default function ServiceTreatmentDetailsPage() {
 
   if (!category || !treatment) {
     return (
-      <div className="min-h-screen bg-[#fffafa] px-6 py-16" dir="rtl">
+      <div className="min-h-screen bg-secondary px-6 py-16" dir="rtl">
         <div className="mx-auto max-w-4xl rounded-3xl border border-red-100 bg-white p-10 text-center shadow-sm">
           <h1 className="text-3xl font-bold text-gray-900">דף הטיפול לא נמצא</h1>
           <p className="mt-4 text-gray-500">אפשר לחזור לקטגוריה ולבחור טיפול אחר.</p>
@@ -133,7 +146,7 @@ export default function ServiceTreatmentDetailsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#fffafa] px-6 py-12" dir="rtl">
+    <div className="min-h-screen bg-secondary px-6 py-12" dir="rtl">
       <div className="mx-auto max-w-6xl">
         <Link
           to={`/categories/${category.slug}`}
@@ -143,8 +156,8 @@ export default function ServiceTreatmentDetailsPage() {
           חזרה ל-{category.name}
         </Link>
 
-        <div className="rounded-[2.5rem] border border-pink-100 bg-white px-8 py-10 shadow-sm">
-          <div className="inline-flex items-center gap-2 rounded-full bg-pink-100 px-4 py-1.5 text-sm font-bold text-primary">
+        <div className="rounded-[2.5rem] border border-accent-light bg-white px-8 py-10 shadow-sm">
+          <div className="inline-flex items-center gap-2 rounded-full bg-accent-light px-4 py-1.5 text-sm font-bold text-primary">
             <Sparkles size={16} />
             <span>{category.name}</span>
           </div>
@@ -156,11 +169,29 @@ export default function ServiceTreatmentDetailsPage() {
           <p className="mt-6 max-w-4xl text-base leading-8 text-gray-600">
             {treatment.description || treatment.summary}
           </p>
+
+          {/* Treatment Image */}
+          {treatment.image && (
+            <div className="mt-8 relative">
+              <div className="absolute inset-0 bg-gradient-to-r from-primary/10 to-secondary/20 rounded-2xl"></div>
+              <img
+                src={treatment.image}
+                alt={treatment.name}
+                className="relative w-full max-w-2xl mx-auto rounded-2xl shadow-lg object-cover border-4 border-white"
+                style={{ maxHeight: '400px' }}
+              />
+              <div className="absolute bottom-4 left-4 right-4 bg-white/90 backdrop-blur-sm rounded-xl p-4">
+                <p className="text-sm font-medium text-primary text-center">
+                  טיפול מקצועי במרכז היופי MeDay
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="mt-8 grid grid-cols-1 gap-8 xl:grid-cols-[1.8fr_0.95fr]">
           <div className="space-y-8">
-            <section className="rounded-[2rem] border border-pink-100 bg-white p-8 shadow-sm">
+            <section className="rounded-[2rem] border border-accent-light bg-white p-8 shadow-sm">
               <h2 className="mb-5 text-2xl font-bold text-gray-900">על הטיפול</h2>
 
               <div className="space-y-3 text-gray-700">
@@ -180,7 +211,7 @@ export default function ServiceTreatmentDetailsPage() {
             </section>
 
             {treatment.variants?.length ? (
-              <section className="rounded-[2rem] border border-pink-100 bg-white/90 p-8 shadow-sm">
+              <section className="rounded-[2rem] border border-accent-light bg-white/90 p-8 shadow-sm">
                 <h2 className="text-3xl font-bold text-gray-900">הסוגים בתוך הטיפול</h2>
                 <p className="mt-3 max-w-3xl text-sm leading-7 text-gray-500">
                   כל האפשרויות של {treatment.name} מרוכזות כאן בתוך אותו עמוד, לפי המבנה שביקשת.
@@ -200,7 +231,7 @@ export default function ServiceTreatmentDetailsPage() {
           </div>
 
           <aside className="space-y-6">
-            <div className="rounded-[2rem] bg-gray-900 p-8 text-white shadow-xl">
+            <div className="rounded-[2rem] bg-primary-dark p-8 text-white shadow-xl">
               <h3 className="text-2xl font-bold">MeDay Tip</h3>
               <p className="mt-4 text-sm leading-7 text-gray-300">
                 {treatment.consultation || "נוכל להוסיף כאן המלצת ייעוץ או הערה חשובה לגבי הטיפול."}
@@ -221,13 +252,13 @@ export default function ServiceTreatmentDetailsPage() {
               </div>
             </div>
 
-            <div className="rounded-[2rem] border border-pink-100 bg-white p-8 shadow-sm">
+            <div className="rounded-[2rem] border border-accent-light bg-white p-8 shadow-sm">
               <h3 className="text-xl font-bold text-gray-900">שאלות נפוצות</h3>
 
               {treatment.faq?.length ? (
                 <div className="mt-5 space-y-4">
                   {treatment.faq.map((item) => (
-                    <div key={item.question} className="rounded-2xl bg-pink-50/40 p-4">
+                    <div key={item.question} className="rounded-2xl bg-accent-light/40 p-4">
                       <p className="font-bold text-gray-900">{item.question}</p>
                       <p className="mt-2 text-sm leading-7 text-gray-600">{item.answer}</p>
                     </div>

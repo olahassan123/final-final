@@ -7,10 +7,10 @@ export default function CategorySelectionPage() {
   const navigate = useNavigate();
 
   return (
-    <div className="min-h-screen bg-[#fffafa] px-6 py-12" dir="rtl">
+    <div className="min-h-screen bg-secondary px-6 py-12" dir="rtl">
       <div className="mx-auto max-w-5xl">
         <div className="mb-12 text-center">
-          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-pink-100 px-4 py-1.5 text-sm font-bold text-primary">
+          <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-accent-light px-4 py-1.5 text-sm font-bold text-primary">
             <Sparkles size={16} />
             <span>MeDay Beauty Center</span>
           </div>
@@ -23,7 +23,7 @@ export default function CategorySelectionPage() {
             <button
               key={category.slug}
               onClick={() => navigate(`/categories/${category.slug}`)}
-              className="group flex items-center justify-between rounded-2xl border border-pink-100 bg-white p-6 text-right transition-all hover:border-primary hover:shadow-lg"
+              className="group flex items-center justify-between rounded-2xl border border-accent-light bg-white p-6 text-right transition-all hover:border-primary hover:shadow-lg"
             >
               <span className="text-xl font-bold text-gray-900 transition-colors group-hover:text-primary">
                 {category.name}

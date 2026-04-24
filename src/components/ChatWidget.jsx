@@ -118,23 +118,23 @@ export default function ChatWidget() {
 
       {/* Chat Window */}
       {open && (
-        <div className="absolute bottom-20 left-0 w-[380px] max-w-[90vw] h-[600px] bg-white rounded-3xl shadow-2xl border border-pink-50 overflow-hidden flex flex-col animate-in slide-in-from-bottom-5">
+        <div className="absolute bottom-20 left-0 w-[380px] max-w-[90vw] h-[600px] bg-white rounded-3xl shadow-2xl border border-accent-light overflow-hidden flex flex-col animate-in slide-in-from-bottom-5">
           
           {/* Header */}
-          <div className="bg-gradient-to-l from-primary to-pink-300 p-6 text-white">
+          <div className="bg-gradient-to-l from-primary to-accent p-6 text-white">
             <div className="flex justify-between items-center">
               <div>
                 <h3 className="font-bold text-xl flex items-center gap-2">
                   <Sparkles size={18} />
                   MeDay AI
                 </h3>
-                <p className="text-pink-50 text-xs opacity-90 mt-1">
+                <p className="text-white/80 text-xs opacity-90 mt-1">
                   ייעוץ חכם בהתאמה אישית
                 </p>
 
                 {/* Context Display */}
                 {selectedTreatment?.name && (
-                  <p className="text-pink-50 text-[11px] font-medium bg-white/10 rounded-full px-2 py-0.5 mt-2 inline-block">
+                  <p className="text-white/80 text-[11px] font-medium bg-white/10 rounded-full px-2 py-0.5 mt-2 inline-block">
                     הקשר: {selectedTreatment.name}
                   </p>
                 )}
@@ -172,7 +172,7 @@ export default function ChatWidget() {
                     "max-w-[85%] p-4 rounded-2xl text-sm leading-relaxed",
                     m.from === "user"
                       ? "bg-primary text-white rounded-tl-none shadow-md"
-                      : "bg-white text-gray-800 border border-pink-100 rounded-tr-none shadow-sm"
+                      : "bg-white text-gray-800 border border-accent-light rounded-tr-none shadow-sm"
                   )}
                 >
                   {m.text}
@@ -202,7 +202,7 @@ export default function ChatWidget() {
                           setSelectedTreatment({ id: r.id, name: r.name });
                           navigate(`/treatments/${r.id}`);
                         }}
-                        className="w-full bg-white hover:bg-pink-50 border border-pink-200 p-3 rounded-xl text-right text-sm font-medium text-primary transition-all flex justify-between items-center group shadow-sm"
+                        className="w-full bg-white hover:bg-accent-light border border-accent-light p-3 rounded-xl text-right text-sm font-medium text-primary transition-all flex justify-between items-center group shadow-sm"
                       >
                         <span>טיפול מומלץ: {r.name}</span>
                         <Sparkles size={14} className="opacity-0 group-hover:opacity-100 transition-opacity" />
@@ -255,7 +255,7 @@ function ChatInput({ onSend, disabled }) {
       <button
         onClick={submit}
         disabled={disabled || !val.trim()}
-        className="absolute left-2 p-2 text-primary hover:text-pink-600 disabled:text-gray-300 transition-colors"
+        className="absolute left-2 p-2 text-primary hover:text-primary-dark disabled:text-gray-300 transition-colors"
       >
         <Send size={20} className="rotate-180" />
       </button>

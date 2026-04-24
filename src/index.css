@@ -16,8 +16,8 @@ body {
   min-height: 100vh;
   /* ביטול המרכוז הכפוי של Vite */
   display: block;
-  background-color: #ffffff;
-  color: #1a1a1a;
+  background-color: #f3ede3;
+  color: #2d3a2e;
   font-family: 'Heebo', 'Assistant', system-ui, -apple-system, sans-serif;
 }
 

@@ -13,7 +13,7 @@ export default function TreatmentCard({ t }) {
 
   return (
     <article className="rounded-3xl bg-white border border-black/5 shadow-sm hover:shadow-lg transition-shadow p-7 text-center">
-      <h3 className="text-2xl font-extrabold text-[#1f6f73] leading-tight">
+      <h3 className="text-2xl font-extrabold text-primary-dark leading-tight">
         {t.name}
       </h3>
 

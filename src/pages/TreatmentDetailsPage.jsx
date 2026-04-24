@@ -6,7 +6,7 @@ import { ArrowRight, Clock, ShieldCheck, Sparkles, AlertCircle, MessageCircle } 
 function DetailRow({ label, value, icon: Icon }) {
   if (!value) return null;
   return (
-    <div className="flex items-start gap-3 py-4 border-b border-pink-50 last:border-0">
+    <div className="flex items-start gap-3 py-4 border-b border-accent-light/30 last:border-0">
       {Icon && <Icon className="w-5 h-5 text-primary shrink-0 mt-0.5" />}
       <div className="flex flex-col sm:flex-row sm:gap-2">
         <span className="font-bold text-gray-800 min-w-[150px]">{label}:</span>
@@ -92,7 +92,7 @@ export default function TreatmentDetailsPage() {
             <Sparkles className="w-5 h-5 text-primary" />
             מידע על הטיפול
           </h3>
-          <div className="bg-pink-50/30 rounded-3xl p-6 border border-pink-100/50">
+          <div className="bg-accent-light/30 rounded-3xl p-6 border border-accent-light/50">
             <DetailRow label="מתאים לכל סוגי העור" value={treatment.suitable_for_all_skins} />
             <DetailRow label="גילאים" value={treatment.ages} />
             <DetailRow label="מתי רואים תוצאות" value={treatment.results_timing} icon={Clock} />
@@ -103,7 +103,7 @@ export default function TreatmentDetailsPage() {
         </div>
 
         <div className="space-y-6">
-          <div className="bg-gray-900 text-white rounded-3xl p-8 shadow-xl">
+          <div className="bg-primary-dark text-white rounded-3xl p-8 shadow-xl">
             <h4 className="text-xl font-bold mb-4 italic">MeDay Tip</h4>
             <p className="text-gray-300 leading-relaxed mb-6">
               חשוב לדעת: {treatment.consultation_required === 'Yes' ? 'טיפול זה דורש ייעוץ מקדים עם המומחיות שלנו.' : 'ניתן להגיע לטיפול ללא פגישת ייעוץ מקדימה.'}

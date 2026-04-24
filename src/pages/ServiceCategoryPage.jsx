@@ -6,12 +6,24 @@ function TreatmentLinkCard({ categorySlug, treatment, sectionTitle = null }) {
   return (
     <Link
       to={`/categories/${categorySlug}/${treatment.slug}`}
-      className="group rounded-3xl border border-pink-100 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:border-primary hover:shadow-lg"
+      className="group rounded-3xl border border-accent-light bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:border-primary hover:shadow-lg"
     >
-      <div className="flex items-start justify-between gap-4">
-        <div className="space-y-3 text-right">
+      <div className="flex items-start gap-4">
+        {/* Treatment Image */}
+        {treatment.image && (
+          <div className="flex-shrink-0 relative">
+            <div className="absolute inset-0 bg-gradient-to-br from-primary/10 to-secondary/5 rounded-lg"></div>
+            <img
+              src={treatment.image}
+              alt={treatment.name}
+              className="relative w-20 h-20 object-cover rounded-xl shadow-sm border border-white"
+            />
+          </div>
+        )}
+
+        <div className="flex-1 space-y-3 text-right">
           {sectionTitle ? (
-            <span className="inline-flex rounded-full bg-pink-50 px-3 py-1 text-xs font-bold text-primary">
+            <span className="inline-flex rounded-full bg-accent-light px-3 py-1 text-xs font-bold text-primary">
               {sectionTitle}
             </span>
           ) : null}
@@ -25,7 +37,7 @@ function TreatmentLinkCard({ categorySlug, treatment, sectionTitle = null }) {
           </p>
         </div>
 
-        <span className="mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-pink-50 text-primary transition-all group-hover:bg-primary group-hover:text-white">
+        <span className="mt-1 inline-flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-accent-light text-primary transition-all group-hover:bg-primary group-hover:text-white">
           <ArrowLeft size={20} />
         </span>
       </div>
@@ -39,7 +51,7 @@ export default function ServiceCategoryPage() {
 
   if (!category) {
     return (
-      <div className="min-h-screen bg-[#fffafa] px-6 py-16" dir="rtl">
+      <div className="min-h-screen bg-secondary px-6 py-16" dir="rtl">
         <div className="mx-auto max-w-4xl rounded-3xl border border-red-100 bg-white p-10 text-center shadow-sm">
           <h1 className="text-3xl font-bold text-gray-900">הקטגוריה לא נמצאה</h1>
           <p className="mt-4 text-gray-500">אפשר לחזור למסך הקטגוריות ולבחור טיפול אחר.</p>
@@ -64,7 +76,7 @@ export default function ServiceCategoryPage() {
   }
 
   return (
-    <div className="min-h-screen bg-[#fffafa] px-6 py-12" dir="rtl">
+    <div className="min-h-screen bg-secondary px-6 py-12" dir="rtl">
       <div className="mx-auto max-w-6xl">
         <Link
           to="/categories"
@@ -74,10 +86,10 @@ export default function ServiceCategoryPage() {
           חזרה לסוגי טיפולים
         </Link>
 
-        <div className="rounded-[2rem] border border-pink-100 bg-white px-8 py-10 shadow-sm">
+        <div className="rounded-[2rem] border border-accent-light bg-white px-8 py-10 shadow-sm">
           <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
             <div className="space-y-4">
-              <div className="inline-flex items-center gap-2 rounded-full bg-pink-100 px-4 py-1.5 text-sm font-bold text-primary">
+              <div className="inline-flex items-center gap-2 rounded-full bg-accent-light px-4 py-1.5 text-sm font-bold text-primary">
                 <Sparkles size={16} />
                 <span>MeDay Beauty Center</span>
               </div>
@@ -92,7 +104,7 @@ export default function ServiceCategoryPage() {
               </div>
             </div>
 
-            <div className="inline-flex items-center gap-3 rounded-2xl bg-pink-50 px-5 py-4 text-primary">
+            <div className="inline-flex items-center gap-3 rounded-2xl bg-accent-light px-5 py-4 text-primary">
               <LayoutGrid size={22} />
               <div className="text-right">
                 <p className="text-2xl font-bold">{treatments.length}</p>
@@ -107,13 +119,25 @@ export default function ServiceCategoryPage() {
             {category.sections.map((section) => (
               <section
                 key={section.slug}
-                className="rounded-[2rem] border border-pink-100 bg-white/90 p-8 shadow-sm"
+                className="rounded-[2rem] border border-accent-light bg-white/90 p-8 shadow-sm"
               >
-                <div className="mb-6">
-                  <h2 className="text-3xl font-bold text-gray-900">{section.title}</h2>
-                  {section.subtitle ? (
-                    <p className="mt-2 text-sm font-medium text-primary">{section.subtitle}</p>
-                  ) : null}
+                <div className="mb-6 flex flex-col md:flex-row gap-6 items-start">
+                  {section.image && (
+                    <div className="flex-shrink-0 relative">
+                      <div className="absolute inset-0 bg-gradient-to-br from-primary/15 to-accent-light/20 rounded-xl"></div>
+                      <img
+                        src={section.image}
+                        alt={section.title}
+                        className="relative w-full md:w-64 h-40 object-cover rounded-xl shadow-md border-2 border-white"
+                      />
+                    </div>
+                  )}
+                  <div className="flex-1">
+                    <h2 className="text-3xl font-bold text-gray-900">{section.title}</h2>
+                    {section.subtitle ? (
+                      <p className="mt-2 text-sm font-medium text-primary">{section.subtitle}</p>
+                    ) : null}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
@@ -140,7 +164,7 @@ export default function ServiceCategoryPage() {
             ))}
           </div>
         ) : (
-          <div className="mt-10 rounded-[2rem] border border-dashed border-pink-200 bg-white p-10 text-center shadow-sm">
+          <div className="mt-10 rounded-[2rem] border border-dashed border-accent-light bg-white p-10 text-center shadow-sm">
             <h2 className="text-2xl font-bold text-gray-900">הקטגוריה מוכנה למילוי</h2>
             <p className="mt-4 text-gray-600">
               ברגע שתשלחי את רשימת הטיפולים בקטגוריה הזאת, נוסיף לכל אחד מהם כרטיס או עמוד מרכזי עם חלוקה פנימית לפי הצורך.

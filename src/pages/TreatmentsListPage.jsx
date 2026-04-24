@@ -35,11 +35,11 @@ export default function TreatmentsListPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#fff1f4] py-10 px-4" dir="rtl">
+    <div className="min-h-screen bg-secondary py-10 px-4" dir="rtl">
       <div className="max-w-5xl mx-auto">
         {/* Header */}
         <div className="text-center mb-10">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-pink-100 text-primary text-sm font-bold mb-4">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-accent-light text-primary text-sm font-bold mb-4">
             <Sparkles size={16} />
             <span>התפריט המלא</span>
           </div>
@@ -60,7 +60,7 @@ export default function TreatmentsListPage() {
               <div
                 key={section.id}
                 id={section.id}
-                className="rounded-3xl overflow-hidden border border-pink-200 bg-white/70"
+                className="rounded-3xl overflow-hidden border border-accent-light bg-white/70"
               >
                 {/* Section Header (click to open) */}
                 <button
@@ -88,7 +88,7 @@ export default function TreatmentsListPage() {
                 {/* Section Body */}
                 {isOpen ? (
                   <div className="px-6 pb-6">
-                    <div className="h-px bg-pink-100 mb-4" />
+                    <div className="h-px bg-accent-light mb-4" />
 
                     <ul className="space-y-6">
                       {section.treatments.map((t) => {
@@ -97,30 +97,47 @@ export default function TreatmentsListPage() {
 
                         return (
                           <li key={t.id} className="py-2">
-                            {/* Treatment Title */}
-                            <h3 className="text-xl md:text-2xl font-extrabold text-gray-900 leading-tight">
-                              {t.name}
-                            </h3>
+                            <div className="flex flex-col md:flex-row gap-6">
+                              {/* Treatment Image */}
+                              {t.image && (
+                                <div className="flex-shrink-0 relative">
+                                  <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-secondary/10 rounded-xl"></div>
+                                  <img
+                                    src={t.image}
+                                    alt={t.name}
+                                    className="relative w-full md:w-48 h-32 md:h-32 object-cover rounded-xl shadow-md border-2 border-white"
+                                  />
+                                </div>
+                              )}
 
-                            {/* Treatment Text */}
-                            <div className="mt-3 space-y-2 text-gray-700 leading-relaxed">
-                              {linesToShow.map((line, idx) => (
-                                <p key={idx}>{line}</p>
-                              ))}
+                              {/* Treatment Content */}
+                              <div className="flex-1">
+                                {/* Treatment Title */}
+                                <h3 className="text-xl md:text-2xl font-extrabold text-gray-900 leading-tight">
+                                  {t.name}
+                                </h3>
+
+                                {/* Treatment Text */}
+                                <div className="mt-3 space-y-2 text-gray-700 leading-relaxed">
+                                  {linesToShow.map((line, idx) => (
+                                    <p key={idx}>{line}</p>
+                                  ))}
+                                </div>
+
+                                {/* Read more */}
+                                {t.lines.length > 2 ? (
+                                  <button
+                                    onClick={() => toggleTreatment(t.id)}
+                                    className="mt-3 text-primary font-bold text-sm hover:underline"
+                                  >
+                                    {expanded ? "לסגור ▲" : "לקרוא עוד ▼"}
+                                  </button>
+                                ) : null}
+                              </div>
                             </div>
 
-                            {/* Read more */}
-                            {t.lines.length > 2 ? (
-                              <button
-                                onClick={() => toggleTreatment(t.id)}
-                                className="mt-3 text-primary font-bold text-sm hover:underline"
-                              >
-                                {expanded ? "לסגור ▲" : "לקרוא עוד ▼"}
-                              </button>
-                            ) : null}
-
                             {/* Soft separator */}
-                            <div className="mt-6 h-px bg-pink-100/70" />
+                            <div className="mt-6 h-px bg-accent-light/70" />
                           </li>
                         );
                       })}

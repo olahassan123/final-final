@@ -59,13 +59,13 @@ export default function Navbar() {
       dir="rtl"
       className={`fixed left-0 right-0 top-0 z-50 transition-all duration-500 ${
         isScrolled
-          ? "border-b border-pink-100 bg-white/80 shadow-sm backdrop-blur-lg"
+          ? "border-b border-accent-light bg-secondary/80 shadow-sm backdrop-blur-lg"
           : "bg-transparent"
       }`}
     >
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-20 items-center justify-between">
-          <Link to="/" className="text-2xl font-serif font-bold tracking-tight text-primary">
+          <Link to="/" className="text-2xl font-serif font-bold tracking-tight text-primary-dark">
             MeDay
           </Link>
 
@@ -78,7 +78,7 @@ export default function Navbar() {
                 onMouseLeave={() => setActiveDropdown(null)}
               >
                 {link.dropdown ? (
-                  <button className="flex items-center gap-1 font-medium text-gray-700 transition-colors hover:text-primary">
+                  <button className="flex items-center gap-1 font-medium text-gray-700 transition-colors hover:text-primary-dark">
                     {link.label}
                     <ChevronDown
                       className={`h-4 w-4 transition-transform ${
@@ -90,19 +90,19 @@ export default function Navbar() {
                   <a
                     href={link.href}
                     onClick={(e) => handleNavClick(link.href, e)}
-                    className="font-medium text-gray-700 transition-colors hover:text-primary"
+                    className="font-medium text-gray-700 transition-colors hover:text-primary-dark"
                   >
                     {link.label}
                   </a>
                 )}
 
                 {link.dropdown && activeDropdown === index ? (
-                  <div className="absolute right-0 top-full mt-2 w-56 overflow-hidden rounded-2xl border border-pink-50 bg-white shadow-xl">
+                  <div className="absolute right-0 top-full mt-2 w-56 overflow-hidden rounded-2xl border border-accent-light bg-white shadow-xl">
                     {link.dropdown.map((item) => (
                       <Link
                         key={item.href}
                         to={item.href}
-                        className="block px-6 py-3 text-gray-600 transition-colors hover:bg-pink-50 hover:text-primary"
+                        className="block px-6 py-3 text-gray-600 transition-colors hover:bg-accent-light hover:text-primary-dark"
                       >
                         {item.label}
                       </Link>
@@ -115,14 +115,14 @@ export default function Navbar() {
 
           <div className="hidden items-center gap-4 lg:flex">
             <button
-              className="flex items-center gap-2 rounded-full border border-primary/20 px-5 py-2 text-primary transition-all hover:bg-primary/5"
+              className="flex items-center gap-2 rounded-full border border-primary/20 px-5 py-2 text-primary-dark transition-all hover:bg-primary/5"
               onClick={() => {}}
             >
               <MessageSquare size={18} />
               <span>ייעוץ AI</span>
             </button>
 
-            <button className="rounded-full bg-primary px-8 py-2.5 font-medium text-white shadow-md transition-all hover:bg-primary/90 hover:shadow-primary/20">
+            <button className="rounded-full bg-primary px-8 py-2.5 font-medium text-white shadow-md transition-all hover:bg-primary-dark hover:shadow-primary/20">
               תיאום תור
             </button>
           </div>
@@ -137,7 +137,7 @@ export default function Navbar() {
       </div>
 
       {isMobileMenuOpen ? (
-        <div className="space-y-4 border-t border-gray-100 bg-white p-6 shadow-xl animate-in slide-in-from-right duration-300 lg:hidden">
+        <div className="space-y-4 border-t border-gray-100 bg-secondary p-6 shadow-xl animate-in slide-in-from-right duration-300 lg:hidden">
           {navLinks.map((link) => (
             <div key={link.label} className="border-b border-gray-50 pb-2">
               {link.dropdown ? (
