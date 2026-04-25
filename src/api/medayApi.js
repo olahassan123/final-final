@@ -54,23 +54,45 @@ export async function updateAppointment(id, data) {
   return res.json();
 }
 
-export async function fetchAnalytics() {
-  const res = await fetch(`${API_BASE}/appointments/analytics`);
+export async function fetchAnalytics({ fromDate, toDate } = {}) {
+  const params = new URLSearchParams();
+  if (fromDate) params.set("from_date", fromDate);
+  if (toDate) params.set("to_date", toDate);
+  const query = params.toString() ? `?${params.toString()}` : "";
+  const res = await fetch(`${API_BASE}/appointments/analytics${query}`);
   if (!res.ok) throw new Error("Failed to fetch analytics");
   return res.json();
 }
 
-export async function sendChat(message, context = null, selectedTreatment = null, history = []) {
-  const selected_treatment_id = selectedTreatment?.id || null;
-
+/**
+ * Sends a chat message with full flow state to the AI assistant.
+ *
+ * @param {string}  message              - The text the user typed or the chip label
+ * @param {object}  flowState            - { profile, mode, category, currentField }
+ * @param {object}  chipData             - { chip_field, chip_value } when a chip was tapped
+ * @param {string|null} selectedTreatmentId  - ID of the treatment page the user is viewing
+ * @param {Array}   history              - Previous messages [{from, text}]
+ */
+export async function sendChat(
+  message,
+  flowState = {},
+  chipData = {},
+  selectedTreatmentId = null,
+  history = []
+) {
   const res = await fetch(`${API_BASE}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       message,
-      context,
-      selected_treatment_id,
       history,
+      selected_treatment_id: selectedTreatmentId,
+      profile: flowState.profile ?? {},
+      mode: flowState.mode ?? "idle",
+      category: flowState.category ?? null,
+      current_field: flowState.currentField ?? null,
+      chip_field: chipData.chip_field ?? null,
+      chip_value: chipData.chip_value ?? null,
     }),
   });
 
