@@ -9,7 +9,7 @@ const HOURS = Array.from({ length: 15 }, (_, i) => i + 8); // 8..22
 const DAY_NAMES = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 const MONTH_NAMES_HE = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
 const MINI_DAY_HEADS = ["א׳","ב׳","ג׳","ד׳","ה׳","ו׳","ש׳"]; // Sun→Sat
-const ROW_HEIGHT = 80; // px per hour row
+const ROW_HEIGHT = 64; // Smaller rows make more of the weekly table visible on first load.
 const FIRST_HOUR = 8;
 const BUSINESS_TIME_ZONE = "Asia/Jerusalem";
 const MAX_ADVANCE_BOOKING_DAYS = 365;
@@ -24,6 +24,133 @@ const SECRETARY_CATEGORY_OPTIONS = [
   "סטיילינג אישי",
   "טיפולי אסתטיקה",
 ];
+
+// Treatment availability rules: allowed weekdays and bookable working hours.
+const TREATMENT_AVAILABILITY = {
+  "טיפולי קוסמטיקה": { days: [0, 2, 4], start: "09:00", end: "16:00" },
+  "טיפולי אסתטיקה": { days: [0, 2, 3, 4], start: "10:00", end: "18:30" },
+  "עיצוב שיער": { days: [1, 3], start: "10:00", end: "18:00" },
+  "הסרת שיער": { days: [0, 3, 5], start: "09:00", end: "14:00" },
+  "טיפולי גוף": { days: [1, 4], start: "11:00", end: "17:00" },
+  "איפור מקצועי": { days: [5, 6], start: "08:00", end: "13:00" },
+  "מניקור ופדיקור": { days: [1, 2, 3], start: "09:00", end: "15:00" },
+  "סטיילינג אישי": { days: [0, 4], start: "12:00", end: "18:00" },
+  "איפור קבוע ועיצוב גבות": { days: [1, 3, 4], start: "10:00", end: "16:00" },
+};
+
+// Treatment color mapping: soft pastel colors keep the weekly calendar readable and elegant.
+const TREATMENT_COLORS = {
+  "טיפולי אסתטיקה": {
+    background: "#DDF3EA",
+    hoverBackground: "#CBEBDD",
+    border: "rgba(107,162,146,0.42)",
+    text: "#25594B",
+    mutedText: "#4F8F7B",
+  },
+  "מניקור ופדיקור": {
+    background: "#F8DDE7",
+    hoverBackground: "#F3CBD9",
+    border: "rgba(204,132,160,0.36)",
+    text: "#7A4055",
+    mutedText: "#A45E78",
+  },
+  "טיפולי קוסמטיקה": {
+    background: "#F7E0D1",
+    hoverBackground: "#F1D0BC",
+    border: "rgba(214,151,105,0.38)",
+    text: "#7A4A2F",
+    mutedText: "#A36E4A",
+  },
+  "עיצוב שיער": {
+    background: "#EFE2D2",
+    hoverBackground: "#E6D3BE",
+    border: "rgba(158,123,88,0.36)",
+    text: "#60472D",
+    mutedText: "#8B6F52",
+  },
+  "הסרת שיער": {
+    background: "#E8DDF5",
+    hoverBackground: "#DDCDEA",
+    border: "rgba(149,120,184,0.34)",
+    text: "#59436F",
+    mutedText: "#7E6797",
+  },
+  "טיפולי גוף": {
+    background: "#DDEBF7",
+    hoverBackground: "#CDDFEF",
+    border: "rgba(105,149,184,0.34)",
+    text: "#345B78",
+    mutedText: "#5F85A1",
+  },
+  "איפור מקצועי": {
+    background: "#F5DCE0",
+    hoverBackground: "#EDCBD2",
+    border: "rgba(190,116,128,0.34)",
+    text: "#753E49",
+    mutedText: "#9A5B66",
+  },
+  "סטיילינג אישי": {
+    background: "#F7EFCF",
+    hoverBackground: "#EFE3B7",
+    border: "rgba(186,158,83,0.34)",
+    text: "#6A5525",
+    mutedText: "#90743A",
+  },
+  "איפור קבוע ועיצוב גבות": {
+    background: "#EEDCE7",
+    hoverBackground: "#E4CBD9",
+    border: "rgba(164,112,142,0.34)",
+    text: "#654258",
+    mutedText: "#8C6277",
+  },
+};
+
+const DEFAULT_TREATMENT_COLOR = {
+  background: "#F4EFEA",
+  hoverBackground: "#EADFD5",
+  border: "rgba(200,173,142,0.42)",
+  text: "#5F432B",
+  mutedText: "#8B6F52",
+};
+
+// Employee filtering: each employee can perform only these treatment categories.
+const EMPLOYEES = [
+  { name: "Ranin", treatments: ["טיפולי קוסמטיקה", "טיפולי אסתטיקה"] },
+  { name: "Regev", treatments: ["עיצוב שיער"] },
+  { name: "Irit", treatments: ["עיצוב שיער"] },
+  { name: "Ira", treatments: ["מניקור ופדיקור"] },
+  { name: "Dana", treatments: ["איפור מקצועי"] },
+  { name: "Maya", treatments: ["סטיילינג אישי"] },
+  { name: "Adele", treatments: ["טיפולי גוף", "הסרת שיער"] },
+  { name: "Miri", treatments: ["איפור קבוע ועיצוב גבות"] },
+  { name: "Amjad", treatments: ["טיפולי אסתטיקה"] },
+];
+
+// Employee availability: these rules narrow each employee inside the treatment hours.
+// Ranin keeps her regular aesthetics hours and also works Wednesday 11:00-18:30.
+const EMPLOYEE_AVAILABILITY = {
+  Ranin: {
+    "טיפולי אסתטיקה": [
+      { days: [0, 2, 4], start: "10:00", end: "17:00" },
+      { days: [3], start: "11:00", end: "18:30" },
+    ],
+  },
+  Amjad: {
+    "טיפולי אסתטיקה": [
+      { days: [0, 2, 4], start: "10:00", end: "17:00" },
+    ],
+  },
+};
+
+const GENERAL_ERROR_MESSAGES = {
+  required: "נא למלא את כל השדות החובה",
+  unavailable: "הטיפול שבחרת אינו זמין ביום או בשעה שנבחרו",
+  past_date: "לא ניתן לקבוע תור ליום שכבר עבר",
+  outside_hours: "השעה שנבחרה אינה זמינה לטיפול זה",
+  employee_unavailable: "העובדת שנבחרה אינה זמינה ביום או בשעה שנבחרו",
+  employee_booked: "העובדת שנבחרה כבר משובצת בשעה זו",
+  max_parallel: "לא ניתן לקבוע יותר משני תורים באותה שעה",
+};
 
 const SECRETARY_CATEGORY_PRESETS = {
   "מניקור ופדיקור": {
@@ -167,6 +294,76 @@ function timeToMinutes(time) {
   return h * 60 + m;
 }
 
+function minutesToTime(totalMinutes) {
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+}
+
+// Treatment duration calculation: cosmetology is 2h, aesthetics is 1.5h, all others are 1h.
+function getTreatmentDurationMinutes(categoryName) {
+  if (categoryName === "טיפולי קוסמטיקה") return 120;
+  if (categoryName === "טיפולי אסתטיקה") return 90;
+  return 60;
+}
+
+function calculateEndTime(categoryName, startTime) {
+  if (!categoryName || !startTime) return "";
+  return minutesToTime(timeToMinutes(startTime) + getTreatmentDurationMinutes(categoryName));
+}
+
+function formatAvailability(categoryName) {
+  const rule = TREATMENT_AVAILABILITY[categoryName];
+  if (!rule) return "";
+  const dayText = rule.days.map((dayIndex) => DAY_NAMES[dayIndex]).join(", ");
+  return `${dayText}, ${rule.start}-${rule.end}`;
+}
+
+function getEmployeeAvailabilityRules(employeeName, categoryName) {
+  const employeeRules = EMPLOYEE_AVAILABILITY[employeeName]?.[categoryName];
+  if (employeeRules) return employeeRules;
+  const fallbackRule = TREATMENT_AVAILABILITY[categoryName];
+  return fallbackRule ? [fallbackRule] : [];
+}
+
+function formatEmployeeAvailability(employeeName, categoryName) {
+  return getEmployeeAvailabilityRules(employeeName, categoryName)
+    .map((rule) => {
+      const dayText = rule.days.map((dayIndex) => DAY_NAMES[dayIndex]).join(", ");
+      return `${dayText}, ${rule.start}-${rule.end}`;
+    })
+    .join(" | ");
+}
+
+function getEmployeesForTreatment(categoryName) {
+  return EMPLOYEES.filter((employee) => employee.treatments.includes(categoryName));
+}
+
+function rangesOverlap(startA, endA, startB, endB) {
+  return startA < endB && startB < endA;
+}
+
+function isTreatmentAvailableAt(categoryName, date, startTime, endTime) {
+  const rule = TREATMENT_AVAILABILITY[categoryName];
+  if (!rule || !date || !startTime || !endTime) return false;
+  const dayIndex = new Date(`${date}T00:00:00`).getDay();
+  return (
+    rule.days.includes(dayIndex) &&
+    timeToMinutes(startTime) >= timeToMinutes(rule.start) &&
+    timeToMinutes(endTime) <= timeToMinutes(rule.end)
+  );
+}
+
+function isEmployeeAvailableAt(employeeName, categoryName, date, startTime, endTime) {
+  if (!employeeName || !categoryName || !date || !startTime || !endTime) return false;
+  const dayIndex = new Date(`${date}T00:00:00`).getDay();
+  return getEmployeeAvailabilityRules(employeeName, categoryName).some((rule) => (
+    rule.days.includes(dayIndex) &&
+    timeToMinutes(startTime) >= timeToMinutes(rule.start) &&
+    timeToMinutes(endTime) <= timeToMinutes(rule.end)
+  ));
+}
+
 function getBusinessNowParts() {
   const formatter = new Intl.DateTimeFormat("en-GB", {
     timeZone: BUSINESS_TIME_ZONE,
@@ -270,6 +467,34 @@ function getAppointmentCategory(appt, treatments) {
   const treatment = treatments.find((item) => item.id === appt.treatment_id);
   if (treatment?.class_name) return treatment.class_name;
   return parseImplicitTreatmentId(appt.treatment_id)?.category || "";
+}
+
+function getTreatmentColor(categoryName) {
+  return TREATMENT_COLORS[categoryName] || DEFAULT_TREATMENT_COLOR;
+}
+
+function isEmployeeBooked(appointments, employeeName, date, startTime, endTime) {
+  if (!employeeName || !date || !startTime || !endTime) return false;
+  const start = timeToMinutes(startTime);
+  const end = timeToMinutes(endTime);
+  return appointments.some((appt) => {
+    if (appt.date !== date || appt.employee_name !== employeeName) return false;
+    const apptStart = timeToMinutes(appt.time);
+    const apptEnd = timeToMinutes(appt.end_time || calculateEndTime(appt.treatment_category, appt.time));
+    return rangesOverlap(start, end, apptStart, apptEnd);
+  });
+}
+
+function countParallelAppointments(appointments, date, startTime, endTime) {
+  if (!date || !startTime || !endTime) return 0;
+  const start = timeToMinutes(startTime);
+  const end = timeToMinutes(endTime);
+  return appointments.filter((appt) => {
+    if (appt.date !== date) return false;
+    const apptStart = timeToMinutes(appt.time);
+    const apptEnd = timeToMinutes(appt.end_time || calculateEndTime(appt.treatment_category, appt.time));
+    return rangesOverlap(start, end, apptStart, apptEnd);
+  }).length;
 }
 
 function getCategoryStructure(treatments, className) {
@@ -403,6 +628,12 @@ function AppointmentModal({ appt, onClose, onDelete }) {
             <Clock size={14} className="shrink-0" style={{ color: "#C9A27E" }} />
             <span>{appt.time}{appt.end_time ? ` – ${appt.end_time}` : ""}</span>
           </div>
+          {appt.employee_name && (
+            <div className="flex items-center gap-2.5">
+              <User size={14} className="shrink-0" style={{ color: "#6BA292" }} />
+              <span style={{ color: "#2F8F5B" }}>{appt.employee_name}</span>
+            </div>
+          )}
           {appt.notes && (
             <div className="rounded-xl px-3 py-2 text-xs text-gray-500 mt-2" style={{ background: "#F4EFEA", border: "1px solid #EADFD5" }}>
               {appt.notes}
@@ -485,7 +716,7 @@ export default function SecretaryPage() {
   }
 
   // Field order determines which is "first" when scrolling to errors
-  const FIELD_ORDER = ["client_name", "client_phone", "treatment_category", "treatment_subcategory", "treatment_id", "date", "time", "end_time"];
+  const FIELD_ORDER = ["client_name", "client_phone", "treatment_category", "treatment_subcategory", "treatment_id", "date", "time", "end_time", "employee_name"];
 
   function scrollToFirstError(invalidFields) {
     const first = FIELD_ORDER.find((f) => invalidFields.includes(f));
@@ -501,6 +732,18 @@ export default function SecretaryPage() {
 
   function clearPastTimingErrors() {
     setFieldErrors((prev) => ({ ...prev, past_date: false, past_time: false }));
+  }
+
+  function clearSchedulingErrors() {
+    setFieldErrors((prev) => ({
+      ...prev,
+      required: false,
+      unavailable: false,
+      outside_hours: false,
+      employee_unavailable: false,
+      employee_booked: false,
+      max_parallel: false,
+    }));
   }
 
   function showPastSelectionFeedback(date, hour) {
@@ -520,7 +763,7 @@ export default function SecretaryPage() {
     const val = e.target.value;
     setForm((f) => ({ ...f, client_phone: val }));
     if (val === "") {
-      setFieldErrors((prev) => ({ ...prev, client_phone: true }));
+      clearFieldError("client_phone");
     } else if (!isValidPhone(val)) {
       setFieldErrors((prev) => ({ ...prev, client_phone: true }));
       triggerFlash(["client_phone"]);
@@ -546,7 +789,7 @@ export default function SecretaryPage() {
   const [form, setForm] = useState({
     client_name: "", client_phone: "",
     treatment_id: "", treatment_name: "",
-    date: "", time: "", end_time: "", notes: "",
+    date: "", time: "", end_time: "", employee_name: "", notes: "",
   });
   const [selectedTreatmentCategory, setSelectedTreatmentCategory] = useState("");
   const [selectedTreatmentSubcategory, setSelectedTreatmentSubcategory] = useState("");
@@ -567,6 +810,13 @@ export default function SecretaryPage() {
     }
   }, [form.time, form.end_time]);
 
+  useEffect(() => {
+    const endTime = calculateEndTime(selectedTreatmentCategory, form.time);
+    setForm((current) => (
+      current.end_time === endTime ? current : { ...current, end_time: endTime }
+    ));
+  }, [selectedTreatmentCategory, form.time]);
+
   function load() {
     fetchAppointments().then(setAppointments).catch(console.error);
   }
@@ -584,10 +834,13 @@ export default function SecretaryPage() {
   const requiresSubcategory = showTreatmentSubcategory;
   const requiresTreatment = !!selectedTreatmentCategory && (!requiresSubcategory || !!selectedTreatmentSubcategory) && treatmentOptions.length > 0;
   const showTreatmentSelect = requiresTreatment;
+  const selectedAvailability = TREATMENT_AVAILABILITY[selectedTreatmentCategory];
+  const availableEmployees = getEmployeesForTreatment(selectedTreatmentCategory);
 
   function handleTreatmentChange(e) {
     const t = treatments.find((x) => x.id === e.target.value);
     setForm((f) => ({ ...f, treatment_id: t?.id || "", treatment_name: t?.name || "" }));
+    clearSchedulingErrors();
   }
 
   function resetSelectedTreatment() {
@@ -595,12 +848,21 @@ export default function SecretaryPage() {
   }
 
   function handleTreatmentCategoryChange(e) {
-    setSelectedTreatmentCategory(e.target.value);
+    const nextCategory = e.target.value;
+    setSelectedTreatmentCategory(nextCategory);
     setSelectedTreatmentSubcategory("");
-    resetSelectedTreatment();
+    setForm((f) => ({
+      ...f,
+      treatment_id: "",
+      treatment_name: "",
+      employee_name: "",
+      end_time: calculateEndTime(nextCategory, f.time),
+    }));
     clearFieldError("treatment_category");
     clearFieldError("treatment_subcategory");
     clearFieldError("treatment_id");
+    clearFieldError("employee_name");
+    clearSchedulingErrors();
   }
 
   function handleTreatmentSubcategoryChange(e) {
@@ -608,6 +870,7 @@ export default function SecretaryPage() {
     resetSelectedTreatment();
     clearFieldError("treatment_subcategory");
     clearFieldError("treatment_id");
+    clearSchedulingErrors();
   }
 
   function buildAppointmentTreatmentPayload() {
@@ -638,35 +901,30 @@ export default function SecretaryPage() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    setSuccess(false);
+    clearSchedulingErrors();
     const required = {
-      client_name: !!form.client_name.trim(),
-      client_phone: !!form.client_phone.trim() && isValidPhone(form.client_phone),
       treatment_category: !!selectedTreatmentCategory.trim(),
       treatment_subcategory: !requiresSubcategory || !!selectedTreatmentSubcategory.trim(),
       treatment_id: !requiresTreatment || !!form.treatment_id,
       date: !!form.date,
       time: !!form.time,
       end_time: !!form.end_time,
+      employee_name: !!form.employee_name,
     };
     const invalid = Object.keys(required).filter((k) => !required[k]);
     if (invalid.length > 0) {
       const errors = {};
       invalid.forEach((k) => { errors[k] = true; });
-      setFieldErrors((prev) => ({ ...prev, ...errors }));
+      setFieldErrors((prev) => ({ ...prev, ...errors, required: true }));
       triggerFlash(invalid);
       scrollToFirstError(invalid);
       return;
     }
-    if (!hasLogicalBookingYear(form.date, today, maxBookableDate)) {
-      setFieldErrors((prev) => ({ ...prev, date_year: true }));
-      triggerFlash(["date"]);
-      scrollToFirstError(["date"]);
-      return;
-    }
-    if (form.end_time <= form.time) {
-      setFieldErrors((prev) => ({ ...prev, time_order: true }));
-      triggerFlash(["time", "end_time"]);
-      scrollToFirstError(["time"]);
+    if (form.client_phone.trim() && !isValidPhone(form.client_phone)) {
+      setFieldErrors((prev) => ({ ...prev, client_phone: true }));
+      triggerFlash(["client_phone"]);
+      scrollToFirstError(["client_phone"]);
       return;
     }
     const pastSelectionError = getPastSelectionError(form.date, form.time);
@@ -676,18 +934,65 @@ export default function SecretaryPage() {
       scrollToFirstError(["date", "time"]);
       return;
     }
+    if (!hasLogicalBookingYear(form.date, today, maxBookableDate)) {
+      setFieldErrors((prev) => ({ ...prev, date_year: true }));
+      triggerFlash(["date"]);
+      scrollToFirstError(["date"]);
+      return;
+    }
+    if (!isTreatmentAvailableAt(selectedTreatmentCategory, form.date, form.time, form.end_time)) {
+      const rule = TREATMENT_AVAILABILITY[selectedTreatmentCategory];
+      const dayIndex = new Date(`${form.date}T00:00:00`).getDay();
+      const outsideHours = rule && rule.days.includes(dayIndex);
+      setFieldErrors((prev) => ({
+        ...prev,
+        unavailable: true,
+        outside_hours: outsideHours,
+      }));
+      triggerFlash(["treatment_category", "date", "time"]);
+      scrollToFirstError(["time"]);
+      return;
+    }
+    const employeeCanDoTreatment = availableEmployees.some((employee) => employee.name === form.employee_name);
+    if (!employeeCanDoTreatment) {
+      setFieldErrors((prev) => ({ ...prev, employee_name: true }));
+      triggerFlash(["employee_name"]);
+      scrollToFirstError(["employee_name"]);
+      return;
+    }
+    if (!isEmployeeAvailableAt(form.employee_name, selectedTreatmentCategory, form.date, form.time, form.end_time)) {
+      setFieldErrors((prev) => ({ ...prev, employee_unavailable: true }));
+      triggerFlash(["employee_name", "date", "time"]);
+      scrollToFirstError(["employee_name"]);
+      return;
+    }
+    // Scheduling rules: max two parallel appointments and no double-booked employee.
+    if (countParallelAppointments(appointments, form.date, form.time, form.end_time) >= 2) {
+      setFieldErrors((prev) => ({ ...prev, max_parallel: true }));
+      triggerFlash(["time"]);
+      scrollToFirstError(["date", "time"]);
+      return;
+    }
+    if (isEmployeeBooked(appointments, form.employee_name, form.date, form.time, form.end_time)) {
+      setFieldErrors((prev) => ({ ...prev, employee_booked: true }));
+      triggerFlash(["employee_name", "time"]);
+      scrollToFirstError(["employee_name"]);
+      return;
+    }
     setSaving(true);
     try {
       const appointmentTreatment = buildAppointmentTreatmentPayload();
       const payload = {
         ...form,
+        client_name: form.client_name.trim() || "לקוחה",
+        client_phone: form.client_phone.trim() || null,
         ...appointmentTreatment,
       };
       const result = await createAppointment(payload);
       const bookedDate = form.date;
       const bookedTime = form.time;
       const bookedTreatmentId = payload.treatment_id;
-      setForm({ client_name: "", client_phone: "", treatment_id: "", treatment_name: "", date: "", time: "", end_time: "", notes: "" });
+      setForm({ client_name: "", client_phone: "", treatment_id: "", treatment_name: "", date: "", time: "", end_time: "", employee_name: "", notes: "" });
       setSelectedTreatmentCategory("");
       setSelectedTreatmentSubcategory("");
       setFieldErrors({});
@@ -807,8 +1112,32 @@ export default function SecretaryPage() {
       return;
     }
     const h = String(hour).padStart(2, "0");
-    const endH = String(hour + 1).padStart(2, "0");
-    setForm((f) => ({ ...f, date, time: `${h}:00`, end_time: `${endH}:00` }));
+    const startTime = `${h}:00`;
+    const categoryForClick = activeCategory || selectedTreatmentCategory;
+    const employeeForClick = activeCategory ? activeEmployee : form.employee_name;
+    if (categoryForClick && !isBookableSlotForCategory(categoryForClick, date, startTime, employeeForClick)) {
+      setFormOpen(true);
+      setFieldErrors((prev) => ({ ...prev, unavailable: true }));
+      triggerFlash(["date", "time"]);
+      return;
+    }
+    const matchingEmployees = getEmployeesForTreatment(categoryForClick).filter(
+      (employee) => !employeeForClick || employee.name === employeeForClick
+    );
+    const firstFreeEmployee = matchingEmployees.find(
+      (employee) =>
+        isEmployeeAvailableAt(employee.name, categoryForClick, date, startTime, calculateEndTime(categoryForClick, startTime)) &&
+        !isEmployeeBooked(appointments, employee.name, date, startTime, calculateEndTime(categoryForClick, startTime))
+    );
+    setSelectedTreatmentCategory(categoryForClick);
+    setForm((f) => ({
+      ...f,
+      date,
+      time: startTime,
+      end_time: calculateEndTime(categoryForClick, startTime),
+      employee_name: firstFreeEmployee?.name || employeeForClick || f.employee_name,
+    }));
+    setFormOpen(true);
     clearFieldError("date_year");
     clearPastTimingErrors();
   }
@@ -817,6 +1146,13 @@ export default function SecretaryPage() {
     if (rescheduleRef.current) return;
     if (!isFutureSlot(date, hour)) {
       showPastSelectionFeedback(date, hour);
+      return;
+    }
+    const startTime = `${String(hour).padStart(2, "0")}:00`;
+    if (activeCategory && !isBookableSlotForCategory(activeCategory, date, startTime, activeEmployee)) {
+      setFormOpen(true);
+      setFieldErrors((prev) => ({ ...prev, unavailable: true }));
+      triggerFlash(["date", "time"]);
       return;
     }
     setDrag({ date, startHour: hour, endHour: hour });
@@ -831,10 +1167,26 @@ export default function SecretaryPage() {
   function handleDragEnd() {
     if (!drag) return;
     const start = Math.min(drag.startHour, drag.endHour);
-    const end = Math.max(drag.startHour, drag.endHour) + 1;
     const h = String(start).padStart(2, "0");
-    const endH = String(end).padStart(2, "0");
-    setForm((f) => ({ ...f, date: drag.date, time: `${h}:00`, end_time: `${endH}:00` }));
+    const startTime = `${h}:00`;
+    const categoryForDrag = activeCategory || selectedTreatmentCategory;
+    const employeeForDrag = activeCategory ? activeEmployee : form.employee_name;
+    const matchingEmployees = getEmployeesForTreatment(categoryForDrag).filter(
+      (employee) => !employeeForDrag || employee.name === employeeForDrag
+    );
+    const firstFreeEmployee = matchingEmployees.find(
+      (employee) =>
+        isEmployeeAvailableAt(employee.name, categoryForDrag, drag.date, startTime, calculateEndTime(categoryForDrag, startTime)) &&
+        !isEmployeeBooked(appointments, employee.name, drag.date, startTime, calculateEndTime(categoryForDrag, startTime))
+    );
+    setSelectedTreatmentCategory(categoryForDrag);
+    setForm((f) => ({
+      ...f,
+      date: drag.date,
+      time: startTime,
+      end_time: calculateEndTime(categoryForDrag, startTime),
+      employee_name: firstFreeEmployee?.name || employeeForDrag || f.employee_name,
+    }));
     clearFieldError("date_year");
     setFormOpen(true);
     setDrag(null);
@@ -848,17 +1200,20 @@ export default function SecretaryPage() {
   }
 
   const [activeCategory, setActiveCategory] = useState(null); // null = show all
+  const [activeEmployee, setActiveEmployee] = useState(""); // empty = show all employees
   const [categoryFading, setCategoryFading] = useState(false);
 
   function switchCategory(cat) {
     // No animation when toggling off (going back to "all") or clicking same
     if (cat === null || cat === activeCategory) {
       setActiveCategory(cat === activeCategory ? null : cat);
+      setActiveEmployee("");
       return;
     }
     setCategoryFading(true);
     setTimeout(() => {
       setActiveCategory(cat);
+      setActiveEmployee("");
       setCategoryFading(false);
     }, 220);
   }
@@ -870,12 +1225,117 @@ export default function SecretaryPage() {
   const weekLabel = `${weekStart.toLocaleDateString("en-US", { month: "short", day: "numeric" })} – ${weekEnd.toLocaleDateString("en-US", { month: "short", day: "numeric" })}, ${weekEnd.getFullYear()}`;
   const weekDayStrings = weekDays.map(toISO);
   const allWeekAppts = appointments.filter((a) => weekDayStrings.includes(a.date));
-  const weekAppts = activeCategory
-    ? allWeekAppts.filter((a) => getAppointmentCategory(a, treatments) === activeCategory)
-    : allWeekAppts;
+  const weekAppts = allWeekAppts.filter((a) => {
+    if (activeCategory && getAppointmentCategory(a, treatments) !== activeCategory) return false;
+    if (activeEmployee && a.employee_name !== activeEmployee) return false;
+    return true;
+  });
   const isPastWeek = toISO(addDays(weekStart, 6)) < today;
   const isCurrentWeek = toISO(weekStart) === toISO(getWeekStart(new Date()));
   const apptDates = new Set(appointments.map((a) => a.date));
+  const activeCategoryEmployees = getEmployeesForTreatment(activeCategory || "");
+  const activeCategoryAvailability = activeCategory ? TREATMENT_AVAILABILITY[activeCategory] : null;
+  const activeCategoryColor = getTreatmentColor(activeCategory || "");
+
+  function getAvailableSlotsForCategory(categoryName, employeeFilter = "") {
+    const rule = TREATMENT_AVAILABILITY[categoryName];
+    if (!rule) return [];
+    const employees = getEmployeesForTreatment(categoryName).filter(
+      (employee) => !employeeFilter || employee.name === employeeFilter
+    );
+    const duration = getTreatmentDurationMinutes(categoryName);
+    const slots = [];
+
+    // Available slots are calculated by treatment hours, employee hours, global capacity, and employee bookings.
+    weekDays.forEach((day) => {
+      const date = toISO(day);
+      // Past day disabling: past dates are faded and do not show booking slots.
+      if (date < today || !rule.days.includes(day.getDay())) return;
+
+      for (let minutes = timeToMinutes(rule.start); minutes + duration <= timeToMinutes(rule.end); minutes += 60) {
+        const startTime = minutesToTime(minutes);
+        const endTime = minutesToTime(minutes + duration);
+        if (getPastSelectionError(date, startTime)) continue;
+        if (countParallelAppointments(appointments, date, startTime, endTime) >= 2) continue;
+
+        const freeEmployees = employees.filter(
+          (employee) =>
+            isEmployeeAvailableAt(employee.name, categoryName, date, startTime, endTime) &&
+            !isEmployeeBooked(appointments, employee.name, date, startTime, endTime)
+        );
+        if (freeEmployees.length === 0) continue;
+
+        slots.push({ date, dayName: DAY_NAMES[day.getDay()], startTime, endTime, employees: freeEmployees });
+      }
+    });
+
+    return slots;
+  }
+
+  const activeAvailableSlots = activeCategory ? getAvailableSlotsForCategory(activeCategory, activeEmployee) : [];
+
+  function getAvailableSlotsForForm() {
+    if (!selectedTreatmentCategory || !form.date) return [];
+    const rule = TREATMENT_AVAILABILITY[selectedTreatmentCategory];
+    if (!rule) return [];
+    const day = new Date(`${form.date}T00:00:00`);
+    if (form.date < today || !rule.days.includes(day.getDay())) return [];
+
+    const duration = getTreatmentDurationMinutes(selectedTreatmentCategory);
+    const employeesForSlot = availableEmployees.filter(
+      (employee) => !form.employee_name || employee.name === form.employee_name
+    );
+    const slots = [];
+
+    // Form time chips use the same treatment + employee availability checks as the calendar grid.
+    for (let minutes = timeToMinutes(rule.start); minutes + duration <= timeToMinutes(rule.end); minutes += 30) {
+      const startTime = minutesToTime(minutes);
+      const endTime = minutesToTime(minutes + duration);
+      if (getPastSelectionError(form.date, startTime)) continue;
+      if (countParallelAppointments(appointments, form.date, startTime, endTime) >= 2) continue;
+
+      const hasFreeEmployee = employeesForSlot.some(
+        (employee) =>
+          isEmployeeAvailableAt(employee.name, selectedTreatmentCategory, form.date, startTime, endTime) &&
+          !isEmployeeBooked(appointments, employee.name, form.date, startTime, endTime)
+      );
+      if (hasFreeEmployee) slots.push({ startTime, endTime });
+    }
+
+    return slots;
+  }
+
+  const formAvailableTimeSlots = getAvailableSlotsForForm();
+
+  function isBookableSlotForCategory(categoryName, date, startTime, employeeFilter = "") {
+    if (!categoryName) return true;
+    const endTime = calculateEndTime(categoryName, startTime);
+    if (!isTreatmentAvailableAt(categoryName, date, startTime, endTime)) return false;
+    if (countParallelAppointments(appointments, date, startTime, endTime) >= 2) return false;
+    return getEmployeesForTreatment(categoryName).some(
+      (employee) =>
+        (!employeeFilter || employee.name === employeeFilter) &&
+        isEmployeeAvailableAt(employee.name, categoryName, date, startTime, endTime) &&
+        !isEmployeeBooked(appointments, employee.name, date, startTime, endTime)
+    );
+  }
+
+  function chooseAvailableSlot(slot) {
+    setSelectedTreatmentCategory(activeCategory);
+    setSelectedTreatmentSubcategory("");
+    setForm((f) => ({
+      ...f,
+      treatment_id: "",
+      treatment_name: "",
+      date: slot.date,
+      time: slot.startTime,
+      end_time: slot.endTime,
+      employee_name: activeEmployee || slot.employees[0]?.name || "",
+    }));
+    setFormOpen(true);
+    clearSchedulingErrors();
+    clearPastTimingErrors();
+  }
 
   function buildMonthGrid(year, month) {
     const firstDay = new Date(year, month, 1).getDay(); // 0=Sun
@@ -891,6 +1351,12 @@ export default function SecretaryPage() {
     if (!day) return;
     const date = new Date(year, month, day);
     const iso = toISO(date);
+    if (iso < today) {
+      setFormOpen(true);
+      setFieldErrors((prev) => ({ ...prev, past_date: true }));
+      triggerFlash(["date"]);
+      return;
+    }
     setWeekStart(getWeekStart(date));
     setViewMode("week");
     if (highlightedDateTimer.current) clearTimeout(highlightedDateTimer.current);
@@ -921,8 +1387,9 @@ export default function SecretaryPage() {
     }, 350);
   }
 
-  // Derive ordered category list from loaded treatments
-  const loadedCategories = Array.from(new Set(treatments.map((t) => t.class_name).filter(Boolean)));
+  // Derive ordered category list from loaded treatments and remove the duplicate short "קוסמטיקה" tab.
+  const loadedCategories = Array.from(new Set(treatments.map((t) => t.class_name).filter(Boolean)))
+    .filter((cat) => cat !== "קוסמטיקה");
   const categories = [
     ...SECRETARY_CATEGORY_OPTIONS,
     ...loadedCategories.filter((cat) => !SECRETARY_CATEGORY_OPTIONS.includes(cat)),
@@ -970,7 +1437,7 @@ export default function SecretaryPage() {
       />
 
       {/* Header */}
-      <div className="px-8 py-4 flex items-center justify-between relative overflow-hidden"
+      <div className="px-8 py-3 flex items-center justify-between relative overflow-hidden"
         style={{ background: "rgba(253,249,246,0.72)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", borderBottom: "1px solid rgba(240,232,223,0.6)" }}>
 
         {/* Animated radiant glow from logo side */}
@@ -985,7 +1452,7 @@ export default function SecretaryPage() {
         </div>
 
         {/* Logo — faded */}
-        <img src="/logo.png" alt="logo" className="h-16 w-auto opacity-60 relative z-10" />
+        <img src="/logo.png" alt="logo" className="h-14 w-auto opacity-60 relative z-10" />
 
         {/* Centered title */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
@@ -1003,7 +1470,7 @@ export default function SecretaryPage() {
             </p>
             <h1 style={{
               fontFamily: "'Cormorant Garamond', Georgia, serif",
-              fontSize: "42px",
+              fontSize: "34px",
               fontStyle: "italic",
               fontWeight: 600,
               letterSpacing: "0.06em",
@@ -1022,7 +1489,7 @@ export default function SecretaryPage() {
         </div>
       </div>
 
-      <div className="flex h-[calc(100vh-65px)] relative">
+      <div className="flex h-[calc(100vh-57px)] relative">
 
         {/* ── Left panel ─────────────────────────────────────── */}
         <div className="w-72 min-w-[272px] border-l border-gray-100 overflow-y-auto flex flex-col shadow-sm relative">
@@ -1085,7 +1552,7 @@ export default function SecretaryPage() {
 
             {/* שם הלקוחה */}
             <div>
-              <label className={labelCls}>שם הלקוחה <Star /></label>
+              <label className={labelCls}>שם הלקוחה</label>
               <div className="relative">
                 <User size={13} className={fieldIconCls} />
                 <input type="text" value={form.client_name}
@@ -1096,12 +1563,11 @@ export default function SecretaryPage() {
                   }}
                   placeholder="שם מלא" className={inputCls("client_name")} />
               </div>
-              <FieldError show={fieldErrors.client_name} />
             </div>
 
             {/* טלפון */}
             <div>
-              <label className={labelCls}>טלפון <Star /></label>
+              <label className={labelCls}>טלפון</label>
               <div className="relative">
                 <Phone size={13} className={fieldIconCls} />
                 <input type="tel" value={form.client_phone}
@@ -1110,7 +1576,7 @@ export default function SecretaryPage() {
                   placeholder="050-0000000"
                   className={inputCls("client_phone")} />
               </div>
-              <FieldError show={fieldErrors.client_phone} />
+              <FieldError show={fieldErrors.client_phone} message="מספר הטלפון אינו תקין" />
             </div>
 
             <div className="h-px bg-gray-100" />
@@ -1134,6 +1600,20 @@ export default function SecretaryPage() {
                   ))}
                 </select>
                 <FieldError show={fieldErrors.treatment_category} />
+                {selectedAvailability && (
+                  <div className="mt-2 rounded-xl px-3 py-2 text-[11px] leading-relaxed border"
+                    style={{ background: "rgba(255,255,255,0.72)", borderColor: "#EADFD5", color: "#6b4f35" }}>
+                    <div className="font-bold">זמינות הטיפול: {formatAvailability(selectedTreatmentCategory)}</div>
+                    <div className="mt-1 flex flex-wrap gap-1.5">
+                      {availableEmployees.map((employee) => (
+                        <span key={employee.name} className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                          style={{ background: "#EAF7EF", color: "#2F8F5B", border: "1px solid #BFE8CE" }}>
+                          {employee.name}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {showTreatmentSubcategory && (
@@ -1177,6 +1657,40 @@ export default function SecretaryPage() {
 
             </div>
 
+            {/* עובדת */}
+            <div>
+              <label className={labelCls}>עובד/ת <Star /></label>
+              <select
+                ref={(el) => { fieldRefs.current.employee_name = el; }}
+                value={form.employee_name}
+                onChange={(e) => {
+                  setForm((f) => ({ ...f, employee_name: e.target.value }));
+                  if (e.target.value) clearFieldError("employee_name");
+                  clearSchedulingErrors();
+                }}
+                className={selectCls("employee_name")}
+              >
+                <option value="">בחרי עובד/ת...</option>
+                {availableEmployees.map((employee) => (
+                  <option key={employee.name} value={employee.name}>{employee.name}</option>
+                ))}
+              </select>
+              {availableEmployees.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {availableEmployees.map((employee) => (
+                    <span key={employee.name} className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
+                      style={{ background: "#EAF7EF", color: "#2F8F5B", border: "1px solid #BFE8CE" }}>
+                      {employee.name}
+                      {selectedTreatmentCategory && ` - ${formatEmployeeAvailability(employee.name, selectedTreatmentCategory)}`}
+                    </span>
+                  ))}
+                </div>
+              )}
+              <FieldError show={fieldErrors.employee_name} />
+              <FieldError show={fieldErrors.employee_unavailable} message={GENERAL_ERROR_MESSAGES.employee_unavailable} />
+              <FieldError show={fieldErrors.employee_booked} message={GENERAL_ERROR_MESSAGES.employee_booked} />
+            </div>
+
             {/* תאריך */}
             <div
               className="rounded-xl"
@@ -1197,6 +1711,7 @@ export default function SecretaryPage() {
                     if (nextValue) clearFieldError("date");
                     clearFieldError("date_year");
                     clearPastTimingErrors();
+                    clearSchedulingErrors();
                   }}
                   className={inputCls("date")}
                 />
@@ -1222,31 +1737,19 @@ export default function SecretaryPage() {
                       const val = e.target.value;
                       setForm((f) => {
                         if (val) clearFieldError("time");
-                        if (val && f.end_time && val < f.end_time) clearFieldError("time_order");
                         clearPastTimingErrors();
-                        return { ...f, time: val };
+                        clearSchedulingErrors();
+                        return { ...f, time: val, end_time: calculateEndTime(selectedTreatmentCategory, val) };
                       });
                     }}
                     className={inputCls("time")}
                   />
                 </div>
-                <div className="relative">
-                  <Clock size={13} className={fieldIconCls} />
-                  <input
-                    type="time"
-                    value={form.end_time}
-                    ref={(el) => { fieldRefs.current.end_time = el; }}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setForm((f) => {
-                        if (val) clearFieldError("end_time");
-                        if (val && f.time && f.time < val) clearFieldError("time_order");
-                        clearPastTimingErrors();
-                        return { ...f, end_time: val };
-                      });
-                    }}
-                    className={inputCls("end_time")}
-                  />
+                <div ref={(el) => { fieldRefs.current.end_time = el; }}
+                  className="min-h-[42px] rounded-xl border px-3 py-2.5 text-sm font-semibold flex items-center justify-between"
+                  style={{ background: "#fff", borderColor: fieldErrors.end_time ? "#FCA5A5" : "#D6B99A", color: "#111111", boxShadow: "0 8px 20px rgba(73,47,27,0.08)" }}>
+                  <span>{form.end_time || "--:--"}</span>
+                  <Clock size={13} className="text-[#6A4B2D]" />
                 </div>
               </div>
               <div className="flex justify-between text-[10px] text-[#111111] font-semibold mt-1 px-1">
@@ -1254,9 +1757,36 @@ export default function SecretaryPage() {
                 <span>סיום</span>
               </div>
               <FieldError show={fieldErrors.time || fieldErrors.end_time} />
-              <FieldError show={fieldErrors.time_order} message="שעת ההתחלה חייבת להיות מוקדמת משעת הסיום" />
-              <FieldError show={fieldErrors.past_date} message="לא ניתן לקבוע תור לתאריך שכבר עבר" />
+              <FieldError show={fieldErrors.required} message={GENERAL_ERROR_MESSAGES.required} />
+              <FieldError show={fieldErrors.unavailable} message={GENERAL_ERROR_MESSAGES.unavailable} />
+              <FieldError show={fieldErrors.outside_hours} message={GENERAL_ERROR_MESSAGES.outside_hours} />
+              <FieldError show={fieldErrors.max_parallel} message={GENERAL_ERROR_MESSAGES.max_parallel} />
+              <FieldError show={fieldErrors.past_date} message={GENERAL_ERROR_MESSAGES.past_date} />
               <FieldError show={fieldErrors.past_time} message="לא ניתן לקבוע תור לשעה שכבר עברה" />
+              {selectedTreatmentCategory && form.date && formAvailableTimeSlots.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {formAvailableTimeSlots.slice(0, 12).map((slot) => (
+                    <button
+                      key={slot.startTime}
+                      type="button"
+                      onClick={() => {
+                        setForm((f) => ({ ...f, time: slot.startTime, end_time: slot.endTime }));
+                        clearFieldError("time");
+                        clearSchedulingErrors();
+                      }}
+                      className="px-2.5 py-1 rounded-full text-[10px] font-semibold border transition-all active:scale-95"
+                      style={{
+                        background: form.time === slot.startTime ? "#6BA292" : "#EAF7EF",
+                        color: form.time === slot.startTime ? "#fff" : "#2F8F5B",
+                        borderColor: "#BFE8CE",
+                        direction: "ltr",
+                      }}
+                    >
+                      {slot.startTime}-{slot.endTime}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
 
             {/* הערות */}
@@ -1373,8 +1903,8 @@ export default function SecretaryPage() {
             }
           `}</style>
 
-          {/* Calendar card */}
-          <div className="flex-1 min-h-0 mx-12 mt-14 mb-4 flex flex-col"
+          {/* Layout: smaller outer margins give the calendar grid more visible height. */}
+          <div className="flex-1 min-h-0 mx-8 mt-6 mb-3 flex flex-col"
             style={{ perspective: "1200px" }}>
 
             <div
@@ -1392,7 +1922,7 @@ export default function SecretaryPage() {
               }}
             >
               {/* Calendar header */}
-              <div className="border-b px-6 py-3.5 flex items-center justify-between flex-shrink-0"
+              <div className="border-b px-6 py-2.5 flex items-center justify-between flex-shrink-0"
                 style={{ background: "#EDE0D0", borderBottomColor: "#DCCAB5" }}>
                 <div className="flex items-center gap-3">
                   <div className="flex gap-1">
@@ -1457,7 +1987,7 @@ export default function SecretaryPage() {
 
               {/* Category filter bar — hidden in year view */}
               {viewMode === "week" && (
-              <div className="flex items-center gap-2 px-4 py-2 flex-shrink-0 flex-wrap"
+              <div className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 flex-wrap"
                 style={{ background: "#f5ede3", borderBottom: "1px solid #e0cfbb" }}>
                 <button
                   onClick={() => switchCategory(null)}
@@ -1483,6 +2013,70 @@ export default function SecretaryPage() {
                   </button>
                 ))}
               </div>
+              )}
+
+              {viewMode === "week" && activeCategory && activeCategoryAvailability && (
+                <div className="px-4 py-2 flex-shrink-0"
+                  style={{ background: "#FFFDF9", borderBottom: "1px solid #eadfd5" }}>
+                  <div className="flex flex-wrap items-center gap-2 mb-2 text-[11px]" style={{ color: "#6b4f35" }}>
+                    <span className="font-bold">{activeCategory}</span>
+                    <span>זמינות: {formatAvailability(activeCategory)}</span>
+                    {activeCategoryEmployees.length > 1 && (
+                      <span className="font-bold text-[#2F8F5B]">סינון לפי עובד/ת:</span>
+                    )}
+                    {activeCategoryEmployees.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setActiveEmployee("")}
+                        className="px-2 py-0.5 rounded-full font-semibold border transition-all active:scale-95"
+                        style={activeEmployee === ""
+                          ? { background: "#6BA292", color: "#fff", borderColor: "#6BA292" }
+                          : { background: "#EAF7EF", color: "#2F8F5B", borderColor: "#BFE8CE" }}
+                      >
+                        כל העובדים
+                      </button>
+                    )}
+                    {activeCategoryEmployees.map((employee) => (
+                      <button
+                        key={employee.name}
+                        type="button"
+                        onClick={() => setActiveEmployee(activeEmployee === employee.name ? "" : employee.name)}
+                        className="px-2 py-0.5 rounded-full font-semibold border transition-all active:scale-95"
+                        title={formatEmployeeAvailability(employee.name, activeCategory)}
+                        style={activeEmployee === employee.name
+                          ? { background: "#6BA292", color: "#fff", borderColor: "#6BA292" }
+                          : { background: "#EAF7EF", color: "#2F8F5B", borderColor: "#BFE8CE" }}
+                      >
+                        {employee.name}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {activeAvailableSlots.length > 0 ? activeAvailableSlots.slice(0, 18).map((slot) => (
+                      <button
+                        key={`${slot.date}-${slot.startTime}`}
+                        type="button"
+                        onClick={() => chooseAvailableSlot(slot)}
+                        className="shrink-0 rounded-xl px-3 py-2 text-[11px] font-semibold border transition-all hover:shadow-sm active:scale-95"
+                        style={{
+                          background: activeCategoryColor.background,
+                          borderColor: activeCategoryColor.border,
+                          color: activeCategoryColor.text,
+                        }}
+                        title={slot.employees.map((employee) => employee.name).join(", ")}
+                      >
+                        <span className="block">{slot.dayName} {slot.date.slice(5)}</span>
+                        <span className="block" style={{ direction: "ltr" }}>{slot.startTime}-{slot.endTime}</span>
+                        <span className="block" style={{ color: activeCategoryColor.mutedText }}>{slot.employees.map((employee) => employee.name).join(", ")}</span>
+                      </button>
+                    )) : (
+                      <span className="text-[11px] rounded-xl px-3 py-2 border"
+                        style={{ background: "#F9F4EF", borderColor: "#EADFD5", color: "#8b6f52" }}>
+                        אין שעות זמינות בשבוע הזה
+                      </span>
+                    )}
+                  </div>
+                </div>
               )}
 
               {/* ── Year view ─────────────────────────────────── */}
@@ -1531,7 +2125,7 @@ export default function SecretaryPage() {
                                 <div
                                   key={ci}
                                   onClick={() => handleYearDayClick(yearViewYear, monthIdx, day)}
-                                  className="flex flex-col items-center justify-center cursor-pointer rounded-md py-0.5 transition-colors hover:bg-[#F4EFEA]"
+                                  className={`flex flex-col items-center justify-center rounded-md py-0.5 transition-colors ${isPastDay ? "cursor-not-allowed" : "cursor-pointer hover:bg-[#F4EFEA]"}`}
                                   style={{ opacity: isPastDay ? 0.4 : 1 }}
                                 >
                                   <span
@@ -1547,6 +2141,9 @@ export default function SecretaryPage() {
                                   </span>
                                   {hasAppt && (
                                     <div className="w-1 h-1 rounded-full mt-0.5" style={{ background: "#C9A27E" }} />
+                                  )}
+                                  {isPastDay && (
+                                    <span className="text-[7px] leading-none mt-0.5" style={{ color: "#9A8A7A" }}>עבר</span>
                                   )}
                                 </div>
                               );
@@ -1585,10 +2182,11 @@ export default function SecretaryPage() {
                       {weekDays.map((day, i) => {
                         const iso = toISO(day);
                         const isToday = iso === today;
+                        const isPastDay = iso < today;
                         return (
                           <div key={i}
-                            className={`text-center py-3 ${iso < today && !isCurrentWeek ? "blur-[1.5px]" : ""}`}
-                            style={{ background: "#eddfc9", borderBottom: "2px solid #c8ad8e", borderRight: "1px solid #c8ad8e", position: "sticky", top: 0, zIndex: 30, animation: iso === highlightedDateCol ? "columnHeaderHighlight 1.8s ease forwards" : undefined }}>
+                            className={`text-center py-2 ${isPastDay ? "blur-[1px]" : ""}`}
+                            style={{ background: "#eddfc9", borderBottom: "2px solid #c8ad8e", borderRight: "1px solid #c8ad8e", position: "sticky", top: 0, zIndex: 30, opacity: isPastDay ? 0.55 : 1, animation: iso === highlightedDateCol ? "columnHeaderHighlight 1.8s ease forwards" : undefined }}>
                             <p className="text-[11px] font-semibold uppercase tracking-wider"
                               style={{ color: isToday ? "#6BA292" : "#7A7A7A" }}>
                               {DAY_NAMES[day.getDay()]}
@@ -1599,6 +2197,9 @@ export default function SecretaryPage() {
                               style={isToday ? { background: "#6BA292" } : { color: "#2C2C2C" }}>
                               {day.getDate()}
                             </p>
+                            {isPastDay && (
+                              <span className="text-[9px] rounded-full px-1.5 py-0.5" style={{ color: "#8b6f52", background: "rgba(255,255,255,0.55)" }}>עבר</span>
+                            )}
                           </div>
                         );
                       })}
@@ -1637,6 +2238,8 @@ export default function SecretaryPage() {
                             const isDragCell = drag && drag.date === iso && hour >= dragMin && hour <= dragMax;
                             const isRescheduleTarget = reschedule && reschedule.targetDate === iso && reschedule.targetHour === hour;
                             const isPastSlot = !isFutureSlot(iso, hour);
+                            const slotTime = `${String(hour).padStart(2, "0")}:00`;
+                            const isUnavailableForActiveCategory = !!activeCategory && !isBookableSlotForCategory(activeCategory, iso, slotTime, activeEmployee);
                             return (
                               <div key={hour}
                                 onClick={() => handleCellClick(iso, hour)}
@@ -1644,16 +2247,22 @@ export default function SecretaryPage() {
                                 onMouseEnter={() => { handleDragEnter(iso, hour); handleRescheduleEnter(iso, hour); }}
                                 onMouseUp={handleDragEnd}
                                 className={`absolute w-full select-none transition-colors
-                                  ${isPastSlot ? (isPastDay && !isCurrentWeek ? "blur-[1.5px] cursor-not-allowed" : "cursor-not-allowed") : "cursor-pointer"}
-                                  ${!isPastSlot && isDragCell ? "bg-yellow-50" : ""}
-                                  ${!isPastSlot && isRescheduleTarget ? "bg-[#F4EFEA]" : ""}
-                                  ${!isPastSlot && !isDragCell && !isRescheduleTarget ? "hover:bg-yellow-50/70" : ""}`}
+                                  ${isPastSlot || isUnavailableForActiveCategory ? (isPastDay && !isCurrentWeek ? "blur-[1.5px] cursor-not-allowed" : "cursor-not-allowed") : "cursor-pointer"}
+                                  ${!isPastSlot && !isUnavailableForActiveCategory && isDragCell ? "bg-yellow-50" : ""}
+                                  ${!isPastSlot && !isUnavailableForActiveCategory && isRescheduleTarget ? "bg-[#F4EFEA]" : ""}
+                                  ${!isPastSlot && !isUnavailableForActiveCategory && !isDragCell && !isRescheduleTarget ? "hover:bg-yellow-50/70" : ""}`}
                                 style={{
                                   top: `${(hour - FIRST_HOUR) * ROW_HEIGHT}px`,
                                   height: `${ROW_HEIGHT}px`,
                                   borderBottom: "1px solid #e0d0bc",
+                                  background: isUnavailableForActiveCategory ? "rgba(234,223,213,0.22)" : undefined,
+                                  opacity: isPastSlot ? 0.55 : 1,
                                 }}
-                              />
+                              >
+                                {isPastSlot && hour === FIRST_HOUR && (
+                                  <span className="absolute top-1 right-1 text-[9px]" style={{ color: "#9A8A7A" }}>עבר</span>
+                                )}
+                              </div>
                             );
                           })}
 
@@ -1670,6 +2279,8 @@ export default function SecretaryPage() {
                             const containerW = 100;
                             const leftPct = pos.left * containerW + GAP;
                             const widthPct = pos.width * containerW - GAP * 2;
+                            const appointmentCategory = getAppointmentCategory(a, treatments);
+                            const appointmentColor = getTreatmentColor(appointmentCategory);
                             return (
                               <div key={a.id}
                                 onClick={(e) => {
@@ -1691,20 +2302,23 @@ export default function SecretaryPage() {
                                   left: `${leftPct}%`,
                                   width: `${widthPct}%`,
                                   pointerEvents: "auto",
-                                  backgroundColor: !isBeingDragged && isHovered ? "#bfddd6" : "#d4ede6",
-                                  borderColor: !isBeingDragged && isHovered ? "rgba(107,162,146,0.6)" : "rgba(107,162,146,0.35)",
+                                  backgroundColor: !isBeingDragged && isHovered ? appointmentColor.hoverBackground : appointmentColor.background,
+                                  borderColor: appointmentColor.border,
                                   animation: isJustRescheduled
                                     ? "rescheduleGlow 2s ease forwards"
                                     : a.id === newlyBookedId
                                     ? "newBookingPulse 2.5s ease forwards"
                                     : undefined,
                                 }}>
-                                <div className="font-bold truncate text-[#2d5a4f]">{a.client_name}</div>
+                                <div className="font-bold truncate" style={{ color: appointmentColor.text }}>{a.client_name}</div>
                                 {pos.height > 30 && (
-                                  <div className="truncate text-[#5a9a8a] text-[9px]">{a.treatment_name}</div>
+                                  <div className="truncate text-[9px]" style={{ color: appointmentColor.mutedText }}>{a.treatment_name}</div>
+                                )}
+                                {pos.height > 38 && a.employee_name && (
+                                  <div className="truncate text-[9px]" style={{ color: appointmentColor.text }}>{a.employee_name}</div>
                                 )}
                                 {pos.height > 44 && (
-                                  <div className="text-[9px] text-[#6BA292]">{a.time}{a.end_time ? `–${a.end_time}` : ""}</div>
+                                  <div className="text-[9px]" style={{ color: appointmentColor.mutedText }}>{a.time}{a.end_time ? `–${a.end_time}` : ""}</div>
                                 )}
                               </div>
                             );
