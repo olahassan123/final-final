@@ -14,7 +14,6 @@ body {
   margin: 0;
   padding: 0;
   min-height: 100vh;
-  /* ביטול המרכוז הכפוי של Vite */
   display: block;
   background-color: #f3ede3;
   color: #2d3a2e;
@@ -36,7 +35,7 @@ body {
 
 /* ── Gradient text ───────────────────────────────────────────────────── */
 .gradient-text {
-  background: linear-gradient(135deg, #e8a5b5 0%, #c084fc 100%);
+  background: linear-gradient(135deg, #C4795A 0%, #E8C4A0 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -68,8 +67,8 @@ body {
 /* ── Custom scrollbar (light) ────────────────────────────────────────── */
 ::-webkit-scrollbar        { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track  { background: #f9f9f9; }
-::-webkit-scrollbar-thumb  { background: #e0d4e7; border-radius: 99px; }
-::-webkit-scrollbar-thumb:hover { background: #c084fc; }
+::-webkit-scrollbar-thumb  { background: #E8C4A0; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #C4795A; }
 
 /* ── Dark glassmorphism card ─────────────────────────────────────────── */
 .glass-dark {
@@ -175,6 +174,51 @@ body {
 }
 .gradient-border:hover::before {
   opacity: 1;
+}
+
+/* ── 3D perspective utilities ─────────────────────────────────── */
+.perspective-1000 { perspective: 1000px; }
+.perspective-1200 { perspective: 1200px; }
+.preserve-3d      { transform-style: preserve-3d; }
+
+/* ── Animated gradient border (beauty) ───────────────────────── */
+.beauty-border {
+  position: relative;
+  border-radius: 1.5rem;
+}
+.beauty-border::before {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #C4795A, #E8C4A0, #F2C4A0, #C4795A);
+  background-size: 300% 300%;
+  animation: borderSpin 4s linear infinite;
+  z-index: -1;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+}
+.beauty-border:hover::before { opacity: 1; }
+
+@keyframes borderSpin {
+  0%   { background-position: 0%   50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0%   50%; }
+}
+
+/* ── Float keyframe ───────────────────────────────────────────── */
+@keyframes floatY {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-14px); }
+}
+.float-anim { animation: floatY 4s ease-in-out infinite; }
+
+/* ── Glass card (beauty variant) ──────────────────────────────── */
+.glass-beauty {
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
 }
 
 /* הבטחת כיוון כתיבה לימין עבור העברית */

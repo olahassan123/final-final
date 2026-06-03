@@ -909,6 +909,108 @@ def get_analytics():
         "recent": [dict(r) for r in recent],
     }
 
+# ------------------------------------------------------------
+# Skin Analysis
+# ------------------------------------------------------------
+
+_COSMETIC_TREATMENT_INFO = {
+    "classic-meday":   {"name": "מידיי קלאסי",                        "desc": "טיפול פנים קלאסי לניקוי ואיזון עור הפנים"},
+    "man-t":           {"name": "מידיי קלאסי לגבר Man T",             "desc": "טיפול קלאסי לעור הגברי — מאזן, מנקה ומרגיע"},
+    "face-sculpt":     {"name": "מידיי FACE SCULPT עיסוי מעצב",       "desc": "עיסוי מעצב להרמה, מיצוק ושיפור קווי הפנים"},
+    "party":           {"name": "מידיי PARTY",                         "desc": "זוהר מיידי לפני אירועים — פילינג יהלום ואולטרסאונד"},
+    "meso-pro":        {"name": "מידיי MESO PRO",                     "desc": "מזותרפיה קוסמטית לחידוש, לחות ואנטי אייג'ינג עמוק"},
+    "lifting-pro":     {"name": "מידיי LIFTING PRO",                  "desc": "גלי רדיו למיצוק, עיצוב ומתיחת הפנים"},
+    "collagen-plus":   {"name": "מידיי COLLAGEN + קולגן פלוס",        "desc": "IPL Rejuvenation לחידוש טוטאלי ומרקם עור אחיד"},
+    "stop-acne":       {"name": "אקנה סטופ STOP ACNE",                "desc": "IPL מתקדם להעלמת אקנה, דלקתיות ומניעת צלקות"},
+    "clear-skin-plus": {"name": "מידיי CLEAR SKIN + ניקוי העור פלוס", "desc": "ניקוי יסודי ופילינג עדין לעור זוהר ואחיד"},
+    "new-skin":        {"name": "פילינג סידרתי NEW SKIN",             "desc": "פילינג מותאם אישית לאקנה, פיגמנטציה וסימני גיל"},
+    "skin-booster":    {"name": "הצערת העור SKIN BOOSTER",            "desc": "אנטי-אייג'ינג עוצמתי למתיחה, מילוי וחידוש העור"},
+}
+
+_CONCERN_TO_TREATMENTS = {
+    "acne":            ["stop-acne", "clear-skin-plus", "new-skin"],
+    "oily_skin":       ["clear-skin-plus", "stop-acne", "classic-meday"],
+    "dry_skin":        ["skin-booster", "meso-pro", "collagen-plus"],
+    "pigmentation":    ["new-skin", "clear-skin-plus", "meso-pro"],
+    "wrinkles":        ["lifting-pro", "skin-booster", "collagen-plus"],
+    "sagging":         ["face-sculpt", "lifting-pro", "collagen-plus"],
+    "dull_skin":       ["meso-pro", "party", "classic-meday"],
+    "large_pores":     ["collagen-plus", "clear-skin-plus"],
+    "sensitive_skin":  ["classic-meday", "meso-pro"],
+    "dark_circles":    ["skin-booster", "meso-pro"],
+    "uneven_texture":  ["new-skin", "clear-skin-plus", "collagen-plus"],
+    "combination_skin":["classic-meday", "clear-skin-plus"],
+    "normal_skin":     ["classic-meday", "meso-pro", "party"],
+}
+
+
+class SkinAnalysisRequest(BaseModel):
+    image_base64: str
+    mime_type: str = "image/jpeg"
+
+
+@app.post("/analyze-skin")
+def analyze_skin(req: SkinAnalysisRequest):
+    import json as _json
+
+    prompt = (
+        "You are a professional cosmetic skin analyst. Analyze the skin in this facial photo.\n"
+        "Return a JSON object with these fields:\n"
+        "- skin_type: one of dry, oily, combination, normal, sensitive\n"
+        "- skin_type_hebrew: Hebrew translation (יבש, שומני, מעורב, נורמלי, רגיש)\n"
+        "- concerns: array of 2-4 objects, each with key, label (Hebrew), severity (mild/moderate/significant)\n"
+        "- overall_summary: 1-2 sentences in Hebrew describing the skin condition\n\n"
+        "Valid concern keys: acne, oily_skin, dry_skin, pigmentation, wrinkles, "
+        "sagging, dull_skin, large_pores, sensitive_skin, dark_circles, uneven_texture\n"
+        "Be objective and clinical. If the image is unclear, still provide your best assessment."
+    )
+
+    try:
+        completion = groq.chat.completions.create(
+            model="meta-llama/llama-4-scout-17b-16e-instruct",
+            messages=[{
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:{req.mime_type};base64,{req.image_base64}"},
+                    },
+                    {"type": "text", "text": prompt},
+                ],
+            }],
+            max_tokens=1024,
+            temperature=0.2,
+            response_format={"type": "json_object"},
+        )
+        analysis = _json.loads(completion.choices[0].message.content)
+    except Exception as e:
+        print(f"SKIN ANALYSIS ERROR: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=500, detail=f"ניתוח העור נכשל: {type(e).__name__}")
+
+    # Map concerns → ranked unique treatment recommendations
+    seen: set = set()
+    recommended = []
+    for concern in analysis.get("concerns", []):
+        for tid in _CONCERN_TO_TREATMENTS.get(concern.get("key", ""), []):
+            if tid not in seen and len(recommended) < 4:
+                seen.add(tid)
+                info = _COSMETIC_TREATMENT_INFO.get(tid, {})
+                recommended.append({
+                    "slug": tid,
+                    "name": info.get("name", ""),
+                    "desc": info.get("desc", ""),
+                    "concern": concern.get("label", ""),
+                })
+
+    return {
+        "skin_type": analysis.get("skin_type", "combination"),
+        "skin_type_hebrew": analysis.get("skin_type_hebrew", "מעורב"),
+        "concerns": analysis.get("concerns", []),
+        "summary": analysis.get("overall_summary", ""),
+        "recommended_treatments": recommended,
+    }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
