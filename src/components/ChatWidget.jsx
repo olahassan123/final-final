@@ -58,14 +58,17 @@ export default function ChatWidget() {
   // ── Sync treatment context from treatment pages ───────────────
   useEffect(() => {
     const handleTreatmentSelection = (e) => setSelectedTreatment(e.detail);
+    const handleOpenChat = () => setOpen(true);
     const handleOpenWithQuestion = (e) => {
       setOpen(true);
       handleSend(e.detail, {}, {});
     };
     window.addEventListener("treatmentSelected", handleTreatmentSelection);
+    window.addEventListener("openChatbot", handleOpenChat);
     window.addEventListener("openChatWithQuestion", handleOpenWithQuestion);
     return () => {
       window.removeEventListener("treatmentSelected", handleTreatmentSelection);
+      window.removeEventListener("openChatbot", handleOpenChat);
       window.removeEventListener("openChatWithQuestion", handleOpenWithQuestion);
     };
   }, []);
@@ -175,7 +178,7 @@ export default function ChatWidget() {
   }[flowState.mode];
 
   return (
-    <div className="fixed bottom-6 left-6 z-[100] font-sans" dir="rtl">
+    <div className="fixed bottom-6 left-6 z-[140] font-sans" dir="rtl">
       {/* Floating button */}
       <button
         onClick={() => setOpen(!open)}
@@ -189,7 +192,7 @@ export default function ChatWidget() {
 
       {/* Chat window */}
       {open && (
-        <div className="absolute bottom-20 left-0 w-[400px] max-w-[92vw] h-[620px] bg-white rounded-3xl shadow-2xl border border-pink-50 overflow-hidden flex flex-col animate-in slide-in-from-bottom-5">
+        <div className="fixed bottom-24 left-4 right-4 h-[min(620px,calc(100vh-8rem))] max-h-[calc(100vh-8rem)] overflow-hidden rounded-3xl border border-pink-50 bg-white shadow-2xl flex flex-col animate-in slide-in-from-bottom-5 sm:left-6 sm:right-auto sm:w-[400px]">
 
           {/* Header */}
           <div className="bg-gradient-to-l from-primary to-pink-300 p-5 text-white">

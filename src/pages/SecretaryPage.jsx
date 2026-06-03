@@ -1,7 +1,8 @@
-import { useState, useEffect, useRef } from "react";
+import { createElement, useState, useEffect, useRef } from "react";
+import { addContactInquiryFeedback, CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
 import { fetchTreatments, fetchAppointments, createAppointment, deleteAppointment, updateAppointment } from "../api/medayApi";
 import {
-  ChevronLeft, ChevronRight, Trash2, Plus, Sparkles, User, Phone, CalendarDays, Clock, X, LayoutGrid,
+  ChevronLeft, ChevronRight, Trash2, Plus, Sparkles, User, Phone, CalendarDays, Clock, X, LayoutGrid, MessageCircle, Settings, CheckCircle2, Home,
 } from "lucide-react";
 
 // ── Calendar helpers ──────────────────────────────────────────
@@ -283,10 +284,6 @@ function toISO(date) {
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
   return `${y}-${m}-${d}`;
-}
-
-function displayDate(date) {
-  return `${date.getDate()}/${date.getMonth() + 1}`;
 }
 
 function timeToMinutes(time) {
@@ -587,6 +584,194 @@ function computeOverlapLayout(appts) {
   return layout;
 }
 
+const SECRETARY_NAV_ITEMS = [
+  { key: "appointments", icon: CalendarDays, label: "תורים" },
+  { key: "inquiries", icon: MessageCircle, label: "פניות" },
+  { key: "settings", icon: Settings, label: "הגדרות" },
+];
+
+function formatDateTime(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("he-IL", { dateStyle: "short", timeStyle: "short" }).format(new Date(value));
+}
+
+function SecretaryPageGlow() {
+  return (
+    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div className="absolute -right-36 top-0 h-96 w-96 rounded-full bg-[#E8C4A0]/35 blur-3xl" />
+      <div className="absolute left-[-8rem] top-40 h-[28rem] w-[28rem] rounded-full bg-[#F2D4BE]/45 blur-3xl" />
+      <div className="absolute bottom-0 right-1/3 h-80 w-80 rounded-full bg-white/55 blur-3xl" />
+    </div>
+  );
+}
+
+function SecretarySectionCard({ icon: Icon, title, subtitle, children, className = "" }) {
+  return (
+    <section className={`rounded-3xl border border-white/75 bg-white/75 p-5 shadow-xl shadow-[#9B5C38]/5 backdrop-blur-xl ${className}`}>
+      <div className="mb-5 flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#C4795A] to-[#9B5C38] text-white shadow-lg shadow-[#C4795A]/25">
+          {createElement(Icon, { size: 18 })}
+        </div>
+        <div className="min-w-0 text-right">
+          <h2 className="text-base font-extrabold text-gray-900">{title}</h2>
+          {subtitle ? <p className="mt-1 text-xs leading-5 text-gray-500">{subtitle}</p> : null}
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function SecretaryEmptyState({ icon: Icon = Sparkles, title, text }) {
+  return (
+    <div className="rounded-3xl border-2 border-dashed border-[#E8C4A0]/60 bg-white/55 p-8 text-center">
+      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#C4795A]/10 text-[#C4795A]">
+        {createElement(Icon, { size: 22 })}
+      </div>
+      <p className="text-sm font-bold text-gray-900">{title}</p>
+      <p className="mx-auto mt-1 max-w-sm text-xs leading-6 text-gray-500">{text}</p>
+    </div>
+  );
+}
+
+function SecretarySidebar({ activeTab, onTabChange }) {
+  return (
+    <aside className="hidden h-full w-[236px] shrink-0 flex-col overflow-hidden border-l border-white/75 bg-white/65 shadow-xl shadow-[#9B5C38]/5 backdrop-blur-xl lg:flex">
+      <div className="flex items-center gap-3 border-b border-[#E8C4A0]/35 px-4 py-5">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#C4795A] to-[#9B5C38] text-white shadow-lg shadow-[#C4795A]/25">
+          <CalendarDays size={18} />
+        </div>
+        <div>
+          <p className="whitespace-nowrap text-sm font-black text-gray-900">MeDay Secretary</p>
+          <p className="whitespace-nowrap text-xs text-gray-400">ניהול תורים ופניות</p>
+        </div>
+      </div>
+      <nav className="flex-1 space-y-1 px-3 py-4">
+        {SECRETARY_NAV_ITEMS.map((item) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.key;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => onTabChange(item.key)}
+              className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-right transition ${isActive ? "bg-[#C4795A]/12 text-[#8B5030] shadow-sm" : "text-gray-500 hover:bg-white/70 hover:text-gray-900"}`}
+            >
+              <Icon size={18} className="shrink-0" />
+              <span className="whitespace-nowrap text-sm font-bold">{item.label}</span>
+            </button>
+          );
+        })}
+      </nav>
+    </aside>
+  );
+}
+
+function SecretaryMobileTabs({ activeTab, onTabChange }) {
+  return (
+    <div className="flex gap-2 overflow-x-auto rounded-3xl border border-white/70 bg-white/60 p-2 shadow-sm backdrop-blur lg:hidden">
+      {SECRETARY_NAV_ITEMS.map((item) => {
+        const Icon = item.icon;
+        const isActive = activeTab === item.key;
+        return (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => onTabChange(item.key)}
+            className={`flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-xs font-bold transition ${isActive ? "bg-[#C4795A] text-white shadow-lg shadow-[#C4795A]/20" : "bg-white/75 text-[#8B5030] hover:bg-[#F5EDE3]"}`}
+          >
+            <Icon size={15} />
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SecretaryContactInquiries({ inquiries, onStatusChange, onFeedbackAdd }) {
+  const [feedbackDrafts, setFeedbackDrafts] = useState({});
+  const newCount = inquiries.filter((inquiry) => inquiry.status === "new").length;
+  const handledCount = inquiries.filter((inquiry) => inquiry.status === "handled").length;
+
+  const saveFeedback = (id) => {
+    const text = String(feedbackDrafts[id] || "").trim();
+    if (!text) return;
+    onFeedbackAdd(id, text);
+    setFeedbackDrafts((drafts) => ({ ...drafts, [id]: "" }));
+  };
+
+  return (
+    <SecretarySectionCard icon={MessageCircle} title="פניות" subtitle={`${newCount} חדשות · ${handledCount} טופלו · ${inquiries.length} סה״כ`}>
+      <div className="space-y-3">
+        {inquiries.length === 0 ? (
+          <SecretaryEmptyState icon={MessageCircle} title="אין פניות עדיין" text="פניות מטופס צור קשר יופיעו כאן." />
+        ) : inquiries.map((inquiry) => {
+          const isHandled = inquiry.status === "handled";
+          return (
+            <article key={inquiry.id} className="rounded-3xl border border-white/75 bg-white/70 p-4 shadow-sm transition hover:bg-[#FAF6F1]">
+              <div className="grid gap-4 lg:grid-cols-[1fr_1fr_2fr_auto_auto] lg:items-start">
+                <div className="text-right">
+                  <p className="text-xs font-bold text-gray-400">שם</p>
+                  <p className="text-sm font-extrabold text-gray-900">{inquiry.fullName}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs font-bold text-gray-400">טלפון</p>
+                  <a href={`tel:${inquiry.phone}`} className="text-sm font-bold text-[#8B5030] hover:text-[#C4795A]">{inquiry.phone}</a>
+                </div>
+                <div className="text-right">
+                  <p className="text-xs font-bold text-gray-400">הודעה</p>
+                  <p className="text-sm leading-6 text-gray-600">{inquiry.message}</p>
+                </div>
+                <div className="text-right lg:text-left">
+                  <p className="text-xs font-bold text-gray-400">תאריך</p>
+                  <p className="text-xs font-semibold text-gray-500">{formatDateTime(inquiry.createdAt)}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${isHandled ? "bg-emerald-50 text-emerald-700" : "bg-[#C4795A]/10 text-[#8B5030]"}`}>
+                    {isHandled ? "טופל" : "חדש"}
+                  </span>
+                  {isHandled ? (
+                    <button type="button" onClick={() => onStatusChange(inquiry.id, "new")} className="rounded-full border border-[#C4795A]/25 bg-white/80 px-4 py-2 text-xs font-bold text-[#8B5030] transition hover:bg-[#F5EDE3]">החזר לחדש</button>
+                  ) : (
+                    <button type="button" onClick={() => onStatusChange(inquiry.id, "handled")} className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-4 py-2 text-xs font-bold text-white shadow-lg shadow-[#C4795A]/20 transition hover:shadow-[#C4795A]/30">
+                      <CheckCircle2 size={14} />
+                      טופל
+                    </button>
+                  )}
+                </div>
+              </div>
+              <div className="mt-4 rounded-3xl bg-[#FAF6F1] p-4 text-right">
+                <label className="block">
+                  <span className="mb-1 block text-xs font-bold text-gray-400">הערת צוות</span>
+                  <textarea
+                    rows={2}
+                    value={feedbackDrafts[inquiry.id] || ""}
+                    onChange={(event) => setFeedbackDrafts((drafts) => ({ ...drafts, [inquiry.id]: event.target.value }))}
+                    placeholder="כתבי כאן הערה פנימית לצוות..."
+                    className="w-full resize-none rounded-2xl border border-[#E8C4A0]/50 bg-white/80 px-4 py-3 text-right text-sm text-gray-700 outline-none transition focus:border-[#C4795A] focus:ring-2 focus:ring-[#C4795A]/15"
+                  />
+                </label>
+                <button type="button" onClick={() => saveFeedback(inquiry.id)} className="mt-3 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-[#C4795A]/20 transition hover:shadow-[#C4795A]/30">שמור הערה</button>
+                {(inquiry.feedbackNotes || []).length > 0 ? (
+                  <div className="mt-4 space-y-2">
+                    {(inquiry.feedbackNotes || []).map((note) => (
+                      <div key={note.id} className="rounded-2xl bg-white/75 p-3">
+                        <div className="mb-1 text-[11px] font-bold text-gray-400">{formatDateTime(note.createdAt)}</div>
+                        <p className="text-sm leading-6 text-gray-700">{note.text}</p>
+                      </div>
+                    ))}
+                  </div>
+                ) : <p className="mt-3 text-xs text-gray-400">אין הערות צוות עדיין.</p>}
+              </div>
+            </article>
+          );
+        })}
+      </div>
+    </SecretarySectionCard>
+  );
+}
+
 // ── Detail Modal ──────────────────────────────────────────────
 function AppointmentModal({ appt, onClose, onDelete }) {
   if (!appt) return null;
@@ -655,6 +840,8 @@ function AppointmentModal({ appt, onClose, onDelete }) {
 
 // ── Main Component ────────────────────────────────────────────
 export default function SecretaryPage() {
+  const [activeSecretaryTab, setActiveSecretaryTab] = useState("appointments");
+  const [contactInquiries, setContactInquiries] = useState(() => getContactInquiries());
   const [treatments, setTreatments] = useState([]);
   const [appointments, setAppointments] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -800,6 +987,30 @@ export default function SecretaryPage() {
       .catch(console.error);
     load();
   }, []);
+
+  useEffect(() => {
+    const refreshContactInquiries = () => setContactInquiries(getContactInquiries());
+    const handleStorage = (event) => {
+      if (event.key === CONTACT_INQUIRIES_STORAGE_KEY) refreshContactInquiries();
+    };
+
+    window.addEventListener(CONTACT_INQUIRY_EVENT, refreshContactInquiries);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener(CONTACT_INQUIRY_EVENT, refreshContactInquiries);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  function changeContactInquiryStatus(id, status) {
+    updateContactInquiryStatus(id, status);
+    setContactInquiries(getContactInquiries());
+  }
+
+  function addContactInquiryNote(id, noteText) {
+    addContactInquiryFeedback(id, noteText);
+    setContactInquiries(getContactInquiries());
+  }
 
   useEffect(() => { setPastLabelVisible(true); }, [weekStart]);
 
@@ -1089,7 +1300,7 @@ export default function SecretaryPage() {
     }
     window.addEventListener("mouseup", onGlobalMouseUp);
     return () => window.removeEventListener("mouseup", onGlobalMouseUp);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Apply grabbing cursor to whole page while rescheduling
   useEffect(() => {
@@ -1424,7 +1635,38 @@ export default function SecretaryPage() {
   );
 
   return (
-    <div dir="rtl" className="min-h-screen" style={{
+    <div dir="rtl" className="relative flex h-screen overflow-hidden bg-[#FAF6F1] text-gray-900">
+      <SecretaryPageGlow />
+      <SecretarySidebar activeTab={activeSecretaryTab} onTabChange={setActiveSecretaryTab} />
+
+      <div className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden">
+        <div className="sticky top-0 z-20 border-b border-white/70 bg-[#FAF6F1]/80 px-4 py-3 backdrop-blur-xl sm:px-6">
+          <div className="mx-auto flex max-w-7xl items-center justify-between gap-3">
+            <div className="text-right">
+              <p className="text-xs font-bold text-[#C4795A]">MeDay Beauty Center</p>
+              <h1 className="text-2xl font-black text-gray-900">אזור מזכירות</h1>
+            </div>
+            <button
+              type="button"
+              onClick={() => window.location.assign("/")}
+              className="inline-flex items-center gap-2 rounded-full border border-[#C4795A]/15 bg-white/80 px-4 py-2 text-xs font-bold text-[#8B5030] shadow-sm transition hover:bg-[#C4795A]/10"
+            >
+              <Home size={15} />
+              חזרה לדף הראשי
+            </button>
+            <span className="rounded-full bg-white/80 px-4 py-2 text-xs font-bold text-[#8B5030] shadow-sm">
+              ניהול תורים ופניות
+            </span>
+          </div>
+        </div>
+
+        <main className="flex-1 overflow-y-auto px-4 pb-6 pt-5 sm:px-6">
+          <div className="mx-auto max-w-7xl space-y-5">
+            <SecretaryMobileTabs activeTab={activeSecretaryTab} onTabChange={setActiveSecretaryTab} />
+
+            {activeSecretaryTab === "appointments" ? (
+              <div className="overflow-hidden rounded-[2rem] border border-white/75 bg-white/50 shadow-2xl shadow-[#9B5C38]/10">
+    <div dir="rtl" className="h-[calc(100vh-170px)] min-h-[720px]" style={{
       backgroundImage: "url('/salon-bg.png')",
       backgroundSize: "cover",
       backgroundPosition: "center",
@@ -2389,6 +2631,34 @@ export default function SecretaryPage() {
 
           </div>
         </div>
+      </div>
+    </div>
+              </div>
+            ) : null}
+
+            {activeSecretaryTab === "inquiries" ? (
+              <SecretaryContactInquiries
+                inquiries={contactInquiries}
+                onStatusChange={changeContactInquiryStatus}
+                onFeedbackAdd={addContactInquiryNote}
+              />
+            ) : null}
+
+            {activeSecretaryTab === "settings" ? (
+              <SecretarySectionCard icon={Settings} title="הגדרות" subtitle="הגדרות מזכירות">
+                <div className="rounded-3xl bg-[#FAF6F1] p-8 text-right">
+                  <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#C4795A]/10 text-[#C4795A]">
+                    <Settings size={26} />
+                  </div>
+                  <h2 className="text-2xl font-black text-gray-900">הגדרות מזכירות</h2>
+                  <p className="mt-3 max-w-2xl text-sm leading-7 text-gray-600">
+                    כאן יתווספו בהמשך הגדרות ייעודיות למזכירות. אין גישה לניתוח, דשבורד מנהלים או ניהול טיפולים.
+                  </p>
+                </div>
+              </SecretarySectionCard>
+            ) : null}
+          </div>
+        </main>
       </div>
     </div>
   );

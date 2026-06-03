@@ -1,12 +1,34 @@
-import React from 'react';
-import { Mail, Phone, MapPin, Instagram, Facebook, Clock, MessageCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Mail, Phone, MapPin, Instagram, Facebook, Clock, MessageCircle, Send } from 'lucide-react';
+import { saveContactInquiry } from '../api/contactApi';
 
 export default function Footer() {
+  const [form, setForm] = useState({ fullName: '', phone: '', message: '' });
+  const [submitted, setSubmitted] = useState(false);
+
+  const updateField = (field, value) => {
+    setSubmitted(false);
+    setForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    const fullName = form.fullName.trim();
+    const phone = form.phone.trim();
+    const message = form.message.trim();
+
+    if (!fullName || !phone || !message) return;
+
+    saveContactInquiry({ fullName, phone, message });
+    setForm({ fullName: '', phone: '', message: '' });
+    setSubmitted(true);
+  };
+
   return (
-    <footer className="bg-primary-dark text-white py-16">
+    <footer id="contact" className="bg-primary-dark text-white py-16">
       <div className="container mx-auto px-6">
         {/* Main Footer Content */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-12">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-12 mb-12">
           {/* Contact Info */}
           <div className="text-center md:text-right">
             <h3 className="text-2xl font-bold mb-6 text-accent-light">צור קשר</h3>
@@ -44,6 +66,70 @@ export default function Footer() {
                   <p className="text-sm text-accent-light/80">קרוב לבן גוריון</p>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Contact Form */}
+          <div className="lg:col-span-2">
+            <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-2xl shadow-black/10 backdrop-blur-md">
+              <h3 className="mb-2 text-center text-2xl font-bold text-accent-light md:text-right">
+                השאירו פרטים
+              </h3>
+              <p className="mb-5 text-center text-sm leading-6 text-accent-light/75 md:text-right">
+                כתבו לנו איך נוכל לעזור ונחזור אליכן בהקדם.
+              </p>
+
+              <form onSubmit={handleSubmit} className="space-y-3" dir="rtl">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <label className="block text-right">
+                    <span className="mb-1 block text-xs font-bold text-accent-light/90">שם מלא</span>
+                    <input
+                      type="text"
+                      value={form.fullName}
+                      onChange={(event) => updateField('fullName', event.target.value)}
+                      className="w-full rounded-2xl border border-white/15 bg-white/90 px-4 py-3 text-right text-sm text-primary-dark outline-none transition focus:border-accent-light focus:ring-2 focus:ring-accent-light/25"
+                      required
+                    />
+                  </label>
+
+                  <label className="block text-right">
+                    <span className="mb-1 block text-xs font-bold text-accent-light/90">טלפון</span>
+                    <input
+                      type="tel"
+                      value={form.phone}
+                      onChange={(event) => updateField('phone', event.target.value)}
+                      className="w-full rounded-2xl border border-white/15 bg-white/90 px-4 py-3 text-right text-sm text-primary-dark outline-none transition focus:border-accent-light focus:ring-2 focus:ring-accent-light/25"
+                      required
+                    />
+                  </label>
+                </div>
+
+                <label className="block text-right">
+                  <span className="mb-1 block text-xs font-bold text-accent-light/90">איך נוכל לעזור?</span>
+                  <textarea
+                    rows={4}
+                    value={form.message}
+                    onChange={(event) => updateField('message', event.target.value)}
+                    className="w-full resize-none rounded-2xl border border-white/15 bg-white/90 px-4 py-3 text-right text-sm text-primary-dark outline-none transition focus:border-accent-light focus:ring-2 focus:ring-accent-light/25"
+                    required
+                  />
+                </label>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <button
+                    type="submit"
+                    className="inline-flex items-center justify-center gap-2 rounded-full bg-accent-light px-6 py-3 text-sm font-bold text-primary-dark shadow-lg transition hover:bg-white"
+                  >
+                    <Send size={16} />
+                    שליחה
+                  </button>
+                  {submitted ? (
+                    <p className="text-center text-xs font-bold text-accent-light sm:text-right">
+                      הפנייה נשמרה בהצלחה ונציגת MeDay תחזור אלייך.
+                    </p>
+                  ) : null}
+                </div>
+              </form>
             </div>
           </div>
 

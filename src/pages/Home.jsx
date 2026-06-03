@@ -2,7 +2,6 @@ import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform, useInView } from 'framer-motion';
 import { Sparkles, ArrowLeft, Heart, ShieldCheck, Zap, Star } from 'lucide-react';
-import CountUp from 'react-countup';
 
 /* ─── Scan Box ─────────────────────────────────────────────────── */
 function ScanBox({ x, y, label, delay = 0, size = 52 }) {
@@ -118,8 +117,6 @@ function GalleryImage({ src, alt, caption, delay, tall }) {
 /* ─── Main Page ───────────────────────────────────────────────────── */
 export default function Home() {
   const navigate = useNavigate();
-  const statsRef   = useRef();
-  const statsInView = useInView(statsRef, { once: true, margin: '-100px' });
 
   /* carousel */
   const slides = [
@@ -138,13 +135,6 @@ export default function Home() {
     { icon: Heart,       title: 'טיפול מותאם אישית', desc: 'אנחנו לא רק מטפלים — אנחנו מאבחנים את הצרכים הייחודיים של העור שלך ובונים תוכנית מושלמת.', gradient: 'bg-gradient-to-br from-[#C4795A] to-[#9B5C38]' },
     { icon: ShieldCheck, title: 'בטיחות ומקצועיות',  desc: 'כל הטיפולים נבדקו ואושרו על פי הסטנדרטים הגבוהים ביותר בעולם הקוסמטיקה.',                    gradient: 'bg-gradient-to-br from-[#E8C4A0] to-[#C4795A]' },
     { icon: Zap,         title: 'טכנולוגיה מתקדמת',  desc: 'שימוש במכשור החדיש ביותר בעולם — לייזר, AI, ומוצרי פרמיום בלבד.',                              gradient: 'bg-gradient-to-br from-[#D4A882] to-[#9B5C38]' },
-  ];
-
-  const stats = [
-    { end: 500, suffix: '+', label: 'לקוחות מרוצות' },
-    { end: 50,  suffix: '+', label: 'סוגי טיפולים'   },
-    { end: 98,  suffix: '%', label: 'שביעות רצון'    },
-    { end: 5,   suffix: '★', label: 'דירוג ממוצע'    },
   ];
 
   const gallery = [
@@ -370,30 +360,6 @@ export default function Home() {
           </motion.div>
         </motion.div>
 
-      </section>
-
-      {/* ══ STATS ══ */}
-      <section ref={statsRef} className="py-20 bg-white">
-        <div className="container mx-auto px-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-10">
-            {stats.map((s, i) => (
-              <motion.div key={i}
-                initial={{ opacity: 0, scale: 0.4 }}
-                animate={statsInView ? { opacity: 1, scale: 1 } : {}}
-                transition={{ duration: 0.55, delay: i * 0.1, type: 'spring', stiffness: 160 }}
-                className="text-center"
-              >
-                <div
-                  className="text-5xl md:text-6xl font-black mb-2 tabular-nums"
-                  style={{ background: 'linear-gradient(135deg, #C4795A 0%, #9B5C38 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}
-                >
-                  {statsInView ? <CountUp end={s.end} duration={2} delay={i * 0.1} suffix={s.suffix} /> : `0${s.suffix}`}
-                </div>
-                <div className="text-gray-500 font-medium text-sm">{s.label}</div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
       </section>
 
       {/* ══ FEATURES ══ */}

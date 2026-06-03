@@ -1,796 +1,1187 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { motion, AnimatePresence, useScroll, useTransform } from "framer-motion";
+import { createElement } from "react";
+import { motion as Motion, AnimatePresence } from "framer-motion";
 import CountUp from "react-countup";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
+import { CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, addContactInquiryFeedback, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
+import { JOB_APPLICATION_EVENT, JOB_APPLICATIONS_STORAGE_KEY, getJobApplications, updateJobApplicationStatus, addJobApplicationFeedback } from "../api/jobsApi";
 import { fetchAnalytics } from "../api/medayApi";
 import {
-  BarChart2, TrendingUp, Calendar, Clock, Sparkles, Users, Download,
-  RefreshCw, Bell, Search, Settings, Activity, ChevronRight, Zap, Home,
+  Activity,
+  BarChart2,
+  Bell,
+  Briefcase,
+  Calendar,
+  CalendarDays,
+  ChevronRight,
+  Clock,
+  Download,
+  CheckCircle2,
+  Home,
+  MessageCircle,
+  RefreshCw,
+  Search,
+  Settings,
+  Sparkles,
+  TrendingUp,
+  Users,
 } from "lucide-react";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Constants
-// ─────────────────────────────────────────────────────────────────────────────
-const NEON = ["#8b5cf6","#06b6d4","#ec4899","#f59e0b","#10b981","#3b82f6","#f43f5e"];
-const MONTH_HE = ["ינו׳","פבר׳","מרץ","אפר׳","מאי","יוני","יולי","אוג׳","ספט׳","אוק׳","נוב׳","דצמ׳"];
-const formatMonth = (s) => { const [,m] = (s||"").split("-"); return MONTH_HE[parseInt(m,10)-1] ?? s; };
-const daysAgo = (n) => { const d=new Date(); d.setDate(d.getDate()-n); return d.toISOString().slice(0,10); };
-const todayStr = () => new Date().toISOString().slice(0,10);
+const CHART_COLORS = ["#C4795A", "#E8A5B5", "#D4A882", "#9B5C38", "#C67C8B", "#B79A74"];
+const MONTH_HE = ["ינו׳", "פבר׳", "מרץ", "אפר׳", "מאי", "יוני", "יולי", "אוג׳", "ספט׳", "אוק׳", "נוב׳", "דצמ׳"];
+const formatMonth = (s) => {
+  const [, month] = (s || "").split("-");
+  return MONTH_HE[parseInt(month, 10) - 1] ?? s;
+};
+const daysAgo = (n) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().slice(0, 10);
+};
+const todayStr = () => new Date().toISOString().slice(0, 10);
+const formatDateTime = (value) => {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("he-IL", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(new Date(value));
+};
 
 const RANGES = [
-  { key:"today", label:"היום",   getDates:()=>({ fromDate:todayStr(), toDate:todayStr() }) },
-  { key:"7",     label:"7 ימים", getDates:()=>({ fromDate:daysAgo(6),  toDate:todayStr() }) },
-  { key:"30",    label:"30 יום", getDates:()=>({ fromDate:daysAgo(29), toDate:todayStr() }) },
-  { key:"all",   label:"הכל",    getDates:()=>({}) },
+  { key: "today", label: "היום", getDates: () => ({ fromDate: todayStr(), toDate: todayStr() }) },
+  { key: "7", label: "7 ימים", getDates: () => ({ fromDate: daysAgo(6), toDate: todayStr() }) },
+  { key: "30", label: "30 יום", getDates: () => ({ fromDate: daysAgo(29), toDate: todayStr() }) },
+  { key: "all", label: "הכל", getDates: () => ({}) },
 ];
 
 const NAV_ITEMS = [
-  { icon: Home,     label:"דשבורד",  active:true  },
-  { icon: Calendar, label:"תורים",   active:false },
-  { icon: Sparkles, label:"טיפולים", active:false },
-  { icon: Activity, label:"ניתוח",   active:false },
-  { icon: Settings, label:"הגדרות",  active:false },
+  { key: "dashboard", icon: Home, label: "דשבורד" },
+  { key: "appointments", icon: Calendar, label: "תורים" },
+  { key: "inquiries", icon: MessageCircle, label: "פניות" },
+  { key: "jobs", icon: Briefcase, label: "דרושים" },
+  { key: "treatments", icon: Sparkles, label: "טיפולים" },
+  { key: "analytics", icon: Activity, label: "ניתוח" },
+  { key: "settings", icon: Settings, label: "הגדרות" },
 ];
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 🌌 SPACE BACKGROUND COMPONENTS
-// ─────────────────────────────────────────────────────────────────────────────
+const fadeUp = {
+  hidden: { opacity: 0, y: 28 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.55, ease: [0.22, 1, 0.36, 1] } },
+};
+const stagger = { hidden: {}, show: { transition: { staggerChildren: 0.09 } } };
+const inView = (mainRef) => ({ initial: "hidden", whileInView: "show", viewport: { root: mainRef, once: true, margin: "-50px" } });
 
-// Animated star canvas — twinkling stars with coloured variants
-function StarCanvas() {
-  const ref = useRef(null);
-
-  useEffect(() => {
-    const canvas = ref.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-
-    const resize = () => {
-      canvas.width  = window.innerWidth;
-      canvas.height = window.innerHeight;
-    };
-    resize();
-    window.addEventListener("resize", resize);
-
-    // Generate stars with different layers (depth simulation)
-    const stars = Array.from({ length: 220 }, (_, i) => ({
-      x:     Math.random(),
-      y:     Math.random(),
-      r:     Math.random() * 1.4 + 0.15,
-      phase: Math.random() * Math.PI * 2,
-      speed: Math.random() * 0.6 + 0.2,
-      hue:   Math.random() > 0.88 ? (Math.random() > 0.5 ? 270 : 200) : null, // some violet/blue tinted
-    }));
-
-    let raf, t = 0;
-    const draw = () => {
-      t += 0.008;
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      const w = canvas.width, h = canvas.height;
-
-      stars.forEach(s => {
-        const twinkle = (Math.sin(t * s.speed + s.phase) + 1) / 2 * 0.65 + 0.35;
-        const alpha = twinkle * (s.r > 1 ? 0.95 : 0.75);
-
-        ctx.beginPath();
-        ctx.arc(s.x * w, s.y * h, s.r, 0, Math.PI * 2);
-        ctx.fillStyle = s.hue
-          ? `hsla(${s.hue}, 70%, 85%, ${alpha})`
-          : `rgba(255,255,255,${alpha})`;
-        ctx.fill();
-
-        // Glow halo for brighter stars
-        if (s.r > 1) {
-          const grad = ctx.createRadialGradient(s.x*w, s.y*h, 0, s.x*w, s.y*h, s.r*5);
-          grad.addColorStop(0, s.hue ? `hsla(${s.hue},60%,85%,${twinkle*0.18})` : `rgba(255,255,255,${twinkle*0.14})`);
-          grad.addColorStop(1, "rgba(0,0,0,0)");
-          ctx.beginPath();
-          ctx.arc(s.x * w, s.y * h, s.r * 5, 0, Math.PI * 2);
-          ctx.fillStyle = grad;
-          ctx.fill();
-        }
-      });
-
-      raf = requestAnimationFrame(draw);
-    };
-    draw();
-
-    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", resize); };
-  }, []);
-
-  return <canvas ref={ref} style={{ position:"fixed", inset:0, pointerEvents:"none", zIndex:0 }} />;
-}
-
-// Parallax nebula blobs — move at different speeds relative to scroll
-function NebulaBg({ scrollYProgress }) {
-  const y1 = useTransform(scrollYProgress, [0, 1], ["0%",  "-35%"]);
-  const y2 = useTransform(scrollYProgress, [0, 1], ["0%",  "-18%"]);
-  const y3 = useTransform(scrollYProgress, [0, 1], ["0%",  "-55%"]);
-  const y4 = useTransform(scrollYProgress, [0, 1], ["0%",  "-10%"]);
-  const s1 = useTransform(scrollYProgress, [0, 1], [1,      1.15]);
-  const s2 = useTransform(scrollYProgress, [0, 1], [1,      0.88]);
-
-  const blob = (style, y, scale, animDelay) => (
-    <motion.div
-      style={{
-        position:"fixed", pointerEvents:"none",
-        borderRadius:"50%", filter:"blur(80px)",
-        y, scale,
-        ...style,
-      }}
-      animate={{ opacity: [style.opacity*0.7, style.opacity, style.opacity*0.8, style.opacity] }}
-      transition={{ duration: 8 + animDelay, repeat: Infinity, ease: "easeInOut", delay: animDelay }}
-    />
-  );
-
+function PageGlow() {
   return (
-    <>
-      {/* Deep violet — top left */}
-      {blob({ width:600, height:500, left:"-10%",  top:"5%",   background:"radial-gradient(circle, rgba(109,40,217,0.35) 0%, transparent 70%)", opacity:0.9, zIndex:0 }, y1, s1, 0)}
-      {/* Cyan — bottom right */}
-      {blob({ width:700, height:550, right:"-15%", bottom:"0%", background:"radial-gradient(circle, rgba(6,182,212,0.22) 0%, transparent 70%)",  opacity:0.8, zIndex:0 }, y2, s2, 3)}
-      {/* Pink — center-right */}
-      {blob({ width:400, height:400, right:"20%",  top:"30%",  background:"radial-gradient(circle, rgba(219,39,119,0.18) 0%, transparent 70%)",  opacity:0.7, zIndex:0 }, y3, 1, 5)}
-      {/* Indigo — left mid */}
-      {blob({ width:500, height:400, left:"5%",    top:"55%",  background:"radial-gradient(circle, rgba(79,70,229,0.20) 0%, transparent 70%)",   opacity:0.7, zIndex:0 }, y4, 1, 2)}
-    </>
-  );
-}
-
-// Shooting stars — streak across the screen periodically
-function ShootingStar({ left, top, angle, delay, repeatDelay }) {
-  return (
-    <motion.div
-      style={{
-        position:"fixed", left, top,
-        width: 90, height: 1.5,
-        background: "linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.85) 60%, rgba(255,255,255,0.2) 100%)",
-        borderRadius: 2,
-        transformOrigin: "left center",
-        rotate: angle,
-        zIndex: 1, pointerEvents: "none",
-      }}
-      initial={{ scaleX:0, opacity:0 }}
-      animate={{ scaleX:[0, 1, 0], opacity:[0, 0.9, 0], x:[0, 140], y:[0, 140] }}
-      transition={{ duration:0.75, delay, repeat:Infinity, repeatDelay, ease:"easeOut" }}
-    />
-  );
-}
-
-// Floating micro-particles — tiny specks drifting upward
-function FloatingParticles() {
-  const particles = useMemo(() =>
-    Array.from({ length: 28 }, (_, i) => ({
-      id: i,
-      left:     `${Math.random() * 100}%`,
-      size:     Math.random() * 2.5 + 0.8,
-      duration: Math.random() * 22 + 14,
-      delay:    -(Math.random() * 22),
-      opacity:  Math.random() * 0.35 + 0.08,
-      color:    NEON[Math.floor(Math.random() * NEON.length)],
-      glow:     Math.random() > 0.7,
-    })), []);
-
-  return (
-    <div style={{ position:"fixed", inset:0, pointerEvents:"none", zIndex:1, overflow:"hidden" }}>
-      {particles.map(p => (
-        <motion.div
-          key={p.id}
-          style={{
-            position:"absolute", left:p.left, bottom:-12,
-            width:p.size, height:p.size, borderRadius:"50%",
-            background: p.glow ? p.color : "rgba(255,255,255,0.6)",
-            boxShadow: p.glow ? `0 0 6px ${p.color}` : "none",
-          }}
-          animate={{ y: [0, -(window.innerHeight + 30)], opacity:[0, p.opacity, p.opacity, 0] }}
-          transition={{ duration:p.duration, delay:p.delay, repeat:Infinity, ease:"linear" }}
-        />
-      ))}
+    <div className="pointer-events-none absolute inset-0 overflow-hidden">
+      <div className="absolute -right-36 top-0 h-96 w-96 rounded-full bg-[#E8C4A0]/35 blur-3xl" />
+      <div className="absolute left-[-8rem] top-40 h-[28rem] w-[28rem] rounded-full bg-[#F2D4BE]/45 blur-3xl" />
+      <div className="absolute bottom-0 right-1/3 h-80 w-80 rounded-full bg-white/55 blur-3xl" />
     </div>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Framer variants
-// ─────────────────────────────────────────────────────────────────────────────
-const fadeUp  = { hidden:{opacity:0,y:36}, show:{opacity:1,y:0,transition:{duration:0.55,ease:[0.25,0.46,0.45,0.94]}} };
-const stagger = { hidden:{},              show:{transition:{staggerChildren:0.10}} };
-const cardV   = { hidden:{opacity:0,y:28,scale:0.96}, show:{opacity:1,y:0,scale:1,transition:{duration:0.5,ease:[0.25,0.46,0.45,0.94]}} };
-
-// Helper for scroll-triggered sections
-const inView = (mainRef) => ({ initial:"hidden", whileInView:"show", viewport:{ root:mainRef, once:true, margin:"-60px" } });
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Chart components
-// ─────────────────────────────────────────────────────────────────────────────
-
-function NeonBar({ label, count, max, color, index=0, mainRef }) {
-  const pct = max > 0 ? Math.round((count/max)*100) : 0;
+function EmptyState({ icon: Icon = Sparkles, title = "אין נתונים עדיין", text = "ברגע שיתווספו נתונים הם יופיעו כאן." }) {
   return (
-    <motion.div
-      className="flex items-center gap-3 group"
-      initial={{ opacity:0, x:24 }}
-      whileInView={{ opacity:1, x:0 }}
-      viewport={{ root:mainRef, once:true }}
-      transition={{ duration:0.4, delay:index*0.06, ease:"easeOut" }}
-    >
-      <span className="w-32 text-right text-xs text-slate-400 truncate group-hover:text-slate-200 transition-colors">{label}</span>
-      <div className="flex-1 bg-white/5 rounded-full h-2 overflow-hidden">
-        <motion.div
-          className="h-2 rounded-full"
-          initial={{ width:0 }}
-          whileInView={{ width:`${pct}%` }}
-          viewport={{ root:mainRef, once:true }}
-          transition={{ duration:1, delay:index*0.06+0.2, ease:[0.25,0.46,0.45,0.94] }}
-          style={{ background:`linear-gradient(90deg, ${color}77, ${color})`, boxShadow:`0 0 8px ${color}55` }}
-        />
+    <div className="rounded-3xl border-2 border-dashed border-[#E8C4A0]/60 bg-white/55 p-8 text-center">
+      <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#C4795A]/10 text-[#C4795A]">
+        {createElement(Icon, { size: 22 })}
       </div>
-      <span className="w-7 text-xs font-bold text-right" style={{ color }}>{count}</span>
-    </motion.div>
+      <p className="text-sm font-bold text-gray-900">{title}</p>
+      <p className="mx-auto mt-1 max-w-sm text-xs leading-6 text-gray-500">{text}</p>
+    </div>
   );
 }
 
-function NeonVBar({ label, count, max, color, index=0 }) {
-  const pct = max > 0 ? Math.round((count/max)*100) : 0;
+function SectionCard({ icon: Icon, title, subtitle, children, className = "" }) {
   return (
-    <div className="flex flex-col items-center gap-1 flex-1 min-w-0">
-      <motion.span className="text-xs font-bold"
-        initial={{ opacity:0 }} animate={{ opacity:1 }} transition={{ delay:index*0.08+0.7 }}
-        style={{ color:pct>0?color:"transparent" }}
-      >{count||""}</motion.span>
-      <div className="w-full flex items-end rounded overflow-hidden" style={{ height:72 }}>
-        <motion.div
-          className="w-full rounded-t"
-          initial={{ height:0 }}
-          animate={{ height:`${pct}%` }}
-          transition={{ duration:0.85, delay:index*0.08+0.1, ease:[0.34,1.56,0.64,1] }}
-          style={{
-            minHeight: count>0?4:0,
-            background:`linear-gradient(180deg, ${color}, ${color}44)`,
-            boxShadow: pct>0?`0 0 18px ${color}55`:"none",
-          }}
+    <Motion.section
+      variants={fadeUp}
+      className={`rounded-3xl border border-white/75 bg-white/75 p-5 shadow-xl shadow-[#9B5C38]/5 backdrop-blur-xl ${className}`}
+      whileHover={{ y: -3, boxShadow: "0 18px 48px rgba(155,92,56,0.10)" }}
+    >
+      <div className="mb-5 flex items-start gap-3">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#C4795A] to-[#9B5C38] text-white shadow-lg shadow-[#C4795A]/25">
+          {createElement(Icon, { size: 18 })}
+        </div>
+        <div className="min-w-0 text-right">
+          <h2 className="text-base font-extrabold text-gray-900">{title}</h2>
+          {subtitle ? <p className="mt-1 text-xs leading-5 text-gray-500">{subtitle}</p> : null}
+        </div>
+      </div>
+      {children}
+    </Motion.section>
+  );
+}
+
+function StatCard({ icon: Icon, label, value, helper, index = 0 }) {
+  return (
+    <Motion.article
+      variants={fadeUp}
+      whileHover={{ y: -6, boxShadow: "0 18px 50px rgba(196,121,90,0.15)" }}
+      className="group relative overflow-hidden rounded-3xl border border-white/75 bg-white/80 p-5 shadow-xl shadow-[#9B5C38]/5 backdrop-blur-xl"
+    >
+      <div className="absolute -left-12 -top-12 h-32 w-32 rounded-full bg-[#F2D4BE]/55 blur-2xl transition-opacity group-hover:opacity-80" />
+      <div className="relative flex items-start justify-between gap-4">
+        <div className="text-right">
+          <p className="text-3xl font-black tabular-nums text-gray-900">
+            <CountUp end={value || 0} duration={1.7} delay={0.15 + index * 0.08} separator="," />
+          </p>
+          <p className="mt-1 text-sm font-bold text-[#8B5030]">{label}</p>
+          {helper ? <p className="mt-1 text-xs text-gray-400">{helper}</p> : null}
+        </div>
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#C4795A]/10 text-[#C4795A]">
+          {createElement(Icon, { size: 22 })}
+        </div>
+      </div>
+    </Motion.article>
+  );
+}
+
+function WarmBar({ label, count, max, color, index = 0, mainRef }) {
+  const pct = max > 0 ? Math.round((count / max) * 100) : 0;
+  return (
+    <Motion.div
+      className="group grid grid-cols-[7rem_1fr_2.25rem] items-center gap-3"
+      initial={{ opacity: 0, x: 20 }}
+      whileInView={{ opacity: 1, x: 0 }}
+      viewport={{ root: mainRef, once: true }}
+      transition={{ duration: 0.35, delay: index * 0.05 }}
+    >
+      <span className="truncate text-right text-xs font-semibold text-gray-500 group-hover:text-gray-800">{label}</span>
+      <div className="h-2.5 overflow-hidden rounded-full bg-[#F5EDE3]">
+        <Motion.div
+          className="h-full rounded-full"
+          initial={{ width: 0 }}
+          whileInView={{ width: `${pct}%` }}
+          viewport={{ root: mainRef, once: true }}
+          transition={{ duration: 0.9, delay: index * 0.04 + 0.1, ease: [0.22, 1, 0.36, 1] }}
+          style={{ background: `linear-gradient(90deg, ${color}88, ${color})` }}
         />
       </div>
-      <span className="text-xs text-slate-500 text-center">{label}</span>
+      <span className="text-left text-xs font-black tabular-nums" style={{ color }}>{count}</span>
+    </Motion.div>
+  );
+}
+
+function MonthBar({ label, count, max, index = 0 }) {
+  const pct = max > 0 ? Math.round((count / max) * 100) : 0;
+  return (
+    <div className="flex min-w-0 flex-1 flex-col items-center gap-2">
+      <Motion.span className="text-xs font-black text-[#8B5030]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: index * 0.08 + 0.35 }}>
+        {count || ""}
+      </Motion.span>
+      <div className="flex h-24 w-full items-end overflow-hidden rounded-t-2xl bg-[#F5EDE3]/80">
+        <Motion.div
+          className="w-full rounded-t-2xl bg-gradient-to-t from-[#C4795A] to-[#E8C4A0]"
+          initial={{ height: 0 }}
+          animate={{ height: `${pct}%` }}
+          transition={{ duration: 0.85, delay: index * 0.08 + 0.1, ease: [0.34, 1.56, 0.64, 1] }}
+          style={{ minHeight: count > 0 ? 5 : 0 }}
+        />
+      </div>
+      <span className="text-center text-xs text-gray-400">{label}</span>
     </div>
   );
 }
 
 function DonutChart({ segments, total }) {
-  const r=54, cx=70, cy=70;
-  const circ = 2*Math.PI*r;
-  const sum  = segments.reduce((s,g)=>s+g.value,0)||1;
-  let cum = 0;
+  const r = 54;
+  const cx = 70;
+  const cy = 70;
+  const circ = 2 * Math.PI * r;
+  const sum = segments.reduce((acc, seg) => acc + seg.value, 0) || 1;
+
   return (
-    <svg width="140" height="140" viewBox="0 0 140 140">
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke="rgba(255,255,255,0.05)" strokeWidth="16"/>
-      {segments.map((seg,i)=>{
-        const len = (seg.value/sum)*circ;
-        const off = -cum;
-        cum += len;
+    <svg width="140" height="140" viewBox="0 0 140 140" className="shrink-0">
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#F5EDE3" strokeWidth="16" />
+      {segments.map((seg, index) => {
+        const len = (seg.value / sum) * circ;
+        const offset = -segments.slice(0, index).reduce((acc, item) => acc + (item.value / sum) * circ, 0);
         return (
-          <motion.circle key={i} cx={cx} cy={cy} r={r}
-            fill="none" stroke={seg.color} strokeWidth="16" strokeDashoffset={off}
+          <Motion.circle
+            key={seg.label}
+            cx={cx}
+            cy={cy}
+            r={r}
+            fill="none"
+            stroke={seg.color}
+            strokeWidth="16"
+            strokeDashoffset={offset}
             transform={`rotate(-90 ${cx} ${cy})`}
-            initial={{ strokeDasharray:`0 ${circ}` }}
-            animate={{ strokeDasharray:`${len} ${circ}` }}
-            transition={{ duration:1.1, delay:i*0.18+0.3, ease:"easeOut" }}
-            style={{ filter:`drop-shadow(0 0 8px ${seg.color}99)` }}
+            initial={{ strokeDasharray: `0 ${circ}` }}
+            animate={{ strokeDasharray: `${len} ${circ}` }}
+            transition={{ duration: 1, delay: index * 0.12 + 0.2, ease: "easeOut" }}
           />
         );
       })}
-      <motion.text x={cx} y={cy-6} textAnchor="middle" fill="white" fontSize="20" fontWeight="700"
-        fontFamily="Heebo,sans-serif"
-        initial={{ opacity:0, scale:0.4 }} animate={{ opacity:1, scale:1 }}
-        transition={{ delay:1.3, type:"spring", stiffness:220 }}
-      >{total}</motion.text>
-      <text x={cx} y={cy+12} textAnchor="middle" fill="rgba(255,255,255,0.4)" fontSize="10" fontFamily="Heebo,sans-serif">סה״כ</text>
+      <Motion.text x={cx} y={cy - 5} textAnchor="middle" fill="#1f2937" fontSize="20" fontWeight="800" fontFamily="Heebo,sans-serif" initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }} transition={{ delay: 1, type: "spring" }}>
+        {total}
+      </Motion.text>
+      <text x={cx} y={cy + 14} textAnchor="middle" fill="#9ca3af" fontSize="10" fontFamily="Heebo,sans-serif">סה״כ</text>
     </svg>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// KPI card
-// ─────────────────────────────────────────────────────────────────────────────
-function KpiCard({ icon:Icon, label, value, color, index=0, mainRef }) {
-  return (
-    <motion.div
-      variants={cardV}
-      initial="hidden" whileInView="show"
-      viewport={{ root:mainRef, once:true }}
-      whileHover={{ y:-6, boxShadow:`0 16px 48px ${color}33`, transition:{duration:0.2} }}
-      whileTap={{ scale:0.96 }}
-      className="glass-dark rounded-2xl p-5 cursor-default relative overflow-hidden"
-      style={{ borderTop:`2px solid ${color}` }}
-    >
-      <motion.div
-        className="absolute -top-8 -right-8 w-28 h-28 rounded-full blur-2xl"
-        style={{ background:color, opacity:0.12 }}
-        animate={{ opacity:[0.08,0.20,0.08], scale:[1,1.15,1] }}
-        transition={{ duration:4+index, repeat:Infinity, ease:"easeInOut", delay:index*0.5 }}
-      />
-      <div className="relative flex items-start justify-between">
-        <div>
-          <p className="text-2xl font-bold text-white mb-0.5">
-            <CountUp end={value} duration={1.8} delay={0.3+index*0.12} separator="," />
-          </p>
-          <p className="text-xs text-slate-400">{label}</p>
-        </div>
-        <motion.div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background:`${color}22` }}
-          whileHover={{ rotate:[0,-12,12,0], transition:{duration:0.4} }}
-        >
-          <Icon size={18} style={{ color }}/>
-        </motion.div>
-      </div>
-    </motion.div>
-  );
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// AI insights
-// ─────────────────────────────────────────────────────────────────────────────
 function AiInsights({ data, mainRef }) {
   const items = [];
   if (data.by_day?.length) {
-    const top=[...data.by_day].sort((a,b)=>b.count-a.count)[0];
-    if(top?.count>0) items.push({ text:`יום ${top.day} הוא היום העמוס ביותר עם ${top.count} תורים`, color:"#8b5cf6" });
+    const top = [...data.by_day].sort((a, b) => b.count - a.count)[0];
+    if (top?.count > 0) items.push(`יום ${top.day} הוא היום העמוס ביותר עם ${top.count} תורים.`);
   }
   if (data.by_hour?.length) {
-    const top=[...data.by_hour].sort((a,b)=>b.count-a.count)[0];
-    if(top?.count>0) items.push({ text:`פיק פעילות בשעה ${top.hour} — מומלץ לשריין עוד מטפלות`, color:"#06b6d4" });
+    const top = [...data.by_hour].sort((a, b) => b.count - a.count)[0];
+    if (top?.count > 0) items.push(`פיק פעילות בשעה ${top.hour}. כדאי לוודא זמינות צוות בשעה הזו.`);
   }
-  if (data.by_treatment?.length) items.push({ text:`הטיפול המבוקש ביותר: ${data.by_treatment[0].name} (${data.by_treatment[0].count} הזמנות)`, color:"#ec4899" });
-  if (data.by_category?.length) items.push({ text:`${data.by_category[0].category} מובילה עם ${data.by_category[0].count} תורים`, color:"#10b981" });
-  if (data.monthly_trend?.length>=2) {
-    const last=data.monthly_trend.at(-1)?.count??0, prev=data.monthly_trend.at(-2)?.count??0;
-    if(prev>0){ const p=Math.round(((last-prev)/prev)*100), up=p>=0;
-      items.push({ text:`חודש זה ${up?"↑":"↓"} ${Math.abs(p)}% לעומת החודש הקודם`, color:up?"#10b981":"#f43f5e" });
+  if (data.by_treatment?.length) items.push(`הטיפול המבוקש ביותר: ${data.by_treatment[0].name} (${data.by_treatment[0].count} הזמנות).`);
+  if (data.by_category?.length) items.push(`${data.by_category[0].category} מובילה עם ${data.by_category[0].count} תורים.`);
+  if (data.monthly_trend?.length >= 2) {
+    const last = data.monthly_trend.at(-1)?.count ?? 0;
+    const prev = data.monthly_trend.at(-2)?.count ?? 0;
+    if (prev > 0) {
+      const pct = Math.round(((last - prev) / prev) * 100);
+      items.push(`החודש ${pct >= 0 ? "עלה" : "ירד"} ב-${Math.abs(pct)}% לעומת החודש הקודם.`);
     }
   }
 
   return (
-    <motion.div variants={fadeUp} {...inView(mainRef)} className="glass-dark rounded-2xl p-5 h-full" style={{ borderTop:"2px solid #8b5cf6" }}>
-      <div className="flex items-center gap-2 mb-4">
-        <motion.div className="w-7 h-7 rounded-lg bg-violet-500/20 flex items-center justify-center"
-          animate={{ boxShadow:["0 0 0px #8b5cf600","0 0 18px #8b5cf677","0 0 0px #8b5cf600"] }}
-          transition={{ duration:2.5, repeat:Infinity }}
-        ><Zap size={14} className="text-violet-400"/></motion.div>
-        <h3 className="text-sm font-bold text-white">תובנות AI</h3>
-        <motion.span className="mr-auto text-xs bg-violet-500/20 text-violet-300 px-2 py-0.5 rounded-full"
-          animate={{ opacity:[1,0.4,1] }} transition={{ duration:2, repeat:Infinity }}>חי</motion.span>
-      </div>
-      <motion.div className="space-y-3" variants={stagger} initial="hidden" animate="show">
-        {items.length===0
-          ? <p className="text-slate-600 text-xs text-center py-6">אין מספיק נתונים</p>
-          : items.map((ins,i)=>(
-            <motion.div key={i} variants={fadeUp}
-              whileHover={{ x:-4, transition:{duration:0.18} }}
-              className="flex items-start gap-2.5 p-3 rounded-xl cursor-default"
-              style={{ background:`${ins.color}10`, border:`1px solid ${ins.color}22` }}
-            >
-              <motion.div className="w-1.5 h-1.5 rounded-full mt-1.5 shrink-0" style={{ background:ins.color }}
-                animate={{ opacity:[1,0.2,1] }} transition={{ duration:1.8, repeat:Infinity, delay:i*0.4 }}
-              />
-              <p className="text-xs text-slate-300 leading-relaxed">{ins.text}</p>
-            </motion.div>
+    <SectionCard icon={MessageCircle} title="תובנות וצ׳אטבוט" subtitle="נקודות שמומלץ לבדוק מתוך הנתונים">
+      <Motion.div className="space-y-3" variants={stagger} initial="hidden" whileInView="show" viewport={{ root: mainRef, once: true }}>
+        {items.length === 0 ? (
+          <EmptyState icon={MessageCircle} title="אין מספיק נתונים לתובנות" text="לאחר שיצטברו תורים ושאלות, התובנות יוצגו כאן." />
+        ) : (
+          items.map((text) => (
+            <Motion.div key={text} variants={fadeUp} className="flex items-start gap-3 rounded-2xl bg-[#FAF6F1] p-4">
+              <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-[#C4795A]" />
+              <p className="text-sm leading-6 text-gray-600">{text}</p>
+            </Motion.div>
           ))
-        }
-      </motion.div>
-    </motion.div>
+        )}
+      </Motion.div>
+    </SectionCard>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Activity feed
-// ─────────────────────────────────────────────────────────────────────────────
+function ContactInquiriesSection({ inquiries, onStatusChange, onFeedbackAdd, mainRef }) {
+  const [listRef] = useAutoAnimate();
+  const [feedbackDrafts, setFeedbackDrafts] = useState({});
+  const newCount = inquiries.filter((inquiry) => inquiry.status === "new").length;
+  const handledCount = inquiries.filter((inquiry) => inquiry.status === "handled").length;
+
+  const updateFeedbackDraft = (id, value) => {
+    setFeedbackDrafts((drafts) => ({ ...drafts, [id]: value }));
+  };
+
+  const saveFeedbackDraft = (id) => {
+    const text = String(feedbackDrafts[id] || "").trim();
+    if (!text) return;
+    onFeedbackAdd(id, text);
+    setFeedbackDrafts((drafts) => ({ ...drafts, [id]: "" }));
+  };
+
+  return (
+    <SectionCard
+      icon={MessageCircle}
+      title="פניות"
+      subtitle={`${newCount} חדשות · ${handledCount} טופלו · ${inquiries.length} סה״כ`}
+      className="lg:col-span-3"
+    >
+      <div ref={listRef} className="space-y-3">
+        {inquiries.length === 0 ? (
+          <EmptyState
+            icon={MessageCircle}
+            title="אין פניות צור קשר עדיין"
+            text="פניות שיישלחו מהטופס באתר יופיעו כאן עם שם, טלפון והודעה."
+          />
+        ) : (
+          inquiries.map((inquiry, index) => {
+            const isHandled = inquiry.status === "handled";
+            return (
+              <Motion.article
+                key={inquiry.id}
+                initial={{ opacity: 0, y: 18 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ root: mainRef, once: true }}
+                transition={{ delay: index * 0.04 }}
+                className="rounded-3xl border border-white/75 bg-white/70 p-4 shadow-sm transition hover:bg-[#FAF6F1]"
+              >
+                <div className="grid gap-4 lg:grid-cols-[1fr_1fr_2fr_auto_auto] lg:items-start">
+                <div className="text-right">
+                  <p className="text-xs font-bold text-gray-400">שם</p>
+                  <p className="text-sm font-extrabold text-gray-900">{inquiry.fullName}</p>
+                </div>
+
+                <div className="text-right">
+                  <p className="text-xs font-bold text-gray-400">טלפון</p>
+                  <a href={`tel:${inquiry.phone}`} className="text-sm font-bold text-[#8B5030] hover:text-[#C4795A]">
+                    {inquiry.phone}
+                  </a>
+                </div>
+
+                <div className="text-right">
+                  <p className="text-xs font-bold text-gray-400">הודעה</p>
+                  <p className="text-sm leading-6 text-gray-600">{inquiry.message}</p>
+                </div>
+
+                <div className="text-right lg:text-left">
+                  <p className="text-xs font-bold text-gray-400">תאריך</p>
+                  <p className="text-xs font-semibold text-gray-500">{formatDateTime(inquiry.createdAt)}</p>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${isHandled ? "bg-emerald-50 text-emerald-700" : "bg-[#C4795A]/10 text-[#8B5030]"}`}>
+                    {isHandled ? "טופל" : "חדש"}
+                  </span>
+                  {isHandled ? (
+                    <button
+                      type="button"
+                      onClick={() => onStatusChange(inquiry.id, "new")}
+                      className="rounded-full border border-[#C4795A]/25 bg-white/80 px-4 py-2 text-xs font-bold text-[#8B5030] transition hover:bg-[#F5EDE3]"
+                    >
+                      החזר לחדש
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => onStatusChange(inquiry.id, "handled")}
+                      className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-4 py-2 text-xs font-bold text-white shadow-lg shadow-[#C4795A]/20 transition hover:shadow-[#C4795A]/30"
+                    >
+                      <CheckCircle2 size={14} />
+                      טופל
+                    </button>
+                  )}
+                </div>
+                </div>
+
+                <div className="mt-4 rounded-3xl bg-[#FAF6F1] p-4 text-right">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-bold text-gray-400">הערת צוות</span>
+                    <textarea
+                      rows={2}
+                      value={feedbackDrafts[inquiry.id] || ""}
+                      onChange={(event) => updateFeedbackDraft(inquiry.id, event.target.value)}
+                      placeholder="כתבי כאן הערה פנימית לצוות..."
+                      className="w-full resize-none rounded-2xl border border-[#E8C4A0]/50 bg-white/80 px-4 py-3 text-right text-sm text-gray-700 outline-none transition focus:border-[#C4795A] focus:ring-2 focus:ring-[#C4795A]/15"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => saveFeedbackDraft(inquiry.id)}
+                    className="mt-3 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-[#C4795A]/20 transition hover:shadow-[#C4795A]/30"
+                  >
+                    שמור הערה
+                  </button>
+
+                  {(inquiry.feedbackNotes || []).length > 0 ? (
+                    <div className="mt-4 space-y-2">
+                      {(inquiry.feedbackNotes || []).map((note) => (
+                        <div key={note.id} className="rounded-2xl bg-white/75 p-3">
+                          <div className="mb-1 text-[11px] font-bold text-gray-400">{formatDateTime(note.createdAt)}</div>
+                          <p className="text-sm leading-6 text-gray-700">{note.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-xs text-gray-400">אין הערות צוות עדיין.</p>
+                  )}
+                </div>
+              </Motion.article>
+            );
+          })
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+function ContactInquiriesShortcut({ inquiries, onOpen }) {
+  const newCount = inquiries.filter((inquiry) => inquiry.status === "new").length;
+
+  return (
+    <SectionCard icon={MessageCircle} title="פניות" subtitle="מעקב אחר פניות צור קשר" className="lg:col-span-3">
+      <div className="flex flex-col gap-4 rounded-3xl bg-[#FAF6F1] p-5 text-right sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-3xl font-black text-gray-900">{newCount}</p>
+          <p className="mt-1 text-sm font-bold text-[#8B5030]">פניות חדשות ממתינות לטיפול</p>
+          <p className="mt-1 text-xs text-gray-500">{inquiries.length} פניות בסך הכל</p>
+        </div>
+        <button
+          type="button"
+          onClick={onOpen}
+          className="inline-flex items-center justify-center gap-2 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-[#C4795A]/25"
+        >
+          <MessageCircle size={17} />
+          פתיחת פניות
+        </button>
+      </div>
+    </SectionCard>
+  );
+}
+
 function ActivityFeed({ recent, mainRef }) {
   const [listRef] = useAutoAnimate();
   return (
-    <motion.div variants={fadeUp} {...inView(mainRef)} className="glass-dark rounded-2xl p-5" style={{ borderTop:"2px solid #06b6d4" }}>
-      <div className="flex items-center gap-2 mb-4">
-        <div className="w-7 h-7 rounded-lg bg-cyan-500/20 flex items-center justify-center">
-          <Activity size={14} className="text-cyan-400"/>
-        </div>
-        <h3 className="text-sm font-bold text-white">פעילות אחרונה</h3>
-        <motion.div className="mr-auto w-2 h-2 rounded-full bg-cyan-400"
-          animate={{ scale:[1,1.7,1], opacity:[1,0.3,1] }} transition={{ duration:1.8, repeat:Infinity }}
-        />
-      </div>
-      <div ref={listRef} className="space-y-1.5 dark-scroll overflow-y-auto" style={{ maxHeight:260 }}>
-        {recent.length===0
-          ? <p className="text-slate-600 text-xs text-center py-6">אין פעילות עדיין</p>
-          : recent.map((a,i)=>(
-            <motion.div key={a.id}
-              initial={{ opacity:0, x:18 }} animate={{ opacity:1, x:0 }}
-              transition={{ delay:i*0.05, duration:0.35 }}
-              whileHover={{ x:-4, backgroundColor:"rgba(255,255,255,0.04)" }}
-              className="flex items-center gap-3 p-2.5 rounded-xl cursor-default"
+    <SectionCard icon={Activity} title="פעילות אחרונה" subtitle="התורים האחרונים שנכנסו למערכת" className="lg:col-span-2">
+      <div ref={listRef} className="max-h-72 space-y-2 overflow-y-auto pr-1">
+        {recent.length === 0 ? (
+          <EmptyState icon={Activity} title="אין פעילות אחרונה" text="כשתורים חדשים ייקלטו, הם יופיעו ברשימה הזו." />
+        ) : (
+          recent.map((appointment, index) => (
+            <Motion.div
+              key={appointment.id}
+              initial={{ opacity: 0, x: 18 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ root: mainRef, once: true }}
+              transition={{ delay: index * 0.04 }}
+              className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-2xl bg-white/70 p-3 transition hover:bg-[#FAF6F1]"
             >
-              <motion.div className="w-8 h-8 rounded-xl flex items-center justify-center text-xs font-bold shrink-0 text-white"
-                style={{ background:`${NEON[i%NEON.length]}2a`, border:`1px solid ${NEON[i%NEON.length]}44` }}
-                whileHover={{ scale:1.18, boxShadow:`0 0 14px ${NEON[i%NEON.length]}66` }}
-              >{a.client_name?.charAt(0)??"?"}</motion.div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-slate-200 truncate">{a.client_name}</p>
-                <p className="text-xs text-slate-500 truncate">{a.treatment_name}</p>
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#C4795A]/10 text-sm font-black text-[#8B5030]">
+                {appointment.client_name?.charAt(0) ?? "?"}
               </div>
-              <div className="text-left shrink-0">
-                <p className="text-xs text-slate-400">{a.date}</p>
-                <p className="text-xs text-slate-600">{a.time}</p>
+              <div className="min-w-0 text-right">
+                <p className="truncate text-sm font-bold text-gray-900">{appointment.client_name}</p>
+                <p className="truncate text-xs text-gray-500">{appointment.treatment_name}</p>
               </div>
-            </motion.div>
+              <div className="shrink-0 text-left">
+                <p className="text-xs font-semibold text-gray-500">{appointment.date}</p>
+                <p className="text-xs text-gray-400">{appointment.time}</p>
+              </div>
+            </Motion.div>
           ))
-        }
+        )}
       </div>
-    </motion.div>
+    </SectionCard>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Sidebar
-// ─────────────────────────────────────────────────────────────────────────────
-function Sidebar({ collapsed, onToggle }) {
+function PlaceholderPanel({ icon: Icon, title, text, actionLabel, onAction }) {
   return (
-    <motion.div className="glass-sidebar flex flex-col h-full shrink-0 overflow-hidden relative z-20"
-      animate={{ width: collapsed?64:220 }}
-      transition={{ type:"spring", stiffness:300, damping:30 }}
+    <SectionCard icon={Icon} title={title} subtitle="אזור ניהול עתידי" className="lg:col-span-3">
+      <div className="rounded-3xl bg-[#FAF6F1] p-8 text-right">
+        <div className="mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-[#C4795A]/10 text-[#C4795A]">
+          {createElement(Icon, { size: 26 })}
+        </div>
+        <h2 className="text-2xl font-black text-gray-900">{title}</h2>
+        <p className="mt-3 max-w-2xl text-sm leading-7 text-gray-600">{text}</p>
+        {actionLabel ? (
+          <button
+            type="button"
+            onClick={onAction}
+            className="mt-6 inline-flex items-center gap-2 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-6 py-3 text-sm font-bold text-white shadow-lg shadow-[#C4795A]/25"
+          >
+            {actionLabel}
+          </button>
+        ) : null}
+      </div>
+    </SectionCard>
+  );
+}
+
+function AppointmentsPanel({ recent, mainRef }) {
+  return (
+    <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+      <SectionCard icon={CalendarDays} title="ניהול תורים" subtitle="מעבר מהיר ליומן הקליניקה" className="lg:col-span-1">
+        <div className="rounded-3xl bg-[#FAF6F1] p-5 text-right">
+          <p className="text-sm leading-7 text-gray-600">
+            מסך היומן הקיים כולל ניהול תורים, זמינות צוות, עדכון שעות ופעולות מזכירות.
+          </p>
+          <button
+            type="button"
+            onClick={() => window.location.assign("/secretary")}
+            className="mt-5 inline-flex items-center gap-2 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-[#C4795A]/25"
+          >
+            <CalendarDays size={17} />
+            פתיחת יומן
+          </button>
+        </div>
+      </SectionCard>
+      <ActivityFeed recent={recent} mainRef={mainRef} />
+    </Motion.div>
+  );
+}
+
+function JobApplicationsSection({ applications, onStatusChange, onFeedbackAdd, mainRef }) {
+  const [listRef] = useAutoAnimate();
+  const [feedbackDrafts, setFeedbackDrafts] = useState({});
+  const newCount = applications.filter((app) => app.status === "חדש").length;
+  const handledCount = applications.filter((app) => app.status === "טופל").length;
+
+  const updateFeedbackDraft = (id, value) => {
+    setFeedbackDrafts((drafts) => ({ ...drafts, [id]: value }));
+  };
+
+  const saveFeedbackDraft = (id) => {
+    const text = String(feedbackDrafts[id] || "").trim();
+    if (!text) return;
+    onFeedbackAdd(id, text);
+    setFeedbackDrafts((drafts) => ({ ...drafts, [id]: "" }));
+  };
+
+  return (
+    <SectionCard
+      icon={Briefcase}
+      title="דרושים"
+      subtitle={`${newCount} חדשות · ${handledCount} טופלו · ${applications.length} סה״כ`}
+      className="lg:col-span-3"
     >
-      <div className="px-4 py-5 flex items-center gap-3 border-b border-white/5 overflow-hidden">
-        <motion.div className="w-8 h-8 rounded-xl flex items-center justify-center shrink-0"
-          style={{ background:"linear-gradient(135deg,#7c3aed,#a855f7)", boxShadow:"0 0 18px rgba(139,92,246,0.55)" }}
-          whileHover={{ rotate:180, scale:1.1 }} transition={{ duration:0.4 }}
-          animate={{ boxShadow:["0 0 12px rgba(139,92,246,0.4)","0 0 24px rgba(139,92,246,0.7)","0 0 12px rgba(139,92,246,0.4)"] }}
-        ><BarChart2 size={15} className="text-white"/></motion.div>
+      <div ref={listRef} className="space-y-3">
+        {applications.length === 0 ? (
+          <EmptyState
+            icon={Briefcase}
+            title="אין בקשות לעבודה עדיין"
+            text="בקשות שיישלחו מעמוד הדרושים יופיעו כאן עם פרטים מלאים."
+          />
+        ) : (
+          applications.map((app, index) => {
+            const isHandled = app.status === "טופל";
+            return (
+              <Motion.article
+                key={app.id}
+                initial={{ opacity: 0, y: 18 }}
+                whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ root: mainRef, once: true }}
+                transition={{ delay: index * 0.04 }}
+                className="rounded-3xl border border-white/75 bg-white/70 p-4 shadow-sm transition hover:bg-[#FAF6F1]"
+              >
+                <div className="grid gap-4 lg:grid-cols-[1fr_1fr_1fr_auto_auto] lg:items-start">
+                  <div className="text-right">
+                    <p className="text-xs font-bold text-gray-400">שם מלא</p>
+                    <p className="text-sm font-extrabold text-gray-900">{app.fullName}</p>
+                  </div>
+
+                  <div className="text-right">
+                    <p className="text-xs font-bold text-gray-400">מייל</p>
+                    <a href={`mailto:${app.email}`} className="text-sm font-bold text-[#8B5030] hover:text-[#C4795A]">
+                      {app.email}
+                    </a>
+                  </div>
+
+                  <div className="text-right">
+                    <p className="text-xs font-bold text-gray-400">תחום</p>
+                    <p className="text-sm font-bold text-gray-900">{app.field}</p>
+                  </div>
+
+                  <div className="text-right lg:text-left">
+                    <p className="text-xs font-bold text-gray-400">תאריך</p>
+                    <p className="text-xs font-semibold text-gray-500">{formatDateTime(app.createdAt)}</p>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2 lg:justify-end">
+                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${isHandled ? "bg-emerald-50 text-emerald-700" : "bg-[#C4795A]/10 text-[#8B5030]"}`}>
+                      {isHandled ? "טופל" : "חדש"}
+                    </span>
+                    {isHandled ? (
+                      <button
+                        type="button"
+                        onClick={() => onStatusChange(app.id, "חדש")}
+                        className="rounded-full border border-[#C4795A]/25 bg-white/80 px-4 py-2 text-xs font-bold text-[#8B5030] transition hover:bg-[#F5EDE3]"
+                      >
+                        החזר לחדש
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => onStatusChange(app.id, "טופל")}
+                        className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-4 py-2 text-xs font-bold text-white shadow-lg shadow-[#C4795A]/20 transition hover:shadow-[#C4795A]/30"
+                      >
+                        <CheckCircle2 size={14} />
+                        טופל
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-4 lg:grid-cols-2">
+                  <div className="text-right">
+                    <p className="text-xs font-bold text-gray-400 mb-1">טלפון</p>
+                    <a href={`tel:${app.phone}`} className="text-sm font-bold text-[#8B5030] hover:text-[#C4795A]">
+                      {app.phone}
+                    </a>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs font-bold text-gray-400 mb-1">תיק עבודות / רשת חברתית</p>
+                    <a href={app.portfolioLink} target="_blank" rel="noopener noreferrer" className="text-sm font-bold text-[#8B5030] hover:text-[#C4795A] break-all">
+                      {app.portfolioLink}
+                    </a>
+                  </div>
+                </div>
+
+                <div className="mt-4 rounded-3xl bg-[#FAF6F1] p-4 text-right">
+                  <label className="block">
+                    <span className="mb-1 block text-xs font-bold text-gray-400">הערת צוות</span>
+                    <textarea
+                      rows={2}
+                      value={feedbackDrafts[app.id] || ""}
+                      onChange={(event) => updateFeedbackDraft(app.id, event.target.value)}
+                      placeholder="כתבי כאן הערה פנימית לצוות..."
+                      className="w-full resize-none rounded-2xl border border-[#E8C4A0]/50 bg-white/80 px-4 py-3 text-right text-sm text-gray-700 outline-none transition focus:border-[#C4795A] focus:ring-2 focus:ring-[#C4795A]/15"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => saveFeedbackDraft(app.id)}
+                    className="mt-3 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-[#C4795A]/20 transition hover:shadow-[#C4795A]/30"
+                  >
+                    שמור הערה
+                  </button>
+
+                  {(app.feedbackNotes || []).length > 0 ? (
+                    <div className="mt-4 space-y-2">
+                      {(app.feedbackNotes || []).map((note) => (
+                        <div key={note.id} className="rounded-2xl bg-white/75 p-3">
+                          <div className="mb-1 text-[11px] font-bold text-gray-400">{formatDateTime(note.createdAt)}</div>
+                          <p className="text-sm leading-6 text-gray-700">{note.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-3 text-xs text-gray-400">אין הערות צוות עדיין.</p>
+                  )}
+                </div>
+              </Motion.article>
+            );
+          })
+        )}
+      </div>
+    </SectionCard>
+  );
+}
+
+function Sidebar({ collapsed, onToggle, activeTab, onTabChange }) {
+  return (
+    <Motion.aside
+      className="hidden h-full shrink-0 flex-col overflow-hidden border-l border-white/75 bg-white/65 shadow-xl shadow-[#9B5C38]/5 backdrop-blur-xl lg:flex"
+      animate={{ width: collapsed ? 72 : 236 }}
+      transition={{ type: "spring", stiffness: 300, damping: 30 }}
+    >
+      <div className="flex items-center gap-3 border-b border-[#E8C4A0]/35 px-4 py-5">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#C4795A] to-[#9B5C38] text-white shadow-lg shadow-[#C4795A]/25">
+          <BarChart2 size={18} />
+        </div>
         <AnimatePresence>
           {!collapsed && (
-            <motion.span className="text-sm font-bold gradient-text-neon whitespace-nowrap"
-              initial={{ opacity:0, x:-10 }} animate={{ opacity:1, x:0 }} exit={{ opacity:0, x:-10 }}
-              transition={{ duration:0.2 }}
-            >MeDay Admin</motion.span>
+            <Motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }}>
+              <p className="whitespace-nowrap text-sm font-black text-gray-900">MeDay Admin</p>
+              <p className="whitespace-nowrap text-xs text-gray-400">ניהול קליניקה</p>
+            </Motion.div>
           )}
         </AnimatePresence>
       </div>
 
-      <nav className="flex-1 py-4 space-y-1 px-2">
-        {NAV_ITEMS.map((item,i)=>{
-          const Icon=item.icon;
+      <nav className="flex-1 space-y-1 px-3 py-4">
+        {NAV_ITEMS.map((item, index) => {
+          const Icon = item.icon;
+          const isActive = activeTab === item.key;
           return (
-            <motion.button key={item.label}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl overflow-hidden
-                ${item.active?"bg-violet-500/20 text-violet-300":"text-slate-500 hover:text-slate-200"}`}
-              style={item.active?{ boxShadow:"inset 0 0 24px rgba(139,92,246,0.1)" }:{}}
-              whileHover={{ backgroundColor:item.active?undefined:"rgba(255,255,255,0.05)", x:-2 }}
-              whileTap={{ scale:0.95 }}
-              initial={{ opacity:0, x:20 }} animate={{ opacity:1, x:0 }} transition={{ delay:i*0.07+0.2 }}
+            <Motion.button
+              key={item.label}
+              type="button"
+              onClick={() => onTabChange(item.key)}
+              className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-right transition ${isActive ? "bg-[#C4795A]/12 text-[#8B5030] shadow-sm" : "text-gray-500 hover:bg-white/70 hover:text-gray-900"}`}
+              initial={{ opacity: 0, x: 18 }}
+              animate={{ opacity: 1, x: 0 }}
+              transition={{ delay: index * 0.05 + 0.1 }}
+              whileTap={{ scale: 0.96 }}
             >
-              <Icon size={17} className={`shrink-0 ${item.active?"text-violet-400":""}`}/>
+              <Icon size={18} className="shrink-0" />
               <AnimatePresence>
-                {!collapsed && (
-                  <motion.span className="text-xs font-medium whitespace-nowrap"
-                    initial={{ opacity:0, x:-8 }} animate={{ opacity:1, x:0 }} exit={{ opacity:0, x:-8 }}
-                    transition={{ duration:0.18 }}
-                  >{item.label}</motion.span>
-                )}
+                {!collapsed && <Motion.span className="whitespace-nowrap text-sm font-bold" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>{item.label}</Motion.span>}
               </AnimatePresence>
-              {!collapsed && item.active && (
-                <motion.div className="mr-auto w-1.5 h-1.5 rounded-full bg-violet-400"
-                  animate={{ opacity:[1,0.2,1] }} transition={{ duration:1.5, repeat:Infinity }}
-                />
-              )}
-            </motion.button>
+            </Motion.button>
           );
         })}
       </nav>
 
-      <motion.button onClick={onToggle}
-        className="m-3 p-2.5 rounded-xl bg-white/5 text-slate-500 flex items-center justify-center"
-        whileHover={{ backgroundColor:"rgba(255,255,255,0.1)", color:"#c4b5fd" }}
-        whileTap={{ scale:0.9 }}
-      >
-        <motion.div animate={{ rotate:collapsed?180:0 }} transition={{ type:"spring", stiffness:280, damping:24 }}>
-          <ChevronRight size={15}/>
-        </motion.div>
-      </motion.button>
-    </motion.div>
+      <button type="button" onClick={onToggle} className="m-3 flex items-center justify-center rounded-2xl bg-[#FAF6F1] p-3 text-[#8B5030] transition hover:bg-[#F5EDE3]">
+        <Motion.div animate={{ rotate: collapsed ? 180 : 0 }}>
+          <ChevronRight size={16} />
+        </Motion.div>
+      </button>
+    </Motion.aside>
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Top nav
-// ─────────────────────────────────────────────────────────────────────────────
-function TopNav({ onRefresh, refreshing }) {
+function MobileTabBar({ activeTab, onTabChange }) {
   return (
-    <div className="glass-dark border-b border-white/6 px-6 py-3 flex items-center gap-4 shrink-0 z-10">
-      <div className="flex items-center gap-2 bg-white/5 border border-white/8 rounded-xl px-3 py-2 flex-1 max-w-xs">
-        <Search size={13} className="text-slate-500 shrink-0"/>
-        <input type="text" placeholder="חיפוש..." dir="rtl"
-          className="bg-transparent text-xs text-slate-300 placeholder-slate-600 outline-none w-full text-right"/>
-      </div>
-      <div className="flex items-center gap-2 mr-auto">
-        <motion.button onClick={onRefresh}
-          className="p-2 rounded-xl bg-white/5 text-slate-500"
-          whileHover={{ backgroundColor:"rgba(139,92,246,0.2)", color:"#a78bfa" }}
-          whileTap={{ scale:0.88 }}
-        >
-          <motion.div animate={refreshing?{ rotate:360 }:{}} transition={{ duration:0.8, repeat:refreshing?Infinity:0, ease:"linear" }}>
-            <RefreshCw size={14}/>
-          </motion.div>
-        </motion.button>
-        <motion.button className="relative p-2 rounded-xl bg-white/5 text-slate-500"
-          whileHover={{ backgroundColor:"rgba(255,255,255,0.08)", color:"#e2e8f0" }} whileTap={{ scale:0.88 }}
-        >
-          <Bell size={15}/>
-          <motion.span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 rounded-full bg-violet-500"
-            animate={{ scale:[1,1.6,1] }} transition={{ duration:1.5, repeat:Infinity }}
-          />
-        </motion.button>
-        <motion.div className="w-8 h-8 rounded-xl flex items-center justify-center text-white text-xs font-bold cursor-pointer"
-          style={{ background:"linear-gradient(135deg,#7c3aed,#a855f7)", boxShadow:"0 0 14px rgba(139,92,246,0.45)" }}
-          whileHover={{ scale:1.1, boxShadow:"0 0 24px rgba(139,92,246,0.65)" }} whileTap={{ scale:0.92 }}
-        >מ</motion.div>
+    <div className="flex gap-2 overflow-x-auto rounded-3xl border border-white/70 bg-white/60 p-2 shadow-sm backdrop-blur lg:hidden">
+      {NAV_ITEMS.map((item) => {
+        const Icon = item.icon;
+        const isActive = activeTab === item.key;
+        return (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => onTabChange(item.key)}
+            className={`flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-xs font-bold transition ${isActive ? "bg-[#C4795A] text-white shadow-lg shadow-[#C4795A]/20" : "bg-white/75 text-[#8B5030] hover:bg-[#F5EDE3]"}`}
+          >
+            <Icon size={15} />
+            {item.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function TopBar({ onRefresh, refreshing }) {
+  return (
+    <div className="sticky top-0 z-20 border-b border-white/70 bg-[#FAF6F1]/80 px-4 py-3 backdrop-blur-xl sm:px-6">
+      <div className="mx-auto flex max-w-7xl items-center gap-3">
+        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-white/75 bg-white/70 px-4 py-2 shadow-sm">
+          <Search size={15} className="shrink-0 text-[#C4795A]" />
+          <input type="text" placeholder="חיפוש..." dir="rtl" className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
+        </div>
+        <button type="button" onClick={onRefresh} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-[#8B5030] shadow-sm transition hover:bg-[#F5EDE3]">
+          <Motion.span animate={refreshing ? { rotate: 360 } : {}} transition={{ duration: 0.8, repeat: refreshing ? Infinity : 0, ease: "linear" }}>
+            <RefreshCw size={17} />
+          </Motion.span>
+        </button>
+        <button type="button" className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-[#8B5030] shadow-sm transition hover:bg-[#F5EDE3]">
+          <Bell size={17} />
+          <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#C4795A]" />
+        </button>
       </div>
     </div>
   );
 }
 
-// CSV export
 function exportCsv(recent) {
   const header = "שם לקוח,טלפון,טיפול,קטגוריה,תאריך,שעה\n";
-  const rows = recent.map(a=>
-    [a.client_name,a.client_phone??"",a.treatment_name,a.treatment_category??"",a.date,a.time]
-      .map(v=>`"${String(v).replace(/"/g,'""')}"`)
+  const rows = recent.map((appointment) =>
+    [appointment.client_name, appointment.client_phone ?? "", appointment.treatment_name, appointment.treatment_category ?? "", appointment.date, appointment.time]
+      .map((value) => `"${String(value).replace(/"/g, '""')}"`)
       .join(",")
   );
-  const blob = new Blob(["\uFEFF"+header+rows.join("\n")],{type:"text/csv;charset=utf-8;"});
+  const blob = new Blob(["\uFEFF" + header + rows.join("\n")], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href=url; a.download=`meday-${todayStr()}.csv`; a.click();
+  a.href = url;
+  a.download = `meday-${todayStr()}.csv`;
+  a.click();
   URL.revokeObjectURL(url);
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// 🚀 Main dashboard
-// ─────────────────────────────────────────────────────────────────────────────
 export default function AdminDashboard() {
-  const [data,       setData]        = useState(null);
-  const [loading,    setLoading]     = useState(true);
-  const [refreshing, setRefreshing]  = useState(false);
-  const [activeRange,setActiveRange] = useState("all");
-  const [collapsed,  setCollapsed]   = useState(false);
-
-  // Scroll ref for parallax
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [activeRange, setActiveRange] = useState("all");
+  const [activeTab, setActiveTab] = useState("dashboard");
+  const [collapsed, setCollapsed] = useState(false);
+  const [contactInquiries, setContactInquiries] = useState(() => getContactInquiries());
+  const [jobApplications, setJobApplications] = useState(() => getJobApplications());
   const mainRef = useRef(null);
-  const { scrollYProgress } = useScroll({ container: mainRef });
 
-  // Card depth on scroll — subtle forward-drift
-  const contentScale = useTransform(scrollYProgress, [0, 1], [1, 0.985]);
-
-  const load = useCallback(async (silent=false) => {
-    if(!silent) setLoading(true); else setRefreshing(true);
+  const load = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
     try {
-      const range = RANGES.find(r=>r.key===activeRange);
-      const result = await fetchAnalytics(range?range.getDates():{});
+      const range = RANGES.find((item) => item.key === activeRange);
+      const result = await fetchAnalytics(range ? range.getDates() : {});
       setData(result);
-    } catch(e){ console.error(e); }
-    finally { setLoading(false); setRefreshing(false); }
-  },[activeRange]);
+    } catch (error) {
+      console.error(error);
+      setData(null);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  }, [activeRange]);
 
-  useEffect(()=>{ load(false); },[load]);
-  useEffect(()=>{ const id=setInterval(()=>load(true),60_000); return ()=>clearInterval(id); },[load]);
+  useEffect(() => {
+    load(false);
+  }, [load]);
 
-  const pageBg = { background:"#020209" };
+  useEffect(() => {
+    const id = setInterval(() => load(true), 60_000);
+    return () => clearInterval(id);
+  }, [load]);
 
-  // ── Loading ──────────────────────────────────────────────────────────────
-  if (loading) return (
-    <div className="flex h-screen overflow-hidden" style={pageBg}>
-      <StarCanvas/>
-      <FloatingParticles/>
-      <div className="glass-sidebar w-[220px] shrink-0" style={{ zIndex:10 }}/>
-      <div className="flex-1 flex flex-col overflow-hidden" style={{ zIndex:10 }}>
-        <div className="glass-dark border-b border-white/6 h-14 shrink-0"/>
-        <div className="flex-1 p-6 space-y-6 overflow-hidden">
-          <div className="grid grid-cols-4 gap-4">
-            {[...Array(4)].map((_,i)=>(
-              <motion.div key={i} className="h-24 rounded-2xl" style={{ background:"rgba(255,255,255,0.04)" }}
-                animate={{ opacity:[0.08,0.2,0.08] }} transition={{ duration:1.5, repeat:Infinity, delay:i*0.2 }}
-              />
-            ))}
+  useEffect(() => {
+    const refreshContactInquiries = () => setContactInquiries(getContactInquiries());
+    const handleStorage = (event) => {
+      if (event.key === CONTACT_INQUIRIES_STORAGE_KEY) refreshContactInquiries();
+    };
+
+    window.addEventListener(CONTACT_INQUIRY_EVENT, refreshContactInquiries);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener(CONTACT_INQUIRY_EVENT, refreshContactInquiries);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  const changeContactInquiryStatus = useCallback((id, status) => {
+    updateContactInquiryStatus(id, status);
+    setContactInquiries(getContactInquiries());
+  }, []);
+
+  const addContactInquiryNote = useCallback((id, noteText) => {
+    addContactInquiryFeedback(id, noteText);
+    setContactInquiries(getContactInquiries());
+  }, []);
+
+  useEffect(() => {
+    const refreshJobApplications = () => setJobApplications(getJobApplications());
+    const handleStorage = (event) => {
+      if (event.key === JOB_APPLICATIONS_STORAGE_KEY) refreshJobApplications();
+    };
+
+    window.addEventListener(JOB_APPLICATION_EVENT, refreshJobApplications);
+    window.addEventListener("storage", handleStorage);
+    return () => {
+      window.removeEventListener(JOB_APPLICATION_EVENT, refreshJobApplications);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  const changeJobApplicationStatus = useCallback((id, status) => {
+    updateJobApplicationStatus(id, status);
+    setJobApplications(getJobApplications());
+  }, []);
+
+  const addJobApplicationNote = useCallback((id, noteText) => {
+    addJobApplicationFeedback(id, noteText);
+    setJobApplications(getJobApplications());
+  }, []);
+
+  const analytics = useMemo(() => ({
+    byTreatment: data?.by_treatment ?? [],
+    byCategory: data?.by_category ?? [],
+    byDay: data?.by_day ?? [],
+    byHour: data?.by_hour ?? [],
+    monthlyTrend: data?.monthly_trend ?? [],
+    recent: data?.recent ?? [],
+  }), [data]);
+
+  if (loading) {
+    return (
+      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-[#FAF6F1]" dir="rtl">
+        <PageGlow />
+        <div className="relative w-full max-w-4xl space-y-5 p-6">
+          <div className="h-36 animate-pulse rounded-3xl bg-white/65 shadow-xl" />
+          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+            {[...Array(4)].map((_, index) => <div key={index} className="h-28 animate-pulse rounded-3xl bg-white/70 shadow-lg" />)}
           </div>
-          {[...Array(3)].map((_,i)=>(
-            <motion.div key={i} className="rounded-2xl" style={{ height:i===0?176:136, background:"rgba(255,255,255,0.04)" }}
-              animate={{ opacity:[0.06,0.16,0.06] }} transition={{ duration:1.8, repeat:Infinity, delay:i*0.3+0.4 }}
-            />
-          ))}
+          <div className="h-48 animate-pulse rounded-3xl bg-white/65 shadow-xl" />
         </div>
       </div>
-    </div>
-  );
+    );
+  }
 
-  if (!data) return (
-    <div className="flex h-screen items-center justify-center" style={pageBg}>
-      <StarCanvas/>
-      <p className="text-red-400 text-sm" style={{ zIndex:10, position:"relative" }}>שגיאה בטעינת הנתונים</p>
-    </div>
-  );
+  if (!data) {
+    return (
+      <div className="relative flex h-screen items-center justify-center overflow-hidden bg-[#FAF6F1] px-6" dir="rtl">
+        <PageGlow />
+        <div className="relative max-w-md rounded-3xl border border-white/75 bg-white/80 p-8 text-center shadow-xl">
+          <EmptyState icon={RefreshCw} title="שגיאה בטעינת הנתונים" text="לא הצלחנו לקבל את נתוני הדשבורד. נסי לרענן שוב בעוד רגע." />
+          <button type="button" onClick={() => load(false)} className="mt-5 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-6 py-3 text-sm font-bold text-white shadow-lg shadow-[#C4795A]/25">
+            טעינה מחדש
+          </button>
+        </div>
+      </div>
+    );
+  }
 
-  const maxTreatment = Math.max(...data.by_treatment.map(t=>t.count),1);
-  const maxDay       = Math.max(...data.by_day.map(d=>d.count),1);
-  const maxHour      = Math.max(...data.by_hour.map(h=>h.count),1);
-  const maxMonthly   = Math.max(...(data.monthly_trend?.map(m=>m.count)??[1]),1);
-  const donutSegs    = (data.by_category??[]).slice(0,6).map((c,i)=>({ label:c.category, value:c.count, color:NEON[i%NEON.length] }));
-
-  const sectionProps = { variants:fadeUp, ...inView(mainRef) };
+  const maxTreatment = Math.max(...analytics.byTreatment.map((item) => item.count), 1);
+  const maxDay = Math.max(...analytics.byDay.map((item) => item.count), 1);
+  const maxHour = Math.max(...analytics.byHour.map((item) => item.count), 1);
+  const maxMonthly = Math.max(...analytics.monthlyTrend.map((item) => item.count), 1);
+  const donutSegs = analytics.byCategory.slice(0, 6).map((category, index) => ({
+    label: category.category,
+    value: category.count,
+    color: CHART_COLORS[index % CHART_COLORS.length],
+  }));
 
   return (
-    <div className="flex h-screen overflow-hidden" dir="rtl" style={pageBg}>
+    <div className="relative flex h-screen overflow-hidden bg-[#FAF6F1] text-gray-900" dir="rtl">
+      <PageGlow />
+      <Sidebar
+        collapsed={collapsed}
+        onToggle={() => setCollapsed((value) => !value)}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+      />
 
-      {/* ── Space layers (z-0) ── */}
-      <StarCanvas/>
-      <NebulaBg scrollYProgress={scrollYProgress}/>
-      <FloatingParticles/>
+      <div className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden">
+        <TopBar onRefresh={() => load(true)} refreshing={refreshing} />
 
-      {/* Shooting stars */}
-      <ShootingStar left="20%"  top="8%"  angle={35}  delay={2}  repeatDelay={11}/>
-      <ShootingStar left="65%"  top="18%" angle={30}  delay={7}  repeatDelay={16}/>
-      <ShootingStar left="40%"  top="40%" angle={40}  delay={13} repeatDelay={20}/>
-      <ShootingStar left="80%"  top="5%"  angle={28}  delay={4}  repeatDelay={14}/>
-
-      {/* ── Sidebar ── */}
-      <div style={{ zIndex:20, position:"relative" }}>
-        <Sidebar collapsed={collapsed} onToggle={()=>setCollapsed(v=>!v)}/>
-      </div>
-
-      {/* ── Main ── */}
-      <div className="flex-1 flex flex-col overflow-hidden" style={{ zIndex:10, position:"relative" }}>
-        <TopNav onRefresh={()=>load(true)} refreshing={refreshing}/>
-
-        <motion.main
-          ref={mainRef}
-          className="flex-1 overflow-y-auto space-scroll p-6 space-y-6"
-          style={{ scale:contentScale }}
-        >
-          {/* ── Toolbar ── */}
-          <motion.div variants={fadeUp} {...inView(mainRef)} className="flex items-center justify-between">
-            <div className="flex gap-2">
-              {RANGES.map(r=>(
-                <motion.button key={r.key} onClick={()=>setActiveRange(r.key)}
-                  className="px-4 py-1.5 rounded-xl text-xs font-medium relative overflow-hidden"
-                  whileHover={{ scale:1.06 }} whileTap={{ scale:0.94 }}
-                  style={activeRange===r.key
-                    ?{ background:"linear-gradient(135deg,#7c3aed,#a855f7)", boxShadow:"0 0 20px rgba(139,92,246,0.5)", color:"white" }
-                    :{ background:"rgba(255,255,255,0.04)", color:"#64748b", border:"1px solid rgba(255,255,255,0.07)" }}
-                >
-                  {r.label}
-                  {activeRange===r.key && (
-                    <motion.div className="absolute inset-0 rounded-xl"
-                      style={{ background:"linear-gradient(135deg,rgba(255,255,255,0.18),transparent)" }}
-                      animate={{ opacity:[0.4,1,0.4] }} transition={{ duration:2.5, repeat:Infinity }}
-                    />
-                  )}
-                </motion.button>
-              ))}
-            </div>
-            <motion.button onClick={()=>exportCsv(data.recent)}
-              className="flex items-center gap-1.5 text-xs text-violet-400 border border-violet-500/20 px-3 py-1.5 rounded-xl"
-              style={{ background:"rgba(139,92,246,0.1)" }}
-              whileHover={{ scale:1.05, boxShadow:"0 0 16px rgba(139,92,246,0.35)" }} whileTap={{ scale:0.95 }}
-            ><Download size={12}/>ייצוא CSV</motion.button>
-          </motion.div>
-
-          {/* ── KPI cards ── */}
-          <motion.div variants={stagger} initial="hidden" whileInView="show" viewport={{ root:mainRef, once:true }}
-            className="grid grid-cols-2 lg:grid-cols-4 gap-4"
-          >
-            <KpiCard index={0} icon={Users}      label="סה״כ תורים"    value={data.total}               color="#8b5cf6" mainRef={mainRef}/>
-            <KpiCard index={1} icon={Calendar}   label="תורים היום"    value={data.today??0}            color="#06b6d4" mainRef={mainRef}/>
-            <KpiCard index={2} icon={TrendingUp} label="תורים השבוע"   value={data.this_week??0}        color="#ec4899" mainRef={mainRef}/>
-            <KpiCard index={3} icon={Sparkles}   label="סוגי טיפולים"  value={data.by_treatment.length} color="#10b981" mainRef={mainRef}/>
-          </motion.div>
-
-          {/* ── Monthly trend + AI insights ── */}
-          <motion.div {...sectionProps} className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-            <motion.div className="glass-dark rounded-2xl p-5 lg:col-span-2" style={{ borderTop:"2px solid #7c3aed" }}
-              whileHover={{ boxShadow:"0 8px 50px rgba(124,58,237,0.18)" }}
-            >
-              <div className="flex items-center gap-2 mb-5">
-                <div className="w-7 h-7 rounded-lg bg-violet-500/20 flex items-center justify-center">
-                  <TrendingUp size={13} className="text-violet-400"/>
-                </div>
-                <h3 className="text-sm font-bold text-white">מגמה חודשית</h3>
-                <span className="mr-auto text-xs text-slate-500">6 חודשים אחרונים</span>
-              </div>
-              {data.monthly_trend?.length>0
-                ? <div className="flex items-end gap-2 px-2">
-                    {data.monthly_trend.map((m,i)=><NeonVBar key={m.month} label={formatMonth(m.month)} count={m.count} max={maxMonthly} color="#8b5cf6" index={i}/>)}
+        <main ref={mainRef} className="flex-1 overflow-y-auto px-4 pb-10 pt-5 sm:px-6">
+          <div className="mx-auto max-w-7xl space-y-6">
+            <Motion.header variants={fadeUp} initial="hidden" animate="show" className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-[#2C1A0A] via-[#5E3420] to-[#C4795A] p-6 text-white shadow-2xl shadow-[#9B5C38]/20 sm:p-8">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_15%,rgba(232,196,160,0.45),transparent_34%),radial-gradient(circle_at_85%_0%,rgba(255,255,255,0.22),transparent_28%)]" />
+              <div className="relative grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
+                <div className="text-right">
+                  <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-bold backdrop-blur">
+                    <Sparkles size={14} className="text-[#E8C4A0]" />
+                    MeDay Beauty Center
                   </div>
-                : <p className="text-slate-600 text-xs text-center py-10">אין נתונים עדיין</p>
-              }
-            </motion.div>
-            <AiInsights data={data} mainRef={mainRef}/>
-          </motion.div>
-
-          {/* ── Treatment bars + Donut ── */}
-          <motion.div {...sectionProps} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <motion.div className="glass-dark rounded-2xl p-5" style={{ borderTop:"2px solid #ec4899" }}
-              whileHover={{ boxShadow:"0 8px 50px rgba(236,72,153,0.14)" }}
-            >
-              <div className="flex items-center gap-2 mb-5">
-                <div className="w-7 h-7 rounded-lg bg-pink-500/20 flex items-center justify-center">
-                  <TrendingUp size={13} className="text-pink-400"/>
+                  <h1 className="text-4xl font-black leading-tight sm:text-5xl">אזור ניהול</h1>
+                  <p className="mt-3 max-w-2xl text-sm leading-7 text-white/70">
+                    מבט מקצועי ועדין על התורים, הטיפולים המבוקשים ותובנות הפעילות של הקליניקה.
+                  </p>
                 </div>
-                <h3 className="text-sm font-bold text-white">טיפולים מבוקשים</h3>
-              </div>
-              {data.by_treatment.length===0
-                ? <p className="text-slate-600 text-xs text-center py-10">אין נתונים עדיין</p>
-                : <div className="space-y-3">{data.by_treatment.map((t,i)=><NeonBar key={t.name} label={t.name} count={t.count} max={maxTreatment} color={NEON[i%NEON.length]} index={i} mainRef={mainRef}/>)}</div>
-              }
-            </motion.div>
-
-            <motion.div className="glass-dark rounded-2xl p-5" style={{ borderTop:"2px solid #10b981" }}
-              whileHover={{ boxShadow:"0 8px 50px rgba(16,185,129,0.14)" }}
-            >
-              <div className="flex items-center gap-2 mb-5">
-                <div className="w-7 h-7 rounded-lg bg-emerald-500/20 flex items-center justify-center">
-                  <Sparkles size={13} className="text-emerald-400"/>
+                <div className="flex flex-wrap gap-3 lg:justify-end">
+                  <button type="button" onClick={() => window.location.assign("/")} className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-5 py-3 text-sm font-bold text-white backdrop-blur transition hover:bg-white/20">
+                    <Home size={17} />
+                    חזרה לדף הראשי
+                  </button>
+                  <button type="button" onClick={() => window.location.assign("/secretary")} className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-bold text-[#8B5030] shadow-lg transition hover:bg-[#FAF6F1]">
+                    <CalendarDays size={17} />
+                    יומן וניהול תורים
+                  </button>
+                  <button type="button" onClick={() => exportCsv(analytics.recent)} className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-5 py-3 text-sm font-bold text-white backdrop-blur transition hover:bg-white/20">
+                    <Download size={17} />
+                    ייצוא CSV
+                  </button>
                 </div>
-                <h3 className="text-sm font-bold text-white">תורים לפי קטגוריה</h3>
               </div>
-              {donutSegs.length===0
-                ? <p className="text-slate-600 text-xs text-center py-10">אין נתונים עדיין</p>
-                : <div className="flex items-center gap-4">
-                    <DonutChart segments={donutSegs} total={data.total}/>
-                    <motion.div className="flex-1 space-y-2" variants={stagger} initial="hidden" animate="show">
-                      {donutSegs.map((seg,i)=>(
-                        <motion.div key={seg.label} variants={fadeUp} whileHover={{ x:-4 }} className="flex items-center gap-2 cursor-default">
-                          <motion.div className="w-2 h-2 rounded-full shrink-0" style={{ background:seg.color }}
-                            animate={{ boxShadow:[`0 0 3px ${seg.color}33`,`0 0 10px ${seg.color}aa`,`0 0 3px ${seg.color}33`] }}
-                            transition={{ duration:2.5, repeat:Infinity, delay:i*0.35 }}
-                          />
-                          <span className="text-xs text-slate-400 truncate flex-1">{seg.label}</span>
-                          <span className="text-xs font-bold" style={{ color:seg.color }}>{seg.value}</span>
-                        </motion.div>
+            </Motion.header>
+
+            <MobileTabBar activeTab={activeTab} onTabChange={setActiveTab} />
+
+            {activeTab === "dashboard" ? (
+              <>
+            <Motion.div variants={fadeUp} {...inView(mainRef)} className="flex flex-col gap-3 rounded-3xl border border-white/70 bg-white/60 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex flex-wrap gap-2">
+                {RANGES.map((range) => (
+                  <button
+                    key={range.key}
+                    type="button"
+                    onClick={() => setActiveRange(range.key)}
+                    className={`rounded-full px-4 py-2 text-xs font-bold transition ${activeRange === range.key ? "bg-[#C4795A] text-white shadow-lg shadow-[#C4795A]/20" : "bg-white/75 text-[#8B5030] hover:bg-[#F5EDE3]"}`}
+                  >
+                    {range.label}
+                  </button>
+                ))}
+              </div>
+              <p className="px-2 text-xs text-gray-400">מתעדכן אוטומטית כל דקה</p>
+            </Motion.div>
+
+            <Motion.div variants={stagger} initial="hidden" whileInView="show" viewport={{ root: mainRef, once: true }} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+              <StatCard index={0} icon={Users} label="סה״כ תורים" value={data.total ?? 0} helper="כלל ההזמנות בטווח" />
+              <StatCard index={1} icon={Calendar} label="תורים היום" value={data.today ?? 0} helper="פעילות יומית" />
+              <StatCard index={2} icon={TrendingUp} label="תורים השבוע" value={data.this_week ?? 0} helper="מומנטום שבועי" />
+              <StatCard index={3} icon={Sparkles} label="סוגי טיפולים" value={analytics.byTreatment.length} helper="טיפולים עם ביקוש" />
+            </Motion.div>
+
+            <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+              <SectionCard icon={TrendingUp} title="מגמה חודשית" subtitle="6 חודשים אחרונים" className="lg:col-span-2">
+                {analytics.monthlyTrend.length > 0 ? (
+                  <div className="flex items-end gap-3 px-1">
+                    {analytics.monthlyTrend.map((month, index) => <MonthBar key={month.month} label={formatMonth(month.month)} count={month.count} max={maxMonthly} index={index} />)}
+                  </div>
+                ) : (
+                  <EmptyState icon={TrendingUp} />
+                )}
+              </SectionCard>
+              <AiInsights data={data} mainRef={mainRef} />
+            </Motion.div>
+
+            <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              <SectionCard icon={Sparkles} title="טיפולים מבוקשים" subtitle="עניין לקוחות לפי סוג טיפול">
+                {analytics.byTreatment.length === 0 ? (
+                  <EmptyState icon={Sparkles} title="אין עדיין עניין בטיפולים" text="לאחר הזמנות ראשונות נראה כאן את הטיפולים המובילים." />
+                ) : (
+                  <div className="space-y-3">
+                    {analytics.byTreatment.map((treatment, index) => <WarmBar key={treatment.name} label={treatment.name} count={treatment.count} max={maxTreatment} color={CHART_COLORS[index % CHART_COLORS.length]} index={index} mainRef={mainRef} />)}
+                  </div>
+                )}
+              </SectionCard>
+
+              <SectionCard icon={BarChart2} title="תורים לפי קטגוריה" subtitle="חלוקה בין תחומי הטיפול">
+                {donutSegs.length === 0 ? (
+                  <EmptyState icon={BarChart2} />
+                ) : (
+                  <div className="flex flex-col items-center gap-5 sm:flex-row">
+                    <DonutChart segments={donutSegs} total={data.total ?? 0} />
+                    <div className="w-full flex-1 space-y-2">
+                      {donutSegs.map((segment) => (
+                        <div key={segment.label} className="flex items-center gap-2 rounded-2xl bg-[#FAF6F1] px-3 py-2">
+                          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: segment.color }} />
+                          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-gray-600">{segment.label}</span>
+                          <span className="text-xs font-black tabular-nums" style={{ color: segment.color }}>{segment.value}</span>
+                        </div>
                       ))}
-                    </motion.div>
+                    </div>
                   </div>
-              }
-            </motion.div>
-          </motion.div>
+                )}
+              </SectionCard>
+            </Motion.div>
 
-          {/* ── Day + Hour bars ── */}
-          <motion.div {...sectionProps} className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-            <motion.div className="glass-dark rounded-2xl p-5" style={{ borderTop:"2px solid #7c3aed" }}
-              whileHover={{ boxShadow:"0 8px 50px rgba(124,58,237,0.14)" }}
-            >
-              <div className="flex items-center gap-2 mb-5">
-                <div className="w-7 h-7 rounded-lg bg-violet-500/20 flex items-center justify-center"><Calendar size={13} className="text-violet-400"/></div>
-                <h3 className="text-sm font-bold text-white">תורים לפי יום</h3>
-              </div>
-              {data.by_day.length===0
-                ? <p className="text-slate-600 text-xs text-center py-10">אין נתונים עדיין</p>
-                : <div className="space-y-3">{data.by_day.map((d,i)=><NeonBar key={d.day} label={d.day} count={d.count} max={maxDay} color="#8b5cf6" index={i} mainRef={mainRef}/>)}</div>
-              }
-            </motion.div>
+            <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              <SectionCard icon={Calendar} title="תורים לפי יום" subtitle="ימים עמוסים יותר ביומן">
+                {analytics.byDay.length === 0 ? (
+                  <EmptyState icon={Calendar} />
+                ) : (
+                  <div className="space-y-3">
+                    {analytics.byDay.map((day, index) => <WarmBar key={day.day} label={day.day} count={day.count} max={maxDay} color="#C4795A" index={index} mainRef={mainRef} />)}
+                  </div>
+                )}
+              </SectionCard>
 
-            <motion.div className="glass-dark rounded-2xl p-5" style={{ borderTop:"2px solid #06b6d4" }}
-              whileHover={{ boxShadow:"0 8px 50px rgba(6,182,212,0.14)" }}
-            >
-              <div className="flex items-center gap-2 mb-5">
-                <div className="w-7 h-7 rounded-lg bg-cyan-500/20 flex items-center justify-center"><Clock size={13} className="text-cyan-400"/></div>
-                <h3 className="text-sm font-bold text-white">שעות עמוסות</h3>
-              </div>
-              {data.by_hour.length===0
-                ? <p className="text-slate-600 text-xs text-center py-10">אין נתונים עדיין</p>
-                : <div className="space-y-3">{data.by_hour.map((h,i)=><NeonBar key={h.hour} label={h.hour} count={h.count} max={maxHour} color="#06b6d4" index={i} mainRef={mainRef}/>)}</div>
-              }
-            </motion.div>
-          </motion.div>
+              <SectionCard icon={Clock} title="שעות עמוסות" subtitle="חלונות זמן שכדאי לעקוב אחריהם">
+                {analytics.byHour.length === 0 ? (
+                  <EmptyState icon={Clock} />
+                ) : (
+                  <div className="space-y-3">
+                    {analytics.byHour.map((hour, index) => <WarmBar key={hour.hour} label={hour.hour} count={hour.count} max={maxHour} color="#9B5C38" index={index} mainRef={mainRef} />)}
+                  </div>
+                )}
+              </SectionCard>
+            </Motion.div>
 
-          {/* ── Activity feed ── */}
-          <ActivityFeed recent={data.recent} mainRef={mainRef}/>
+            <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+              <ContactInquiriesShortcut
+                inquiries={contactInquiries}
+                onOpen={() => setActiveTab("inquiries")}
+              />
+            </Motion.div>
 
-          {/* Bottom spacer so last card isn't flush */}
-          <div style={{ height:32 }}/>
-        </motion.main>
+            <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+              <ActivityFeed recent={analytics.recent} mainRef={mainRef} />
+              <SectionCard icon={CalendarDays} title="קיצור לניהול" subtitle="מעבר מהיר ליומן הקליניקה">
+                <div className="rounded-3xl bg-[#FAF6F1] p-5 text-right">
+                  <p className="text-sm leading-7 text-gray-600">
+                    ניהול תורים, זמינות צוות ועדכון שעות מתבצעים במסך היומן.
+                  </p>
+                  <button type="button" onClick={() => window.location.assign("/secretary")} className="mt-5 inline-flex items-center gap-2 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-[#C4795A]/25">
+                    <CalendarDays size={17} />
+                    פתיחת יומן
+                  </button>
+                </div>
+              </SectionCard>
+            </Motion.div>
+              </>
+            ) : null}
+
+            {activeTab === "appointments" ? (
+              <AppointmentsPanel recent={analytics.recent} mainRef={mainRef} />
+            ) : null}
+
+            {activeTab === "inquiries" ? (
+              <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+                <ContactInquiriesSection
+                  inquiries={contactInquiries}
+                  onStatusChange={changeContactInquiryStatus}
+                  onFeedbackAdd={addContactInquiryNote}
+                  mainRef={mainRef}
+                />
+              </Motion.div>
+            ) : null}
+
+            {activeTab === "jobs" ? (
+              <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+                <JobApplicationsSection
+                  applications={jobApplications}
+                  onStatusChange={changeJobApplicationStatus}
+                  onFeedbackAdd={addJobApplicationNote}
+                  mainRef={mainRef}
+                />
+              </Motion.div>
+            ) : null}
+
+            {activeTab === "treatments" ? (
+              <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+                <PlaceholderPanel
+                  icon={Sparkles}
+                  title="ניהול טיפולים"
+                  text="כאן יופיע בהמשך אזור לניהול קטגוריות, טיפולים, תיאורים וזמינות להצגה באתר. בינתיים נתוני הביקוש מוצגים בלשונית ניתוח."
+                />
+              </Motion.div>
+            ) : null}
+
+            {activeTab === "analytics" ? (
+              <>
+                <Motion.div variants={fadeUp} {...inView(mainRef)} className="flex flex-col gap-3 rounded-3xl border border-white/70 bg-white/60 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap gap-2">
+                    {RANGES.map((range) => (
+                      <button
+                        key={range.key}
+                        type="button"
+                        onClick={() => setActiveRange(range.key)}
+                        className={`rounded-full px-4 py-2 text-xs font-bold transition ${activeRange === range.key ? "bg-[#C4795A] text-white shadow-lg shadow-[#C4795A]/20" : "bg-white/75 text-[#8B5030] hover:bg-[#F5EDE3]"}`}
+                      >
+                        {range.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="px-2 text-xs text-gray-400">מתעדכן אוטומטית כל דקה</p>
+                </Motion.div>
+
+                <Motion.div variants={stagger} initial="hidden" whileInView="show" viewport={{ root: mainRef, once: true }} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                  <StatCard index={0} icon={Users} label="סה״כ תורים" value={data.total ?? 0} helper="כלל ההזמנות בטווח" />
+                  <StatCard index={1} icon={Calendar} label="תורים היום" value={data.today ?? 0} helper="פעילות יומית" />
+                  <StatCard index={2} icon={TrendingUp} label="תורים השבוע" value={data.this_week ?? 0} helper="מומנטום שבועי" />
+                  <StatCard index={3} icon={Sparkles} label="סוגי טיפולים" value={analytics.byTreatment.length} helper="טיפולים עם ביקוש" />
+                </Motion.div>
+
+                <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                  <SectionCard icon={Sparkles} title="טיפולים מבוקשים" subtitle="עניין לקוחות לפי סוג טיפול">
+                    {analytics.byTreatment.length === 0 ? (
+                      <EmptyState icon={Sparkles} title="אין עדיין עניין בטיפולים" text="לאחר הזמנות ראשונות נראה כאן את הטיפולים המובילים." />
+                    ) : (
+                      <div className="space-y-3">
+                        {analytics.byTreatment.map((treatment, index) => <WarmBar key={treatment.name} label={treatment.name} count={treatment.count} max={maxTreatment} color={CHART_COLORS[index % CHART_COLORS.length]} index={index} mainRef={mainRef} />)}
+                      </div>
+                    )}
+                  </SectionCard>
+
+                  <SectionCard icon={BarChart2} title="תורים לפי קטגוריה" subtitle="חלוקה בין תחומי הטיפול">
+                    {donutSegs.length === 0 ? (
+                      <EmptyState icon={BarChart2} />
+                    ) : (
+                      <div className="flex flex-col items-center gap-5 sm:flex-row">
+                        <DonutChart segments={donutSegs} total={data.total ?? 0} />
+                        <div className="w-full flex-1 space-y-2">
+                          {donutSegs.map((segment) => (
+                            <div key={segment.label} className="flex items-center gap-2 rounded-2xl bg-[#FAF6F1] px-3 py-2">
+                              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: segment.color }} />
+                              <span className="min-w-0 flex-1 truncate text-xs font-semibold text-gray-600">{segment.label}</span>
+                              <span className="text-xs font-black tabular-nums" style={{ color: segment.color }}>{segment.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </SectionCard>
+                </Motion.div>
+
+                <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                  <SectionCard icon={Calendar} title="תורים לפי יום" subtitle="ימים עמוסים יותר ביומן">
+                    {analytics.byDay.length === 0 ? (
+                      <EmptyState icon={Calendar} />
+                    ) : (
+                      <div className="space-y-3">
+                        {analytics.byDay.map((day, index) => <WarmBar key={day.day} label={day.day} count={day.count} max={maxDay} color="#C4795A" index={index} mainRef={mainRef} />)}
+                      </div>
+                    )}
+                  </SectionCard>
+
+                  <SectionCard icon={Clock} title="שעות עמוסות" subtitle="חלונות זמן שכדאי לעקוב אחריהם">
+                    {analytics.byHour.length === 0 ? (
+                      <EmptyState icon={Clock} />
+                    ) : (
+                      <div className="space-y-3">
+                        {analytics.byHour.map((hour, index) => <WarmBar key={hour.hour} label={hour.hour} count={hour.count} max={maxHour} color="#9B5C38" index={index} mainRef={mainRef} />)}
+                      </div>
+                    )}
+                  </SectionCard>
+                </Motion.div>
+              </>
+            ) : null}
+
+            {activeTab === "settings" ? (
+              <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+                <PlaceholderPanel
+                  icon={Settings}
+                  title="הגדרות מערכת"
+                  text="כאן יתווספו בהמשך הגדרות ניהול, הרשאות, פרטי קליניקה והעדפות תצוגה. כרגע הדשבורד משתמש בהגדרות הקיימות של האתר."
+                />
+              </Motion.div>
+            ) : null}
+          </div>
+        </main>
       </div>
     </div>
   );
