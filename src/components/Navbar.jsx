@@ -55,6 +55,61 @@ function getTreatmentCategoryLinks() {
   }));
 }
 
+function LogoMark() {
+  const brown = '#3D2418';
+  const font   = '"Abril Fatface", Georgia, serif';
+  const sz     = '2.2rem';
+
+  const letter = { fontFamily: font, fontSize: sz, fontWeight: 400, color: brown, lineHeight: 1 };
+
+  const raised = {
+    display: 'inline-flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: '3px',
+    marginBottom: '-11px',
+  };
+
+  return (
+    <div style={{ direction: 'ltr', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', userSelect: 'none' }}>
+
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0px' }}>
+
+        <span style={letter}>M</span>
+
+        <span style={raised}>
+          <span style={letter}>E</span>
+          <span style={{ fontSize: '0.5rem', color: brown, lineHeight: 1 }}>✦</span>
+        </span>
+
+        <span style={letter}>D</span>
+
+        <span style={raised}>
+          <span style={letter}>A</span>
+          <span style={{ fontSize: '0.5rem', color: brown, lineHeight: 1 }}>✦</span>
+        </span>
+
+        <span style={letter}>Y</span>
+
+      </div>
+
+      {/* beauty center */}
+      <div style={{
+        fontFamily: '"Cormorant Garamond", Georgia, serif',
+        fontSize: '0.55rem',
+        fontWeight: 400,
+        color: brown,
+        letterSpacing: '0.40em',
+        marginTop: '14px',
+        opacity: 0.70,
+      }}>
+        beauty center
+      </div>
+
+    </div>
+  );
+}
+
 export default function Navbar({ onLoginClick }) {
   const [isScrolled, setIsScrolled] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
@@ -129,16 +184,20 @@ export default function Navbar({ onLoginClick }) {
   return (
     <nav
       dir="rtl"
-      className={`fixed left-0 right-0 top-0 z-50 transition-all duration-500 ${
-        isScrolled
-          ? "border-b border-accent-light bg-secondary/85 shadow-sm backdrop-blur-lg"
-          : "bg-transparent"
-      }`}
+      className="fixed left-0 right-0 top-0 z-50 transition-all duration-500"
+      style={{
+        background: isScrolled
+          ? 'rgba(245, 237, 227, 0.96)'
+          : 'rgba(245, 237, 227, 0.88)',
+        backdropFilter: 'blur(14px)',
+        borderBottom: isScrolled ? '1px solid rgba(196,121,90,0.15)' : 'none',
+        boxShadow: isScrolled ? '0 2px 20px rgba(196,121,90,0.10)' : 'none',
+      }}
     >
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="flex h-20 items-center justify-between">
-          <Link to="/" onClick={resetWindowScroll} className="font-serif text-2xl font-bold tracking-tight text-primary-dark">
-            MeDay
+          <Link to="/" onClick={resetWindowScroll} className="flex items-center flex-shrink-0">
+            <LogoMark />
           </Link>
 
           <div className="hidden items-center gap-x-8 lg:flex">
@@ -275,6 +334,9 @@ export default function Navbar({ onLoginClick }) {
 
       {isMobileMenuOpen ? (
         <div className="max-h-[calc(100vh-5rem)] space-y-4 overflow-y-auto border-t border-gray-100 bg-secondary p-6 shadow-xl animate-in slide-in-from-right duration-300 lg:hidden">
+          <div className="flex justify-center pb-2">
+            <LogoMark />
+          </div>
           {navLinks.map((link) => {
             const dropdownItems = link.isTreatmentsDropdown ? treatmentCategories : link.dropdown;
 
