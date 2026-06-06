@@ -1,484 +1,467 @@
-import React, { useRef, useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence, useMotionValue, useSpring, useTransform, useInView } from 'framer-motion';
-import { Sparkles, ArrowLeft, Heart, ShieldCheck, Zap, Star } from 'lucide-react';
-import CountUp from 'react-countup';
+import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  CalendarDays,
+  Clock,
+  CreditCard,
+  HeartHandshake,
+  MapPin,
+  Sparkles,
+} from "lucide-react";
 
-/* ─── Scan Box ─────────────────────────────────────────────────── */
-function ScanBox({ x, y, label, delay = 0, size = 52 }) {
+const Motion = motion;
+
+const pexelsPhoto = (id, width = 1800, height = 1200) =>
+  `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&w=${width}&h=${height}`;
+
+const heroSlides = [
+  {
+    src: pexelsPhoto("9718365", 2200, 1200),
+    alt: "מניקור עדין עם לק שקוף",
+    position: "object-left-center",
+  },
+  {
+    src: pexelsPhoto("6593777", 2200, 1200),
+    alt: "סטיילינג אישי וייעוץ תדמית",
+    position: "object-center",
+  },
+  {
+    src: pexelsPhoto("13965154", 2200, 1200),
+    alt: "עיצוב שיער במרכז יופי",
+    position: "object-left-center",
+  },
+  {
+    src: pexelsPhoto("7446923", 2200, 1200),
+    alt: "איפור קבוע לשפתיים",
+    position: "object-left-center",
+  },
+  {
+    src: pexelsPhoto("6663372", 2200, 1200),
+    alt: "טיפול גוף ועיסוי",
+    position: "object-left-center",
+  },
+  {
+    src: pexelsPhoto("3993449", 2200, 1200),
+    alt: "עיצוב שיער לגבר",
+    position: "object-left-center",
+  },
+];
+
+const treatmentTiles = [
+  {
+    title: "הסרת שיער",
+    href: "/categories/hair-removal",
+    image: pexelsPhoto("36930637", 900, 700),
+    variant: "image",
+  },
+  {
+    title: "טיפולי גוף",
+    href: "/categories/body-treatments",
+    image: pexelsPhoto("6663372", 900, 700),
+    variant: "teal",
+  },
+  {
+    title: "טיפולי קוסמטיקה",
+    href: "/categories/cosmetology",
+    image: pexelsPhoto("9335966", 900, 700),
+    variant: "image",
+  },
+  {
+    title: "עיצוב שיער",
+    href: "/categories/hair-design",
+    image: pexelsPhoto("18614264", 900, 700),
+    variant: "peach",
+  },
+  {
+    title: "מניקור ופדיקור",
+    href: "/categories/manicure-pedicure",
+    image: pexelsPhoto("9718365", 900, 700),
+    variant: "image",
+  },
+  {
+    title: "צילום תדמית",
+    href: "/categories/personal-styling",
+    image: pexelsPhoto("6593777", 900, 700),
+    variant: "orange",
+  },
+  {
+    title: "טיפולי אסתטיקה",
+    href: "/categories/aesthetic-treatments",
+    image: pexelsPhoto("22589552", 900, 700),
+    variant: "image",
+  },
+  {
+    title: "סטיילינג אישי",
+    href: "/categories/personal-styling",
+    image: pexelsPhoto("6593777", 900, 700),
+    variant: "white",
+  },
+  {
+    title: "איפור קבוע ועיצוב גבות",
+    href: "/categories/permanent-makeup-brows",
+    image: pexelsPhoto("7446923", 900, 700),
+    variant: "image",
+  },
+  {
+    title: "איפור מקצועי",
+    href: "/categories/professional-makeup",
+    image: pexelsPhoto("33580447", 900, 700),
+    variant: "teal",
+  },
+];
+
+const benefitItems = [
+  {
+    icon: Clock,
+    title: "חסכון בזמן",
+    text: "מידיי מציעה שירותים יעילים המאפשרים הנאה מטיפולי יופי מהשורה הראשונה מבלי להתפשר על הזמן היקר שלכם.",
+  },
+  {
+    icon: MapPin,
+    title: "הכל במקום אחד",
+    text: "משיער וציפורניים ועד טיפולי פנים וטיפולי אסתטיקה, אנו מספקים מגוון מקיף של שירותים תחת קורת גג אחת, המבטיחים את כל צרכי הטיפוח שלך.",
+  },
+  {
+    icon: CalendarDays,
+    title: "זמינות גבוהה",
+    text: "שעות הפעילות שלנו מורחבות וגמישות כולל ערבים וסופי שבוע.",
+  },
+  {
+    icon: CreditCard,
+    title: "זימון תורים אונליין",
+    text: "מערכת תורים דיגיטלית נוחה וקלה לשימוש.",
+  },
+  {
+    icon: Sparkles,
+    title: "חווית טיפול מקצועי",
+    text: "אנשי מקצוע מנוסים המספקים שירות יוצא דופן, תוך שימוש בטכניקות העדכניות ביותר ובמוצרי פרימיום כדי להבטיח שתקבלו את חווית היופי הטובה ביותר.",
+  },
+  {
+    icon: HeartHandshake,
+    title: "שירותיות",
+    text: "המחויבות שלנו להתעלות על הציפיות שלך עם תשומת לב אישית וטיפול יוצא דופן.",
+  },
+];
+
+function TreatmentTile({ tile, index, onClick }) {
+  const isImageFirst = tile.variant === "image";
+  const variantClass =
+    tile.variant === "teal"
+      ? "bg-[#4F8D96] text-[#111111]"
+      : tile.variant === "orange"
+        ? "bg-[#F48B5D] text-[#111111]"
+        : tile.variant === "peach"
+          ? "bg-[#F2D5BD] text-[#111111]"
+          : tile.variant === "white"
+            ? "bg-white text-[#111111]"
+            : "bg-[#F3EDE3] text-white";
+
   return (
-    <motion.div
-      className="absolute pointer-events-none"
-      style={{ left: `${x}%`, top: `${y}%`, transform: 'translate(-50%,-50%)' }}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ delay, duration: 0.5 }}
-    >
-      <motion.div
-        style={{ width: size, height: size }}
-        className="relative"
-        animate={{ opacity: [0.55, 1, 0.55] }}
-        transition={{ repeat: Infinity, duration: 2.6 + delay * 0.3, ease: 'easeInOut' }}
-      >
-        <div className="absolute top-0 left-0 w-3.5 h-3.5 border-t-2 border-l-2 border-white/90" />
-        <div className="absolute top-0 right-0 w-3.5 h-3.5 border-t-2 border-r-2 border-white/90" />
-        <div className="absolute bottom-0 left-0 w-3.5 h-3.5 border-b-2 border-l-2 border-white/90" />
-        <div className="absolute bottom-0 right-0 w-3.5 h-3.5 border-b-2 border-r-2 border-white/90" />
-        <motion.div
-          className="absolute left-1 right-1 h-px bg-gradient-to-r from-transparent via-[#C4795A] to-transparent"
-          animate={{ top: ['12%', '88%', '12%'] }}
-          transition={{ repeat: Infinity, duration: 1.8 + delay * 0.5, ease: 'linear' }}
-        />
-      </motion.div>
-      {label && (
-        <motion.div
-          className="absolute top-full mt-1.5 left-1/2 -translate-x-1/2 whitespace-nowrap bg-black/45 backdrop-blur-sm text-white text-[9px] font-bold tracking-widest uppercase px-2 py-0.5 rounded-full"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: delay + 0.7, duration: 0.4 }}
-        >
-          {label}
-        </motion.div>
-      )}
-    </motion.div>
-  );
-}
-
-/* ─── 3D Tilt Feature Card ────────────────────────────────────────── */
-function FeatureCard({ icon: Icon, title, desc, index, gradient }) {
-  const x = useMotionValue(0);
-  const y = useMotionValue(0);
-  const xS = useSpring(x, { stiffness: 150, damping: 20 });
-  const yS = useSpring(y, { stiffness: 150, damping: 20 });
-  const rotateX = useTransform(yS, [-0.5, 0.5], ['10deg', '-10deg']);
-  const rotateY = useTransform(xS, [-0.5, 0.5], ['-10deg', '10deg']);
-  const ref = useRef();
-  const inView = useInView(ref, { once: true, margin: '-80px' });
-
-  function handleMove(e) {
-    const r = e.currentTarget.getBoundingClientRect();
-    x.set((e.clientX - r.left - r.width  / 2) / r.width);
-    y.set((e.clientY - r.top  - r.height / 2) / r.height);
-  }
-
-  return (
-    <motion.div
-      ref={ref}
-      initial={{ opacity: 0, y: 70 }}
-      animate={inView ? { opacity: 1, y: 0 } : {}}
-      transition={{ duration: 0.75, delay: index * 0.15, ease: [0.22, 1, 0.36, 1] }}
-      onMouseMove={handleMove}
-      onMouseLeave={() => { x.set(0); y.set(0); }}
-      style={{ rotateX, rotateY, transformStyle: 'preserve-3d' }}
-      className="group relative rounded-3xl p-8 text-center cursor-default overflow-hidden"
-    >
-      <div className="absolute inset-0 rounded-3xl bg-white/70 backdrop-blur-2xl border border-white/80 shadow-2xl" />
-      <motion.div
-        className="absolute inset-0 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"
-        style={{ background: 'linear-gradient(135deg, rgba(196,121,90,0.15) 0%, rgba(232,196,160,0.10) 100%)' }}
-      />
-      <div style={{ transform: 'translateZ(28px)' }} className="relative z-10">
-        <div className={`w-20 h-20 mx-auto mb-6 rounded-2xl flex items-center justify-center shadow-lg ${gradient}`}>
-          <Icon size={36} className="text-white" />
-        </div>
-        <h3 className="text-xl font-bold text-gray-900 mb-3">{title}</h3>
-        <p className="text-gray-500 leading-relaxed text-sm">{desc}</p>
-      </div>
-    </motion.div>
-  );
-}
-
-/* ─── Gallery Image ───────────────────────────────────────────────── */
-function GalleryImage({ src, alt, caption, delay, tall }) {
-  const ref = useRef();
-  const inView = useInView(ref, { once: true, margin: '-60px' });
-  return (
-    <motion.div
-      ref={ref}
-      initial={{ opacity: 0, scale: 0.92 }}
-      animate={inView ? { opacity: 1, scale: 1 } : {}}
-      transition={{ duration: 0.6, delay, ease: [0.22, 1, 0.36, 1] }}
-      className={`group relative overflow-hidden rounded-2xl cursor-pointer ${tall ? 'row-span-2' : ''}`}
-      whileHover={{ scale: 1.02 }}
+    <Motion.button
+      type="button"
+      onClick={() => onClick(tile.href)}
+      initial={{ opacity: 0, y: 24 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "-70px" }}
+      transition={{ duration: 0.5, delay: index * 0.04 }}
+      className={`group relative h-[210px] overflow-hidden text-center md:h-[240px] ${variantClass}`}
     >
       <img
-        src={src} alt={alt}
-        className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
-        style={{ minHeight: tall ? '480px' : '230px' }}
+        src={tile.image}
+        alt={tile.title}
+        className={`absolute inset-0 h-full w-full object-cover transition-all duration-700 group-hover:scale-105 ${
+          isImageFirst ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+        }`}
         loading="lazy"
       />
-      <div className="absolute inset-0 bg-gradient-to-t from-black/65 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-400" />
-      <div className="absolute bottom-4 right-4 left-4 text-white text-center font-semibold text-sm opacity-0 group-hover:opacity-100 transition-all duration-400 translate-y-3 group-hover:translate-y-0">
-        {caption}
+      <div
+        className={`absolute inset-0 transition-colors duration-500 ${
+          isImageFirst
+            ? "bg-black/18 group-hover:bg-black/34"
+            : "bg-transparent group-hover:bg-black/34"
+        }`}
+      />
+      <div className="relative z-10 flex h-full items-center justify-center px-5">
+        <span
+          className={`text-[clamp(1.55rem,2.3vw,2.35rem)] font-black leading-tight transition-colors duration-500 ${
+            isImageFirst ? "text-white" : "text-[#111111] group-hover:text-white"
+          }`}
+        >
+          {tile.title}
+        </span>
       </div>
-    </motion.div>
+    </Motion.button>
   );
 }
 
-/* ─── Main Page ───────────────────────────────────────────────────── */
-export default function Home() {
-  const navigate = useNavigate();
-  const statsRef   = useRef();
-  const statsInView = useInView(statsRef, { once: true, margin: '-100px' });
+function HomePetalMark() {
+  return (
+    <div className="pointer-events-none absolute bottom-[-125px] right-[-55px] h-[620px] w-[760px] opacity-24 md:right-[35px]">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <span
+          key={index}
+          className="absolute left-1/2 top-1/2 h-[360px] w-[360px] origin-bottom rounded-full border-[11px] border-[#F7B084]"
+          style={{ transform: `translate(-50%, -92%) rotate(${index * 60}deg)` }}
+        />
+      ))}
+      <span className="absolute left-1/2 top-1/2 h-[360px] w-[360px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[11px] border-[#F7B084]" />
+    </div>
+  );
+}
 
-  /* carousel */
-  const slides = [
-    { src: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&w=900&q=90', alt: 'ניתוח עור AI',       type: 'scan' },
-    { src: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&w=900&q=90', alt: 'טיפול פנים',         type: 'label', badge: 'טיפול פנים מקצועי' },
-    { src: 'https://images.unsplash.com/photo-1616394584738-fc6e612e71b9?auto=format&fit=crop&w=900&q=90', alt: 'עיצוב גבות',         type: 'label', badge: 'עיצוב גבות ועיניים' },
-    { src: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?auto=format&fit=crop&w=900&q=90',   alt: 'חוויית ספא',         type: 'label', badge: 'חוויית ספא מפנקת'   },
-  ];
-  const [currentSlide, setCurrentSlide] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setCurrentSlide(s => (s + 1) % slides.length), 3500);
-    return () => clearInterval(id);
-  }, []);
-
-  const features = [
-    { icon: Heart,       title: 'טיפול מותאם אישית', desc: 'אנחנו לא רק מטפלים — אנחנו מאבחנים את הצרכים הייחודיים של העור שלך ובונים תוכנית מושלמת.', gradient: 'bg-gradient-to-br from-[#C4795A] to-[#9B5C38]' },
-    { icon: ShieldCheck, title: 'בטיחות ומקצועיות',  desc: 'כל הטיפולים נבדקו ואושרו על פי הסטנדרטים הגבוהים ביותר בעולם הקוסמטיקה.',                    gradient: 'bg-gradient-to-br from-[#E8C4A0] to-[#C4795A]' },
-    { icon: Zap,         title: 'טכנולוגיה מתקדמת',  desc: 'שימוש במכשור החדיש ביותר בעולם — לייזר, AI, ומוצרי פרמיום בלבד.',                              gradient: 'bg-gradient-to-br from-[#D4A882] to-[#9B5C38]' },
-  ];
-
-  const stats = [
-    { end: 500, suffix: '+', label: 'לקוחות מרוצות' },
-    { end: 50,  suffix: '+', label: 'סוגי טיפולים'   },
-    { end: 98,  suffix: '%', label: 'שביעות רצון'    },
-    { end: 5,   suffix: '★', label: 'דירוג ממוצע'    },
-  ];
-
-  const gallery = [
-    { src: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&w=700&q=80', alt: 'טיפול פנים',      caption: 'טיפולי פנים מקצועיים', delay: 0,   tall: true  },
-    { src: 'https://images.unsplash.com/photo-1512207736890-6ffed8a84e8d?auto=format&fit=crop&w=700&q=80', alt: 'מוצרי קוסמטיקה', caption: 'מוצרי פרמיום',          delay: 0.1, tall: false },
-    { src: 'https://images.unsplash.com/photo-1560066984-138daaa0e035?auto=format&fit=crop&w=700&q=80',   alt: 'סלון יופי',       caption: 'סביבה מפנקת',           delay: 0.2, tall: false },
-    { src: 'https://images.unsplash.com/photo-1583416750470-965b2707b355?auto=format&fit=crop&w=700&q=80', alt: 'ניקוי עמוק',      caption: 'ניקוי עמוק וחידוש',    delay: 0.3, tall: false },
-    { src: 'https://images.unsplash.com/photo-1616394584738-fc6e612e71b9?auto=format&fit=crop&w=700&q=80', alt: 'עיצוב גבות',      caption: 'עיצוב גבות ועיניים',   delay: 0.4, tall: false },
-    { src: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?auto=format&fit=crop&w=700&q=80',   alt: 'ספא',             caption: 'חוויית ספא מפנקת',      delay: 0.5, tall: true  },
-  ];
-
-  const container = { hidden: {}, visible: { transition: { staggerChildren: 0.14 } } };
-  const word = {
-    hidden:  { opacity: 0, y: 40, rotateX: -80 },
-    visible: { opacity: 1, y: 0,  rotateX: 0, transition: { duration: 0.8, ease: [0.22, 1, 0.36, 1] } },
-  };
+function BenefitItem({ item, index }) {
+  const Icon = item.icon;
 
   return (
-    <div className="min-h-screen overflow-x-hidden" dir="rtl">
+    <Motion.div
+      initial={{ opacity: 0, y: 22 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, margin: "-70px" }}
+      transition={{ duration: 0.48, delay: index * 0.06 }}
+      className="relative z-10 mx-auto max-w-[320px] text-center"
+    >
+      <div className="mx-auto mb-5 flex h-20 w-20 items-center justify-center rounded-full border-[5px] border-[#FFD9C4] text-[#FFD9C4]">
+        <Icon size={36} strokeWidth={1.8} />
+      </div>
+      <h3 className="mb-3 text-3xl font-medium leading-none text-black">{item.title}</h3>
+      <p className="text-lg font-normal leading-7 text-black">{item.text}</p>
+    </Motion.div>
+  );
+}
 
-      {/* ══ HERO ══ */}
-      <section className="relative min-h-screen overflow-hidden bg-[#FAF7F2]">
+function FlowerImage({ src, alt }) {
+  return (
+    <div className="relative mx-auto h-[340px] w-[340px] md:h-[410px] md:w-[410px]">
+      <div className="absolute left-1/2 top-0 h-[260px] w-[260px] -translate-x-1/2 overflow-hidden rounded-full md:h-[315px] md:w-[315px]">
+        <img src={src} alt={alt} className="h-full w-full object-cover" loading="lazy" />
+      </div>
+      <div className="absolute bottom-3 left-1/2 h-[170px] w-[170px] -translate-x-1/2 overflow-hidden rounded-full md:h-[205px] md:w-[205px]">
+        <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+      </div>
+      <div className="absolute bottom-20 left-4 h-[170px] w-[170px] overflow-hidden rounded-full md:bottom-24 md:h-[205px] md:w-[205px]">
+        <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+      </div>
+      <div className="absolute bottom-20 right-4 h-[170px] w-[170px] overflow-hidden rounded-full md:bottom-24 md:h-[205px] md:w-[205px]">
+        <img src={src} alt="" className="h-full w-full object-cover" loading="lazy" />
+      </div>
+    </div>
+  );
+}
 
-        {/* ── Full-bleed carousel images ── */}
+export default function Home() {
+  const navigate = useNavigate();
+  const [activeHero, setActiveHero] = useState(0);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setActiveHero((index) => (index + 1) % heroSlides.length);
+    }, 3000);
+
+    return () => clearInterval(timer);
+  }, []);
+
+  return (
+    <div className="min-h-screen overflow-x-hidden bg-[#FAF6F1] text-[#211713]" dir="rtl">
+      <section id="home" className="relative min-h-screen overflow-hidden bg-[#edf2f3] pt-[118px] lg:pt-[164px]">
         <AnimatePresence mode="wait">
-          <motion.img
-            key={currentSlide}
-            src={slides[currentSlide].src}
-            alt={slides[currentSlide].alt}
-            className="absolute inset-0 w-full h-full object-cover object-top"
-            initial={{ opacity: 0, scale: 1.04 }}
+          <Motion.img
+            key={heroSlides[activeHero].src}
+            src={heroSlides[activeHero].src}
+            alt={heroSlides[activeHero].alt}
+            className={`absolute inset-0 h-full w-full object-cover ${heroSlides[activeHero].position}`}
+            initial={{ opacity: 0, scale: 1.045 }}
             animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
+            exit={{ opacity: 0, scale: 1.025 }}
+            transition={{ duration: 0.72, ease: "easeOut" }}
+            loading={activeHero === 0 ? "eager" : "lazy"}
           />
         </AnimatePresence>
 
-        {/* ── Gradient: image fades to cream on the right (text side in RTL) ── */}
-        <div
-          className="absolute inset-0 pointer-events-none"
-          style={{
-            background: 'linear-gradient(to right, rgba(250,247,242,0) 0%, rgba(250,247,242,0.55) 42%, rgba(250,247,242,0.93) 62%, #FAF7F2 100%)',
-          }}
-        />
-        {/* bottom fade */}
-        <div className="absolute inset-0 bg-gradient-to-t from-[#FAF7F2]/60 via-transparent to-transparent pointer-events-none" />
+        <div className="absolute inset-0 bg-white/52" />
+        <div className="absolute bottom-0 left-0 top-[118px] w-full bg-gradient-to-r from-transparent via-[#edf2f3]/76 to-white/96 lg:top-[164px]" />
 
-        {/* ── Scan boxes (slide 0 only) ── */}
-        <AnimatePresence>
-          {currentSlide === 0 && (
-            <motion.div
-              key="scans"
-              className="absolute inset-0 pointer-events-none"
-              style={{ zIndex: 5 }}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.5 }}
+        <div className="relative z-10 mx-auto flex min-h-[calc(100vh-118px)] max-w-7xl items-center justify-center px-5 pb-12 text-center lg:min-h-[calc(100vh-164px)] lg:px-14">
+          <div className="mr-auto max-w-3xl lg:ml-12">
+            <Motion.h1
+              initial={{ opacity: 0, y: 26 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.8, ease: [0.22, 1, 0.36, 1] }}
+              className="font-serif text-[clamp(4.8rem,10vw,10rem)] font-black leading-[0.82] tracking-normal text-[#231713]"
             >
-              <ScanBox x={28} y={25} label="קמטים"    delay={0}   size={52} />
-              <ScanBox x={40} y={38} label="כתמים"    delay={0.3} size={46} />
-              <ScanBox x={30} y={55} label="נקבוביות" delay={0.6} size={44} />
-              <ScanBox x={42} y={68} label="לחות"     delay={0.9} size={38} />
-            </motion.div>
-          )}
-        </AnimatePresence>
-
-        {/* ── Text overlay (right side in RTL) ── */}
-        <div className="relative z-10 min-h-screen flex items-center" style={{ paddingTop: '5rem' }}>
-          <div className="w-full container mx-auto px-6">
-            <div className="flex justify-start">
-              <div className="w-full md:w-[48%] lg:w-[42%] text-right py-12">
-
-                {/* Badge */}
-                <motion.div
-                  initial={{ opacity: 0, y: -14 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.6, delay: 0.2 }}
-                  className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-[#C4795A]/35 text-[#9B5C38] text-xs font-bold mb-8"
-                  style={{ background: 'rgba(196,121,90,0.09)' }}
-                >
-                  <Sparkles size={12} />
-                  <span>MeDay Beauty Center</span>
-                  <Sparkles size={12} />
-                </motion.div>
-
-                {/* Title */}
-                <motion.div
-                  variants={container}
-                  initial="hidden"
-                  animate="visible"
-                  className="mb-6"
-                  style={{ perspective: '800px' }}
-                >
-                  <motion.h1
-                    variants={word}
-                    className="block font-black text-gray-900 leading-[1.0]"
-                    style={{ fontSize: 'clamp(3rem, 5.5vw, 5.5rem)' }}
-                  >
-                    העור שלך
-                  </motion.h1>
-                  <motion.h1
-                    variants={word}
-                    className="block font-black leading-[1.05] mt-1"
-                    style={{
-                      fontSize: 'clamp(3rem, 5.5vw, 5.5rem)',
-                      background: 'linear-gradient(135deg, #C4795A 0%, #9B5C38 100%)',
-                      WebkitBackgroundClip: 'text',
-                      WebkitTextFillColor: 'transparent',
-                      backgroundClip: 'text',
-                    }}
-                  >
-                    בידיים מקצועיות
-                  </motion.h1>
-                </motion.div>
-
-                {/* Subtitle */}
-                <motion.p
-                  initial={{ opacity: 0, y: 18 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.8, delay: 0.65 }}
-                  className="text-sm text-gray-500 mb-9 leading-relaxed"
-                >
-                  טכנולוגיה חדישה · AI חכם · ידיים מנוסות = התוצאה המושלמת
-                </motion.p>
-
-                {/* Buttons */}
-                <motion.div
-                  initial={{ opacity: 0, y: 18 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.8, delay: 0.85 }}
-                  className="flex flex-col sm:flex-row gap-3 justify-end"
-                >
-                  <motion.button
-                    onClick={() => navigate('/categories')}
-                    whileHover={{ scale: 1.05, boxShadow: '0 8px 28px rgba(196,121,90,0.40)' }}
-                    whileTap={{ scale: 0.97 }}
-                    className="px-7 py-4 rounded-full font-bold text-white text-sm flex items-center gap-2 shadow-md"
-                    style={{ background: 'linear-gradient(135deg, #C4795A, #9B5C38)' }}
-                  >
-                    <span>לכל הטיפולים</span>
-                    <ArrowLeft size={16} />
-                  </motion.button>
-
-                  <motion.button
-                    onClick={() => { const b = document.querySelector('button[title="Ask MeDay"]'); if (b) b.click(); }}
-                    whileHover={{ scale: 1.05 }}
-                    whileTap={{ scale: 0.97 }}
-                    className="px-7 py-4 rounded-full font-bold text-[#9B5C38] text-sm border border-[#C4795A]/35 bg-white/80 backdrop-blur-sm flex items-center gap-2 shadow-sm"
-                  >
-                    <span>התחילי AI</span>
-                    <Sparkles size={16} className="text-[#C4795A]" />
-                  </motion.button>
-                </motion.div>
-
-              </div>
-            </div>
+              MeDay
+            </Motion.h1>
+            <Motion.p
+              initial={{ opacity: 0, y: 18 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.7, delay: 0.14 }}
+              className="mt-6 text-3xl font-medium text-black md:text-4xl"
+            >
+              תעשי לך את היום
+            </Motion.p>
+            <Motion.button
+              type="button"
+              onClick={() => navigate("/categories")}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.7, delay: 0.26 }}
+              className="mt-8 inline-flex items-center justify-center bg-[#4F8D96] px-12 py-3 text-3xl font-black leading-none text-white transition-all hover:-translate-y-0.5 hover:bg-[#3f7b84]"
+              style={{ borderRadius: 3 }}
+            >
+              לתיאום תור
+            </Motion.button>
           </div>
         </div>
 
-        {/* ── Slide badge (bottom-center over image) ── */}
-        <div className="absolute bottom-16 left-0 right-0 flex justify-center z-10 pointer-events-none">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={`badge-${currentSlide}`}
-              className="bg-white/85 backdrop-blur-md border border-[#E8C4A0]/50 shadow-lg rounded-2xl px-5 py-2.5 flex items-center gap-3 whitespace-nowrap"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -6 }}
-              transition={{ duration: 0.35 }}
-            >
-              {currentSlide === 0 ? (
-                <>
-                  <motion.div
-                    className="w-2 h-2 rounded-full bg-emerald-400"
-                    animate={{ opacity: [1, 0.3, 1] }}
-                    transition={{ repeat: Infinity, duration: 1.4 }}
-                  />
-                  <span className="text-xs font-bold text-gray-700" dir="rtl">AI סורק</span>
-                  <span className="text-gray-300 text-xs">|</span>
-                  <span className="text-xs text-gray-400" dir="rtl">4 אזורים זוהו</span>
-                </>
-              ) : (
-                <>
-                  <div className="w-2 h-2 rounded-full bg-[#C4795A]" />
-                  <span className="text-xs font-bold text-gray-700" dir="rtl">{slides[currentSlide].badge}</span>
-                </>
-              )}
-            </motion.div>
-          </AnimatePresence>
-        </div>
-
-        {/* ── Navigation dots ── */}
-        <div className="absolute bottom-7 left-0 right-0 flex justify-center gap-2 z-10">
-          {slides.map((_, i) => (
+        <div className="absolute inset-x-0 bottom-7 z-20 flex justify-center gap-2">
+          {heroSlides.map((slide, index) => (
             <button
-              key={i}
-              onClick={() => setCurrentSlide(i)}
-              className="rounded-full transition-all duration-300"
+              key={slide.src}
+              type="button"
+              aria-label={`תמונת פתיחה ${index + 1}`}
+              onClick={() => setActiveHero(index)}
+              className="h-2 transition-all"
               style={{
-                width:      i === currentSlide ? '1.5rem' : '0.5rem',
-                height:     '0.5rem',
-                background: i === currentSlide ? '#C4795A' : 'rgba(196,121,90,0.35)',
+                width: activeHero === index ? 34 : 10,
+                borderRadius: 99,
+                background: activeHero === index ? "#4F8D96" : "rgba(79,141,150,0.32)",
               }}
             />
           ))}
         </div>
-
-        {/* ── Scroll indicator ── */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 2.5 }}
-          className="absolute bottom-7 right-8 flex flex-col items-center gap-1.5 z-10"
-        >
-          <span className="text-[#9B5C38]/40 text-[9px] tracking-[0.3em] uppercase">גלול</span>
-          <motion.div
-            animate={{ y: [0, 6, 0] }}
-            transition={{ repeat: Infinity, duration: 1.6 }}
-            className="w-4 h-7 rounded-full border border-[#C4795A]/30 flex items-start justify-center pt-1"
-          >
-            <div className="w-0.5 h-1.5 bg-[#C4795A]/40 rounded-full" />
-          </motion.div>
-        </motion.div>
-
       </section>
 
-      {/* ══ STATS ══ */}
-      <section ref={statsRef} className="py-20 bg-white">
-        <div className="container mx-auto px-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-10">
-            {stats.map((s, i) => (
-              <motion.div key={i}
-                initial={{ opacity: 0, scale: 0.4 }}
-                animate={statsInView ? { opacity: 1, scale: 1 } : {}}
-                transition={{ duration: 0.55, delay: i * 0.1, type: 'spring', stiffness: 160 }}
-                className="text-center"
-              >
-                <div
-                  className="text-5xl md:text-6xl font-black mb-2 tabular-nums"
-                  style={{ background: 'linear-gradient(135deg, #C4795A 0%, #9B5C38 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}
-                >
-                  {statsInView ? <CountUp end={s.end} duration={2} delay={i * 0.1} suffix={s.suffix} /> : `0${s.suffix}`}
-                </div>
-                <div className="text-gray-500 font-medium text-sm">{s.label}</div>
-              </motion.div>
-            ))}
-          </div>
+      <section className="relative overflow-hidden bg-[#dedede] py-16 md:py-20">
+        <div className="pointer-events-none absolute left-[28%] top-5 hidden text-[#F48B5D] md:block">
+          <span className="absolute text-xl">✦</span>
+          <span className="absolute left-7 top-8 text-3xl">✦</span>
+          <span className="absolute left-16 top-11 text-xl">✦</span>
+          <span className="absolute left-4 top-16 text-2xl">✦</span>
         </div>
-      </section>
 
-      {/* ══ FEATURES ══ */}
-      <section className="py-28 bg-gradient-to-b from-[#FAF6F1] via-[#F5EDE3]/30 to-[#FAF6F1]">
-        <div className="container mx-auto px-6">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.7 }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-4xl md:text-5xl font-black text-gray-900 mb-4">
-              למה לבחור ב
-              <span style={{ background: 'linear-gradient(135deg, #C4795A, #9B5C38)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>MeDay</span>
-              ?
-            </h2>
-            <p className="text-lg text-gray-400 max-w-lg mx-auto">כי אנחנו מאמינות שכל אחת מגיעה לטיפול הטוב ביותר</p>
-          </motion.div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8" style={{ perspective: '1200px' }}>
-            {features.map((f, i) => <FeatureCard key={i} {...f} index={i} />)}
-          </div>
-        </div>
-      </section>
-
-      {/* ══ GALLERY ══ */}
-      <section className="py-28 bg-[#F5EDE3]/40">
-        <div className="container mx-auto px-6">
-          <motion.div
-            initial={{ opacity: 0, y: 30 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.7 }}
-            className="text-center mb-16"
-          >
-            <h2 className="text-4xl md:text-5xl font-black text-gray-900 mb-4">
-              גלריית
-              <span style={{ background: 'linear-gradient(135deg, #C4795A, #9B5C38)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}> יופי</span>
-            </h2>
-            <p className="text-lg text-gray-400">הצצה לעולם הקוסמטיקה שלנו</p>
-          </motion.div>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-4" style={{ gridAutoRows: '230px' }}>
-            {gallery.map((img, i) => <GalleryImage key={i} {...img} />)}
-          </div>
-        </div>
-      </section>
-
-      {/* ══ CTA ══ */}
-      <section className="py-28 relative overflow-hidden bg-[#1A0E06]">
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[700px] h-[700px] bg-[#C4795A]/12 rounded-full blur-[130px]" />
-          <div className="absolute top-1/2 left-1/3 -translate-y-1/2 w-[400px] h-[400px] bg-[#E8C4A0]/08 rounded-full blur-[100px]" />
-        </div>
-        {[...Array(18)].map((_, i) => (
-          <motion.div key={i} className="absolute w-1 h-1 rounded-full bg-white/20"
-            style={{ top: `${Math.random() * 100}%`, left: `${Math.random() * 100}%` }}
-            animate={{ opacity: [0.2, 0.7, 0.2], scale: [1, 1.5, 1] }}
-            transition={{ duration: 2 + Math.random() * 3, repeat: Infinity, delay: Math.random() * 2 }}
-          />
-        ))}
-        <div className="relative z-10 container mx-auto px-6 text-center">
-          <motion.div initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.85 }}>
-            <div className="flex justify-center gap-1 mb-6">
-              {[...Array(5)].map((_, i) => (
-                <motion.div key={i} initial={{ opacity: 0, scale: 0 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} transition={{ delay: i * 0.1, type: 'spring' }}>
-                  <Star size={24} className="fill-[#C4795A] text-[#C4795A]" />
-                </motion.div>
-              ))}
-            </div>
-            <h2 className="text-4xl md:text-6xl font-black text-white mb-6 leading-tight">
-              מוכנה להתחיל את<br />
-              <span style={{ background: 'linear-gradient(135deg, #C4795A 0%, #E8C4A0 50%, #F2C4A0 100%)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>
-                מסע היופי שלך?
-              </span>
-            </h2>
-            <p className="text-lg text-white/50 mb-12 max-w-lg mx-auto leading-relaxed">
-              תני לנו לדאוג לעורך — תוצאות ראשונות שתרגישי כבר מהטיפול הראשון.
+        <div className="relative z-10 mx-auto max-w-7xl px-5 md:px-10 lg:px-14">
+          <div className="mb-10 text-center">
+            <p className="font-serif text-[clamp(4.3rem,7vw,6.7rem)] uppercase leading-[0.72] tracking-normal text-white">
+              WHY CHOOSE US?
             </p>
-            <motion.button
-              onClick={() => navigate('/categories')}
-              whileHover={{ scale: 1.06, boxShadow: '0 0 50px rgba(196,121,90,0.45)' }}
-              whileTap={{ scale: 0.96 }}
-              className="px-12 py-5 rounded-full font-bold text-lg text-white shadow-2xl"
-              style={{ background: 'linear-gradient(135deg, #C4795A, #9B5C38)' }}
-            >
-              גלי את כל הטיפולים ←
-            </motion.button>
-          </motion.div>
+            <h2 className="-mt-2 text-4xl font-black leading-none text-[#4F8D96] md:text-5xl">
+              למה לבחור בנו?
+            </h2>
+          </div>
+
+          <div className="grid items-center gap-10 md:grid-cols-[1.05fr_0.95fr]">
+            <div className="mx-auto max-w-[620px] text-center text-black">
+              <h3 className="mb-7 text-3xl font-medium leading-tight text-[#F48B5D]">
+                מעצבים את חווית הטיפוח שלך מחדש
+              </h3>
+              <p className="mb-6 text-xl leading-8">
+                המרכז הוקם מתוך חשיבה עמוקה ובשיתוף עם אנשי מקצוע
+                מבריקים בתחום היופי בארץ ובעולם!
+              </p>
+
+              <div className="space-y-5 text-xl leading-7">
+                {[
+                  "אצלנו תנהלו את שגרת הטיפוח בקלות ובנעימים, לשירותכם טיפולים משולבים ב-4 ידיים, זמינות גבוהה של 14 שעות ביום כולל סופי שבוע!",
+                  "אנשי מקצוע שנבחרו בקפידה ועברו הכשרות מקצועיות על ידי טובי המאסטרים המובילים בתחומם.",
+                  "כל הטיפולים במרכז מבוצעים על פי פרוטוקול מקצועי קפדני.",
+                  "במידיי תמצאו את הטרנדים הכי עדכניים בעולם, מכשור חדשני וחומרים איכותיים.",
+                ].map((line) => (
+                  <div key={line} className="flex items-start justify-center gap-3">
+                    <span className="mt-1 text-[#F48B5D]">✦</span>
+                    <p>{line}</p>
+                  </div>
+                ))}
+              </div>
+
+              <p className="mx-auto mt-7 max-w-[570px] text-xl font-black leading-7">
+                מחכים לך במידיי, מרחב חם ומזמין של יופי ואסתטיקה, פינת אירוח מפנקת והכי חשוב,
+                אנשי מקצוע עם חיוך שפשוט אוהבים אנשים!
+              </p>
+            </div>
+
+            <FlowerImage
+              src={pexelsPhoto("7705849", 760, 760)}
+              alt="מניקור עדין עם לק שקוף"
+            />
+          </div>
         </div>
       </section>
 
+      <section id="about" className="relative overflow-hidden bg-[#F48B5D] py-20 md:py-24">
+        <HomePetalMark />
+        <div className="relative z-10 mx-auto grid max-w-7xl grid-cols-1 gap-x-14 gap-y-14 px-5 md:grid-cols-3 md:px-10 lg:px-14">
+          {benefitItems.map((item, index) => (
+            <BenefitItem key={item.title} item={item} index={index} />
+          ))}
+        </div>
+        <div className="relative z-10 mt-14 text-center">
+          <button
+            type="button"
+            onClick={() => navigate("/categories")}
+            className="inline-flex items-center justify-center bg-[#4F8D96] px-12 py-3 text-3xl font-black leading-none text-white transition-all hover:-translate-y-0.5 hover:bg-[#3f7b84]"
+            style={{ borderRadius: 3 }}
+          >
+            לתיאום תור
+          </button>
+        </div>
+      </section>
+
+      <section id="treatments" className="bg-white">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5">
+          {treatmentTiles.map((tile, index) => (
+            <TreatmentTile
+              key={tile.title}
+              tile={tile}
+              index={index}
+              onClick={(href) => navigate(href)}
+            />
+          ))}
+        </div>
+      </section>
+
+      <section className="relative overflow-hidden bg-[#dedede]">
+        <div className="mx-auto grid min-h-[400px] max-w-7xl items-end px-5 pt-12 md:grid-cols-[1fr_1.15fr] md:px-10 lg:px-14">
+          <div className="relative order-2 flex h-[260px] items-end justify-center md:order-1 md:h-[390px]">
+            <div className="absolute bottom-0 h-[330px] w-[520px] max-w-full overflow-hidden rounded-t-[48%] rounded-br-[46%] rounded-bl-[28%] md:h-[390px]">
+              <img
+                src={pexelsPhoto("7290669", 900, 760)}
+                alt="מברשות איפור מקצועיות"
+                className="h-full w-full object-cover grayscale"
+                loading="lazy"
+              />
+              <div className="absolute inset-0 bg-white/18" />
+            </div>
+          </div>
+
+          <div className="relative order-1 pb-12 text-center md:order-2 md:pb-20">
+            <div className="pointer-events-none absolute -top-10 left-12 hidden text-[#F48B5D] md:block">
+              <span className="absolute text-3xl">✦</span>
+              <span className="absolute left-8 top-9 text-4xl">✦</span>
+              <span className="absolute left-20 top-14 text-2xl">✦</span>
+              <span className="absolute left-4 top-20 text-3xl">✦</span>
+            </div>
+            <p className="font-serif text-[clamp(4.6rem,7vw,6.8rem)] uppercase leading-[0.72] tracking-normal text-white">
+              OUR GOALS
+            </p>
+            <h2 className="-mt-2 text-4xl font-black leading-none text-[#4F8D96] md:text-5xl">
+              המטרות שלנו
+            </h2>
+            <p className="mx-auto mt-9 max-w-[560px] text-lg font-medium leading-7 text-black">
+              מידיי דוגלת ביצירת חוויה נעימה ומרגשת שבה תוכלו להתרגש ולהתפנק.
+              חשוב לנו לייצר מקום שיענה בצורה הטובה ביותר לצרכים שלכם כאשר כל
+              הטיפולים במקום אחד ולחסוך לכם זמן ומאמץ.
+            </p>
+            <button
+              type="button"
+              onClick={() => navigate("/categories")}
+              className="mt-10 inline-flex items-center justify-center bg-[#4F8D96] px-12 py-3 text-3xl font-black leading-none text-white transition-all hover:-translate-y-0.5 hover:bg-[#3f7b84]"
+              style={{ borderRadius: 3 }}
+            >
+              לתיאום תור
+            </button>
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

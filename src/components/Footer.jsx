@@ -1,118 +1,86 @@
-import React from 'react';
-import { Mail, Phone, MapPin, Instagram, Facebook, Clock, MessageCircle } from 'lucide-react';
+import React from "react";
+import { Facebook, Instagram, MessageCircle } from "lucide-react";
+
+function PetalMark() {
+  return (
+    <div className="pointer-events-none absolute bottom-[-115px] right-[70px] hidden h-[430px] w-[520px] opacity-22 md:block">
+      {Array.from({ length: 6 }).map((_, index) => (
+        <span
+          key={index}
+          className="absolute left-1/2 top-1/2 h-[250px] w-[250px] origin-bottom rounded-full border-[10px] border-[#F7B084]"
+          style={{ transform: `translate(-50%, -90%) rotate(${index * 60}deg)` }}
+        />
+      ))}
+      <span className="absolute left-1/2 top-1/2 h-[250px] w-[250px] -translate-x-1/2 -translate-y-1/2 rounded-full border-[10px] border-[#F7B084]" />
+    </div>
+  );
+}
 
 export default function Footer() {
   return (
-    <footer className="bg-primary-dark text-white py-16">
-      <div className="container mx-auto px-6">
-        {/* Main Footer Content */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-12 mb-12">
-          {/* Contact Info */}
-          <div className="text-center md:text-right">
-            <h3 className="text-2xl font-bold mb-6 text-accent-light">צור קשר</h3>
-            
-            <div className="space-y-4">
-              {/* WhatsApp */}
-              <div className="flex items-center justify-center md:justify-start gap-3 hover:text-accent-light transition-colors">
-                <a href="https://wa.me/97248306544" className="w-10 h-10 bg-green-500 hover:bg-green-600 text-white rounded-full flex items-center justify-center transition-all duration-300 transform hover:scale-110">
-                  <MessageCircle size={20} />
-                </a>
-                <span className="font-semibold">WhatsApp</span>
-              </div>
+    <footer id="contact" dir="rtl" className="relative overflow-hidden bg-[#F48B5D] text-black">
+      <PetalMark />
 
-              {/* Phone */}
-              <div className="flex items-center justify-center md:justify-start gap-3 hover:text-accent-light transition-colors">
-                <a href="tel:*6931" className="w-10 h-10 bg-accent-light/20 hover:bg-accent-light hover:text-primary-dark text-white rounded-full flex items-center justify-center transition-all duration-300 transform hover:scale-110">
-                  <Phone size={20} />
-                </a>
-                <span className="font-semibold">טלפון</span>
-              </div>
-
-              {/* Email */}
-              <div className="flex items-center justify-center md:justify-start gap-3 hover:text-accent-light transition-colors">
-                <Mail size={20} />
-                <a href="mailto:Ranin.meday@gmail.com" className="font-semibold">
-                  Ranin.meday@gmail.com
-                </a>
-              </div>
-
-              {/* Address */}
-              <div className="flex items-start justify-center md:justify-start gap-3 hover:text-accent-light transition-colors">
-                <MapPin size={20} className="flex-shrink-0 mt-1" />
-                <div className="font-semibold">
-                  <p>שד. הנשיא 99, חיפה</p>
-                  <p className="text-sm text-accent-light/80">קרוב לבן גוריון</p>
-                </div>
-              </div>
-            </div>
+      <div className="relative z-10 mx-auto grid min-h-[335px] max-w-7xl items-center gap-10 px-5 py-12 md:grid-cols-[1fr_1.08fr] md:px-10 lg:px-14">
+        <div className="text-center text-[22px] font-bold leading-8 md:pr-20">
+          <div className="mb-4 flex items-center justify-center gap-3">
+            <a
+              href="https://wa.me/97248306544"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="WhatsApp"
+              className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-[#03B55B] text-white shadow-sm"
+            >
+              <MessageCircle size={23} className="fill-white" />
+            </a>
+            <span className="h-6 w-px bg-black" />
+            <a href="tel:*3691" className="font-black tracking-wide">
+              *3691
+            </a>
           </div>
 
-          {/* Hours */}
-          <div className="text-center">
-            <h3 className="text-2xl font-bold mb-6 text-accent-light">שעות פתיחה</h3>
-            
-            <div className="space-y-3 inline-block">
-              <div className="flex items-center gap-2">
-                <Clock size={18} />
-                <span className="font-semibold">ראשון - חמישי:</span>
-              </div>
-              <p className="text-accent-light/90 ml-7">08:30 - 20:00</p>
+          <p>ראשון-חמישי: 08:30-20:00</p>
+          <p>שישי : 08:30-15:00</p>
+          <p>שד. הנשיא 99, חיפה</p>
+          <a href="mailto:Ranin.meday@gmail.com" className="mt-4 block font-medium">
+            Ranin.meday@gmail.com
+          </a>
 
-              <div className="flex items-center gap-2 mt-4">
-                <Clock size={18} />
-                <span className="font-semibold">שישי:</span>
-              </div>
-              <p className="text-accent-light/90 ml-7">08:30 - 15:00</p>
-
-              <div className="flex items-center gap-2 mt-4">
-                <Clock size={18} />
-                <span className="font-semibold">שבת:</span>
-              </div>
-              <p className="text-accent-light/90 ml-7">סגור</p>
-            </div>
-          </div>
-
-          {/* Social & Branding */}
-          <div className="text-center md:text-left">
-            <h3 className="text-2xl font-bold mb-6 text-accent-light">עקבי אחרינו</h3>
-            
-            <div className="flex justify-center md:justify-start gap-6 mb-8">
-              <a
-                href="https://www.instagram.com/meday_beautycenter/?igsh=eTJjMjVxamh1bDlq"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-12 h-12 bg-accent-light/20 hover:bg-accent-light hover:text-primary-dark text-white rounded-full flex items-center justify-center transition-all duration-300 transform hover:scale-110"
-              >
-                <Instagram size={24} />
-              </a>
-              <a
-                href="https://www.facebook.com/profile.php?id=61559205189105"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-12 h-12 bg-accent-light/20 hover:bg-accent-light hover:text-primary-dark text-white rounded-full flex items-center justify-center transition-all duration-300 transform hover:scale-110"
-              >
-                <Facebook size={24} />
-              </a>
-            </div>
-
-            <p className="text-accent-light/90 font-light">
-              MeDay Beauty Center
-            </p>
-            <p className="text-accent-light/70 text-sm">
-              הנכם בטוחות בידיים המקצועיות ביותר
-            </p>
+          <div className="mt-8 flex justify-center gap-7 text-white">
+            <a
+              href="https://www.instagram.com/meday_beautycenter/?igsh=eTJjMjVxamh1bDlq"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Instagram"
+              className="transition-transform hover:-translate-y-0.5"
+            >
+              <Instagram size={22} />
+            </a>
+            <a
+              href="https://www.facebook.com/profile.php?id=61559205189105"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="Facebook"
+              className="transition-transform hover:-translate-y-0.5"
+            >
+              <Facebook size={21} className="fill-white" />
+            </a>
           </div>
         </div>
 
-        {/* Divider */}
-        <div className="border-t border-accent-light/20 pt-8"></div>
-
-        {/* Copyright */}
-        <div className="text-center">
-          <p className="text-accent-light/80 font-light">
-            © כל הזכויות שמורות למידיי
-          </p>
+        <div className="mx-auto w-full max-w-[520px]">
+          <iframe
+            title="MeDay location map"
+            src="https://maps.google.com/maps?q=%D7%A9%D7%93%D7%A8%D7%95%D7%AA%20%D7%94%D7%A0%D7%A9%D7%99%D7%90%2099%20%D7%97%D7%99%D7%A4%D7%94&t=&z=15&ie=UTF8&iwloc=&output=embed"
+            className="h-[190px] w-full border-0 bg-white shadow-sm"
+            loading="lazy"
+            referrerPolicy="no-referrer-when-downgrade"
+          />
         </div>
+      </div>
+
+      <div className="relative z-10 pb-7 text-center text-xl font-medium">
+        © כל הזכויות שמורות למידיי
       </div>
     </footer>
   );

@@ -1,14 +1,17 @@
+const pexelsPhoto = (id, width = 1200, height = 900) =>
+  `https://images.pexels.com/photos/${id}/pexels-photo-${id}.jpeg?auto=compress&cs=tinysrgb&w=${width}&h=${height}`;
+
 export const cosmeticSections = [
   {
     id: "classic",
     title: "טיפולי פנים קלאסיים",
     subtitle: "ניקוי עמוק, איזון, מיצוק ואנטי אייג'ינג",
-    image: "/treatment-classic.jpg",
+    image: pexelsPhoto("9335966"),
     treatments: [
       {
         id: "classic-meday",
         name: "מידיי קלאסי",
-        image: "/treatment-classic.jpg",
+        image: pexelsPhoto("9335966"),
         lines: [
           "טיפול פנים קלאסי הכולל ניקוי עמוק ויסודי.",
           "פילינג, ניקוי קומודונים, טיהור וחיטוי העור תוך איזון הלחות.",
@@ -19,7 +22,7 @@ export const cosmeticSections = [
       {
         id: "man-t",
         name: "מידיי קלאסי לגבר Man T",
-        image: "/treatment-classic.jpg",
+        image: pexelsPhoto("16131206"),
         lines: [
           "טיפול יופי קלאסי לגבר המותאם אישית לעור הגברי.",
           "טיפול מאזן, מנקה מרגיע ומשקם.",
@@ -34,12 +37,12 @@ export const cosmeticSections = [
     id: "pamper",
     title: "טיפולי פנים מפנקים",
     subtitle: "לזוהר, הרגעה ופינוק",
-    image: "/treatment-pamper.jpg",
+    image: pexelsPhoto("5308655"),
     treatments: [
       {
         id: "face-sculpt",
         name: "מידיי FACE SCULPT עיסוי מעצב",
-        image: "/treatment-pamper.jpg",
+        image: pexelsPhoto("5308655"),
         lines: [
           "עיסוי פנים קוסמטי מפנק להרמה, מיצוק ושיפור קווי המתאר של הפנים.",
           "טיפול עיסוי ייחודי המתאים לעור עייף.",
@@ -50,7 +53,7 @@ export const cosmeticSections = [
       {
         id: "party",
         name: "מידיי PARTY",
-        image: "/treatment-pamper.jpg",
+        image: pexelsPhoto("3985331"),
         lines: [
           "טיפול יופי טכנולוגי מושלם לפני אירוע.",
           "כולל ניקוי, חידוש, הזנה ולחות.",
@@ -65,12 +68,12 @@ export const cosmeticSections = [
     id: "tech-special",
     title: "טיפולי פנים טכנולוגיים מיוחדים",
     subtitle: "טכנולוגיות מתקדמות לחידוש ומיצוק",
-    image: "/treatment-tech.jpg",
+    image: pexelsPhoto("29908196"),
     treatments: [
       {
         id: "meso-pro",
         name: "מידיי MESO PRO",
-        image: "/meso-pro.jpg",
+        image: pexelsPhoto("29908196"),
         lines: [
           "טיפול מזותרפיה קוסמטית מתקדם למיצוק, מתיחה, הבהרה ואנטי אייג'ינג.",
           "שימוש במחטים זעירות להחדרת חומרים פעילים לעומק העור.",
@@ -81,7 +84,7 @@ export const cosmeticSections = [
       {
         id: "lifting-pro",
         name: "מידיי LIFTING PRO",
-        image: "/lifting-pro.jpg",
+        image: pexelsPhoto("22589552"),
         lines: [
           "טיפול בגלי רדיו למיצוק ושיפור מרקם העור.",
           "מתיחה ועיצוב הפנים באמצעות טכנולוגיית גלי רדיו.",
@@ -92,7 +95,7 @@ export const cosmeticSections = [
       {
         id: "collagen-plus",
         name: "מידיי COLLAGEN + קולגן פלוס",
-        image: "/collagen-plus.jpg",
+        image: pexelsPhoto("36930637"),
         lines: [
           "טיפול בטכנולוגיית IPL Rejuvenation לחידוש טוטאלי של העור.",
           "למראה מוצק, חלק ואחיד באמצעות המכשור המתקדם ביותר.",
@@ -103,7 +106,7 @@ export const cosmeticSections = [
       {
         id: "stop-acne",
         name: "אקנה סטופ STOP ACNE",
-        image: "/stop-acne.jpg",
+        image: pexelsPhoto("7446671"),
         lines: [
           "טיפול מתקדם בטכנולוגיית IPL Acne להעלמת אקנה ולהפחתת דלקתיות.",
           "מונע פצעונים וצלקות.",
@@ -114,7 +117,7 @@ export const cosmeticSections = [
       {
         id: "clear-skin-plus",
         name: "מידיי CLEAR SKIN + ניקוי העור פלוס",
-        image: "/clear-skin.jpg",
+        image: pexelsPhoto("3985323"),
         lines: [
           "טיפול לעור זוהר וקורן עם ניקוי יסודי משולב בפילינג עדין.",
           "לשיפור מרקם העור ולהבהרת הפנים.",
@@ -125,7 +128,7 @@ export const cosmeticSections = [
       {
         id: "new-skin",
         name: "פילינג סידרתי NEW SKIN",
-        image: "/treatment-tech.jpg",
+        image: pexelsPhoto("3985331"),
         lines: [
           "סדרת טיפולי פילינג מתקדמים המותאמים אישית.",
           "לטיפול באקנה, פיגמנטציה והזדקנות העור.",
@@ -136,7 +139,7 @@ export const cosmeticSections = [
       {
         id: "skin-booster",
         name: "הצערת העור SKIN BOOSTER",
-        image: "/treatment-tech.jpg",
+        image: pexelsPhoto("9335966"),
         lines: [
           "טיפול אנטי-אייג'ינג עוצמתי עם תכשירים קוסמטיים מתקדמים.",
           "למתיחה, מילוי וחידוש העור.",

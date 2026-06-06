@@ -9,6 +9,7 @@ import SecretaryPage from "./pages/SecretaryPage";
 import AdminDashboard from "./pages/AdminDashboard";
 import ServiceCategoryPage from "./pages/ServiceCategoryPage";
 import ServiceTreatmentDetailsPage from "./pages/ServiceTreatmentDetailsPage";
+import RecruitmentPage from "./pages/RecruitmentPage";
 
 function AppContent() {
   const location = useLocation();
@@ -28,6 +29,7 @@ function AppContent() {
           />
           <Route path="/treatments" element={<Navigate to="/categories/cosmetology" replace />} />
           <Route path="/treatments/:id" element={<TreatmentDetailsPage />} />
+          <Route path="/recruitment" element={<RecruitmentPage />} />
           <Route path="/secretary" element={<SecretaryPage />} />
           <Route path="/admin" element={<AdminDashboard />} />
         </Routes>
