@@ -5,18 +5,25 @@ import CountUp from "react-countup";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, addContactInquiryFeedback, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
 import { JOB_APPLICATION_EVENT, JOB_APPLICATIONS_STORAGE_KEY, getJobApplications, updateJobApplicationStatus, addJobApplicationFeedback } from "../api/jobsApi";
-import { fetchAnalytics } from "../api/medayApi";
+import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl } from "../api/medayApi";
 import {
   Activity,
+  AlertCircle,
   BarChart2,
   Bell,
   Briefcase,
   Calendar,
   CalendarDays,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   Clock,
+  Database,
   Download,
   CheckCircle2,
+  Eye,
+  EyeOff,
+  FileText,
   Home,
   MessageCircle,
   RefreshCw,
@@ -24,6 +31,7 @@ import {
   Settings,
   Sparkles,
   TrendingUp,
+  Upload,
   Users,
 } from "lucide-react";
 
@@ -449,6 +457,265 @@ function ActivityFeed({ recent, mainRef }) {
             </Motion.div>
           ))
         )}
+      </div>
+    </SectionCard>
+  );
+}
+
+const KB_FILES = [
+  {
+    type: "treatments",
+    label: "טיפולים",
+    filename: "Treatments.xlsx",
+    description: "מידע על הטיפולים, קטגוריות, התוויות נגד ותשובות לשאלות נפוצות",
+  },
+  {
+    type: "questions",
+    label: "שאלות ותשובות",
+    filename: "questions.xlsx",
+    description: "שאלות ותשובות ספציפיות לכל טיפול שהצ'אטבוט משתמש בהן",
+  },
+  {
+    type: "category_questions",
+    label: "שאלות לפי קטגוריה",
+    filename: "category_questions.xlsx",
+    description: "אילו שאלות הצ'אטבוט שואל לכל קטגוריה, באיזה סדר, עם אילו אפשרויות, ואיזה שדות נדרשים לפני המלצה",
+  },
+];
+
+function KnowledgeBasePanel({ mainRef }) {
+  const [info, setInfo] = useState([]);
+  const [preview, setPreview] = useState(null);
+  const [loadingPreview, setLoadingPreview] = useState(null);
+  const [uploading, setUploading] = useState(null);
+  const [uploadMsg, setUploadMsg] = useState({});
+  const [refreshing, setRefreshing] = useState(false);
+  const fileInputRefs = useRef({});
+
+  const loadInfo = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      const data = await getExcelInfo();
+      setInfo(data);
+    } catch {
+      // silently ignore on initial load failure
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  useEffect(() => { loadInfo(); }, [loadInfo]);
+
+  const handleUpload = useCallback(async (fileType, file) => {
+    setUploading(fileType);
+    setUploadMsg((prev) => ({ ...prev, [fileType]: null }));
+    try {
+      const result = await uploadExcel(fileType, file);
+      setUploadMsg((prev) => ({
+        ...prev,
+        [fileType]: { ok: true, text: `הועלה בהצלחה — ${result.rows} שורות` },
+      }));
+      await loadInfo();
+      if (preview?.file_type === fileType) setPreview(null);
+    } catch (e) {
+      setUploadMsg((prev) => ({
+        ...prev,
+        [fileType]: { ok: false, text: e.message },
+      }));
+    } finally {
+      setUploading(null);
+      if (fileInputRefs.current[fileType]) fileInputRefs.current[fileType].value = "";
+    }
+  }, [loadInfo, preview]);
+
+  const togglePreview = useCallback(async (fileType) => {
+    if (preview?.file_type === fileType) { setPreview(null); return; }
+    setLoadingPreview(fileType);
+    try {
+      const data = await getExcelPreview(fileType);
+      setPreview({ file_type: fileType, ...data });
+    } catch {
+      setPreview(null);
+    } finally {
+      setLoadingPreview(null);
+    }
+  }, [preview]);
+
+  const infoByType = useMemo(() =>
+    Object.fromEntries((info || []).map((i) => [i.file_type, i])), [info]);
+
+  return (
+    <SectionCard
+      icon={Database}
+      title="בסיס הידע של הצ'אטבוט"
+      subtitle="ניהול קובצי Excel שהצ'אטבוט מסתמך עליהם למתן תשובות"
+      className="lg:col-span-3"
+    >
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+        {KB_FILES.map((cfg) => {
+          const meta = infoByType[cfg.type];
+          const msg = uploadMsg[cfg.type];
+          const isUploading = uploading === cfg.type;
+          const isPreviewing = preview?.file_type === cfg.type;
+          const isLoadingPreview = loadingPreview === cfg.type;
+
+          return (
+            <div
+              key={cfg.type}
+              className="rounded-2xl border border-[#E8C4A0]/60 bg-[#FAF6F1] p-4 text-right"
+            >
+              {/* Header */}
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="flex items-start gap-2 text-right">
+                  <div>
+                    <p className="text-sm font-extrabold text-gray-900">{cfg.label}</p>
+                    <p className="text-xs text-gray-500">{cfg.filename}</p>
+                  </div>
+                </div>
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#C4795A]/10 text-[#C4795A]">
+                  {createElement(FileText, { size: 18 })}
+                </div>
+              </div>
+
+              {/* Meta info */}
+              <p className="mb-3 text-xs leading-5 text-gray-500">{cfg.description}</p>
+              {meta && (
+                <div className="mb-3 flex flex-wrap gap-2 text-right">
+                  <span className="rounded-lg bg-white px-2 py-1 text-xs font-semibold text-gray-600 shadow-sm">
+                    {meta.rows} שורות
+                  </span>
+                  {meta.last_modified && (
+                    <span className="rounded-lg bg-white px-2 py-1 text-xs text-gray-400 shadow-sm">
+                      עודכן {new Date(meta.last_modified).toLocaleDateString("he-IL")}
+                    </span>
+                  )}
+                  <span className="rounded-lg bg-white px-2 py-1 text-xs text-gray-400 shadow-sm">
+                    {meta.size_kb} KB
+                  </span>
+                </div>
+              )}
+
+              {/* Feedback message */}
+              {msg && (
+                <div className={`mb-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ${msg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>
+                  {createElement(msg.ok ? CheckCircle2 : AlertCircle, { size: 14 })}
+                  <span>{msg.text}</span>
+                </div>
+              )}
+
+              {/* Action buttons */}
+              <div className="flex flex-wrap items-center gap-2">
+                {/* Upload */}
+                <label
+                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold shadow-sm transition-all ${
+                    isUploading
+                      ? "bg-gray-100 text-gray-400 cursor-not-allowed"
+                      : "bg-[#C4795A] text-white hover:bg-[#9B5C38]"
+                  }`}
+                >
+                  {createElement(isUploading ? RefreshCw : Upload, {
+                    size: 13,
+                    className: isUploading ? "animate-spin" : "",
+                  })}
+                  {isUploading ? "מעלה..." : "העלאת קובץ"}
+                  <input
+                    ref={(el) => { fileInputRefs.current[cfg.type] = el; }}
+                    type="file"
+                    accept=".xlsx"
+                    className="sr-only"
+                    disabled={isUploading}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleUpload(cfg.type, file);
+                    }}
+                  />
+                </label>
+
+                {/* Preview toggle */}
+                <button
+                  onClick={() => togglePreview(cfg.type)}
+                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#C4795A]/30 bg-white px-3 py-2 text-xs font-bold text-[#C4795A] shadow-sm transition-all hover:bg-[#FDF3ED]"
+                  disabled={isLoadingPreview}
+                >
+                  {createElement(isLoadingPreview ? RefreshCw : isPreviewing ? EyeOff : Eye, {
+                    size: 13,
+                    className: isLoadingPreview ? "animate-spin" : "",
+                  })}
+                  {isPreviewing ? "סגור תצוגה" : "תצוגה מקדימה"}
+                </button>
+
+                {/* Download */}
+                {meta?.rows > 0 && (
+                  <a
+                    href={getExcelDownloadUrl(cfg.type)}
+                    download={cfg.filename}
+                    className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-600 shadow-sm transition-all hover:bg-gray-50"
+                  >
+                    {createElement(Download, { size: 13 })}
+                    הורדה
+                  </a>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Preview table */}
+      {preview && (
+        <Motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0 }}
+          className="mt-5 overflow-hidden rounded-2xl border border-[#E8C4A0]/60"
+        >
+          <div className="flex items-center justify-between bg-[#FAF6F1] px-4 py-3 text-right">
+            <button
+              onClick={() => setPreview(null)}
+              className="text-xs text-gray-400 hover:text-gray-600"
+            >
+              {createElement(ChevronUp, { size: 14 })}
+            </button>
+            <p className="text-xs font-bold text-gray-600">
+              {KB_FILES.find((f) => f.type === preview.file_type)?.label} — מציג {preview.rows.length} מתוך {preview.total_rows} שורות
+            </p>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-right text-xs" dir="rtl">
+              <thead>
+                <tr className="border-b border-[#E8C4A0]/40 bg-[#FDF3ED]">
+                  {preview.columns.map((col) => (
+                    <th key={col} className="whitespace-nowrap px-3 py-2 font-bold text-[#8B5030]">
+                      {col}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {preview.rows.map((row, i) => (
+                  <tr key={i} className={`border-b border-[#E8C4A0]/20 ${i % 2 === 0 ? "bg-white" : "bg-[#FAF6F1]"}`}>
+                    {preview.columns.map((col) => (
+                      <td key={col} className="max-w-[180px] truncate px-3 py-2 text-gray-600">
+                        {String(row[col] ?? "")}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </Motion.div>
+      )}
+
+      {/* Reload button */}
+      <div className="mt-4 flex justify-end">
+        <button
+          onClick={loadInfo}
+          className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-[#C4795A]"
+        >
+          {createElement(RefreshCw, { size: 13, className: refreshing ? "animate-spin" : "" })}
+          רענן מידע
+        </button>
       </div>
     </SectionCard>
   );
@@ -1173,6 +1440,7 @@ export default function AdminDashboard() {
 
             {activeTab === "settings" ? (
               <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+                <KnowledgeBasePanel mainRef={mainRef} />
                 <PlaceholderPanel
                   icon={Settings}
                   title="הגדרות מערכת"

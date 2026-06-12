@@ -1,15 +1,20 @@
-import { createElement, useState } from "react";
+import { createElement, useState, useEffect } from "react";
 import {
   AlertCircle,
   CalendarDays,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Edit3,
+  History,
   MessageCircle,
   Sparkles,
   UserRound,
 } from "lucide-react";
 import ClientProfile from "../components/ClientProfile";
+import RecommendationWidget from "../components/RecommendationWidget";
 import { useAuth } from "../context/useAuth";
+import { getChatSessions } from "../api/medayApi";
 
 function ClientActionButton({ children, icon: Icon, variant = "secondary", ...props }) {
   const className =
@@ -29,13 +34,129 @@ function ClientActionButton({ children, icon: Icon, variant = "secondary", ...pr
   );
 }
 
+function ChatHistoryPanel({ sessions, loading }) {
+  const [expanded, setExpanded] = useState(null);
+
+  if (loading) {
+    return (
+      <div className="rounded-[2rem] border border-white/75 bg-white/85 p-8 shadow-2xl shadow-[#9B5C38]/10">
+        <div className="flex items-center gap-3">
+          <History size={22} className="text-primary" />
+          <h2 className="font-serif text-2xl font-black text-[#3d2e1a]">היסטוריית שיחות</h2>
+        </div>
+        <p className="mt-4 text-sm text-gray-500">טוענת שיחות...</p>
+      </div>
+    );
+  }
+
+  if (!sessions.length) {
+    return (
+      <div className="rounded-[2rem] border border-white/75 bg-white/85 p-8 shadow-2xl shadow-[#9B5C38]/10">
+        <div className="flex items-center gap-3">
+          <History size={22} className="text-primary" />
+          <h2 className="font-serif text-2xl font-black text-[#3d2e1a]">היסטוריית שיחות</h2>
+        </div>
+        <p className="mt-4 text-sm text-gray-500">עדיין לא ניהלת שיחות ייעוץ. פתחי את הצ׳אט בעמוד הבית כדי להתחיל.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-[2rem] border border-white/75 bg-white/85 shadow-2xl shadow-[#9B5C38]/10 overflow-hidden">
+      <div className="bg-gradient-meday px-6 py-5 text-white">
+        <div className="flex items-center gap-3">
+          <History size={22} />
+          <h2 className="font-serif text-2xl font-black">היסטוריית שיחות ייעוץ</h2>
+        </div>
+        <p className="mt-1 text-sm text-white/80">{sessions.length} שיחות נשמרו</p>
+      </div>
+
+      <div className="divide-y divide-gray-100">
+        {sessions.map((session) => {
+          const isOpen = expanded === session.id;
+          const date = new Date(session.created_at).toLocaleDateString("he-IL", {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+            hour: "2-digit",
+            minute: "2-digit",
+          });
+          const profileEntries = Object.entries(session.skin_profile || {});
+          const botMessages = session.messages.filter((m) => m.from === "bot");
+          const preview = botMessages[botMessages.length - 1]?.text?.slice(0, 100) ?? "";
+
+          return (
+            <div key={session.id}>
+              <button
+                type="button"
+                onClick={() => setExpanded(isOpen ? null : session.id)}
+                className="flex w-full items-start justify-between gap-4 px-6 py-4 text-right transition hover:bg-primary/5"
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                      {session.category ?? "ייעוץ כללי"}
+                    </span>
+                    <span className="text-xs text-gray-400">{date}</span>
+                  </div>
+                  <p className="text-sm text-gray-600 truncate">{preview}...</p>
+                  {profileEntries.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {profileEntries.map(([k, v]) => (
+                        <span key={k} className="text-[11px] bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">
+                          {k}: {v}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+                {isOpen ? <ChevronUp size={18} className="text-gray-400 shrink-0 mt-1" /> : <ChevronDown size={18} className="text-gray-400 shrink-0 mt-1" />}
+              </button>
+
+              {isOpen && (
+                <div className="border-t border-gray-100 bg-gray-50/60 px-6 py-4 space-y-3 max-h-80 overflow-y-auto">
+                  {session.messages.map((msg, idx) => (
+                    <div key={idx} className={`flex ${msg.from === "user" ? "justify-end" : "justify-start"}`}>
+                      <div
+                        className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
+                          msg.from === "user"
+                            ? "bg-primary text-white rounded-tl-none"
+                            : "bg-white border border-pink-100 text-gray-800 rounded-tr-none shadow-sm"
+                        }`}
+                      >
+                        {msg.text}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function ClientArea() {
   const { user, getClientProfile, updateClientProfile } = useAuth();
-  const [profile, setProfile] = useState(() => getClientProfile(user?.username));
+  const [profile, setProfile] = useState(() => user?.isGoogle ? null : getClientProfile(user?.username));
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [isEditOpen, setIsEditOpen] = useState(false);
-  const displayName = profile?.fullName || user?.fullName || user?.username || "";
+  const [chatSessions, setChatSessions] = useState([]);
+  const [sessionsLoading, setSessionsLoading] = useState(false);
+
+  useEffect(() => {
+    if (user?.isGoogle) {
+      setSessionsLoading(true);
+      getChatSessions()
+        .then(setChatSessions)
+        .catch(() => {})
+        .finally(() => setSessionsLoading(false));
+    }
+  }, [user]);
+  const displayName = user?.fullName || profile?.fullName || user?.username || "";
 
   const saveProfile = (updates) => {
     setMessage("");
@@ -99,7 +220,7 @@ export default function ClientArea() {
             </div>
           </div>
 
-          {profile ? (
+          {(profile || user?.isGoogle) ? (
             <div className="flex flex-col gap-3 px-5 py-5 sm:flex-row sm:flex-wrap sm:px-8 lg:px-10">
               <ClientActionButton
                 icon={CalendarDays}
@@ -111,12 +232,14 @@ export default function ClientArea() {
               <ClientActionButton icon={MessageCircle} onClick={openAiConsultation}>
                 ייעוץ AI
               </ClientActionButton>
-              <ClientActionButton
-                icon={Edit3}
-                onClick={() => setIsEditOpen(true)}
-              >
-                עריכת פרופיל
-              </ClientActionButton>
+              {profile && (
+                <ClientActionButton
+                  icon={Edit3}
+                  onClick={() => setIsEditOpen(true)}
+                >
+                  עריכת פרופיל
+                </ClientActionButton>
+              )}
             </div>
           ) : null}
         </header>
@@ -142,7 +265,7 @@ export default function ClientArea() {
             isEditOpen={isEditOpen}
             onEditClose={() => setIsEditOpen(false)}
           />
-        ) : (
+        ) : !user?.isGoogle ? (
           <div className="rounded-[2rem] border border-white/75 bg-white/85 p-8 text-center shadow-2xl shadow-[#9B5C38]/10">
             <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary-dark">
               <UserRound size={28} />
@@ -154,6 +277,16 @@ export default function ClientArea() {
             <p className="mx-auto mt-4 max-w-xl text-sm leading-7 text-gray-600">
               כדאי להירשם מחדש דרך כפתור הכניסה כדי ליצור פרופיל מלא עם פרטי קשר והעדפות טיפול.
             </p>
+          </div>
+        ) : null}
+
+        {user?.isGoogle && (
+          <ChatHistoryPanel sessions={chatSessions} loading={sessionsLoading} />
+        )}
+
+        {user?.isGoogle && (
+          <div className="rounded-[2rem] border border-white/75 bg-white/85 p-8 shadow-2xl shadow-[#9B5C38]/10">
+            <RecommendationWidget limit={4} />
           </div>
         )}
       </div>

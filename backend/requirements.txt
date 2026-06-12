@@ -5,3 +5,6 @@ openpyxl
 groq
 python-dotenv
 requests
+google-auth
+PyJWT
+python-multipart

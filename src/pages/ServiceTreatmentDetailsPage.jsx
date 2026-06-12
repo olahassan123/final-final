@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { Link, useParams } from "react-router-dom";
+import RecommendationWidget from "../components/RecommendationWidget";
 import {
   ArrowRight, Clock, MessageCircle, ShieldCheck, Sparkles,
   Stethoscope, CheckCircle2, CalendarDays, ChevronRight,
@@ -429,6 +430,8 @@ export default function ServiceTreatmentDetailsPage() {
 
           </aside>
         </div>
+
+        <RecommendationWidget accent={accent} limit={4} />
       </div>
 
     </div>

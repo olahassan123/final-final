@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Lock, LogIn, UserPlus, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { GoogleLogin } from "@react-oauth/google";
 import ClientRegisterForm from "./ClientRegisterForm";
 import { useAuth } from "../context/useAuth";
 
@@ -16,7 +17,7 @@ export default function LoginModal({ onClose }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const bodyRef = useRef(null);
-  const { login, registerClient } = useAuth();
+  const { login, registerClient, googleLogin } = useAuth();
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -47,6 +48,15 @@ export default function LoginModal({ onClose }) {
 
   const handleRegister = (profile) => {
     completeAuth(registerClient(profile));
+  };
+
+  const handleGoogleSuccess = async (response) => {
+    try {
+      const result = await googleLogin(response.credential);
+      completeAuth(result);
+    } catch {
+      setError("שגיאה בכניסה עם גוגל. אנא נסי שוב.");
+    }
   };
 
   return (
@@ -84,6 +94,22 @@ export default function LoginModal({ onClose }) {
         </div>
 
         <div ref={bodyRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+          <div className="flex flex-col items-center gap-3 px-6 pt-6">
+            <GoogleLogin
+              onSuccess={handleGoogleSuccess}
+              onError={() => setError("שגיאה בכניסה עם גוגל")}
+              text="signin_with"
+              shape="pill"
+              locale="he"
+              width="320"
+            />
+            <div className="flex w-full items-center gap-3 text-xs text-gray-400">
+              <div className="h-px flex-1 bg-gray-200" />
+              <span>או המשיכי עם שם משתמש</span>
+              <div className="h-px flex-1 bg-gray-200" />
+            </div>
+          </div>
+
           {mode === "login" ? (
             <form onSubmit={handleLogin} className="space-y-4 p-6">
               <div>

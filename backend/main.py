@@ -1,17 +1,68 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Header, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 import pandas as pd
 from typing import Optional, List, Dict
 from pydantic import BaseModel
 from groq import Groq
 import os
+import shutil
 import sqlite3
 import json
 import re
 from pathlib import Path
 from dotenv import load_dotenv
+from datetime import datetime, timedelta, timezone
+import jwt
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
 
 load_dotenv()
+
+# ------------------------------------------------------------
+# Auth config
+# ------------------------------------------------------------
+JWT_SECRET = os.getenv("JWT_SECRET", "meday-jwt-secret-change-in-production")
+JWT_ALGORITHM = "HS256"
+JWT_EXPIRE_DAYS = 30
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
+
+
+def create_jwt(user_id: int, email: str, name: str) -> str:
+    payload = {
+        "sub": str(user_id),
+        "email": email,
+        "name": name,
+        "exp": datetime.now(timezone.utc) + timedelta(days=JWT_EXPIRE_DAYS),
+    }
+    return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def decode_jwt(token: str) -> dict:
+    return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+
+
+async def get_current_user(authorization: Optional[str] = Header(None)) -> Optional[dict]:
+    if not authorization or not authorization.startswith("Bearer "):
+        return None
+    try:
+        payload = decode_jwt(authorization.split(" ", 1)[1])
+        return {"id": int(payload["sub"]), "email": payload["email"], "name": payload["name"]}
+    except Exception:
+        return None
+
+
+def verify_google_token(credential: str) -> dict:
+    request = google_requests.Request()
+    audience = GOOGLE_CLIENT_ID if GOOGLE_CLIENT_ID and GOOGLE_CLIENT_ID != "your-google-client-id-here" else None
+    id_info = id_token.verify_oauth2_token(credential, request, audience)
+    return {
+        "google_id": id_info["sub"],
+        "email": id_info["email"],
+        "name": id_info.get("name", ""),
+        "picture": id_info.get("picture", ""),
+    }
+
 
 # ------------------------------------------------------------
 # App setup
@@ -89,6 +140,41 @@ def load_treatments() -> List[Dict]:
     return treatments
 
 
+def load_category_fields():
+    path = EXCEL_DIR / "category_questions.xlsx"
+    if not path.exists():
+        return {}, {}
+    df = pd.read_excel(path).fillna("").sort_values(["קטגוריה", "סדר"])
+    category_fields: Dict[str, List[Dict]] = {}
+    minimum_fields: Dict[str, List[str]] = {}
+    for _, row in df.iterrows():
+        cat = to_text(row.get("קטגוריה", ""))
+        field = to_text(row.get("שדה", ""))
+        if not cat or not field:
+            continue
+        opts_raw = to_text(row.get("אפשרויות", ""))
+        guidance_raw = to_text(row.get("הנחיה", ""))
+        is_min = to_text(row.get("מינימום_נדרש", "לא")).strip() in ("כן", "yes", "true", "1")
+        category_fields.setdefault(cat, []).append({
+            "field": field,
+            "priority": to_text(row.get("עדיפות", "medium")) or "medium",
+            "question": to_text(row.get("שאלה", "")),
+            "options": [o.strip() for o in opts_raw.split(",") if o.strip()],
+            "guidance": guidance_raw or None,
+        })
+        if is_min:
+            minimum_fields.setdefault(cat, [])
+            if field not in minimum_fields[cat]:
+                minimum_fields[cat].append(field)
+    if "_default" not in category_fields:
+        category_fields["_default"] = [
+            {"field": "goal", "priority": "high", "question": "מה המטרה שלך?", "options": [], "guidance": None},
+            {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?", "options": ["כן", "לא"], "guidance": None},
+        ]
+        minimum_fields["_default"] = ["goal"]
+    return category_fields, minimum_fields
+
+
 TREATMENTS = load_treatments()
 
 # ── Hardcoded extra categories not yet in the Excel ──────────
@@ -132,110 +218,106 @@ def get_treatment(treatment_id: str):
 
 
 # ------------------------------------------------------------
+# Admin – Excel knowledge-base management
+# ------------------------------------------------------------
+_EXCEL_FILES = {
+    "treatments": "Treatments.xlsx",
+    "questions": "questions.xlsx",
+    "category_questions": "category_questions.xlsx",
+}
+
+
+@app.get("/admin/excel/info")
+def admin_excel_info():
+    result = []
+    for file_type, filename in _EXCEL_FILES.items():
+        path = EXCEL_DIR / filename
+        if path.exists():
+            stat = path.stat()
+            try:
+                df = pd.read_excel(path)
+                rows = len(df)
+                columns = list(df.columns)
+            except Exception:
+                rows, columns = 0, []
+            result.append({
+                "file_type": file_type,
+                "filename": filename,
+                "rows": rows,
+                "columns": columns,
+                "last_modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                "size_kb": round(stat.st_size / 1024, 1),
+            })
+        else:
+            result.append({
+                "file_type": file_type,
+                "filename": filename,
+                "rows": 0,
+                "columns": [],
+                "last_modified": None,
+                "size_kb": 0,
+            })
+    return result
+
+
+@app.get("/admin/excel/preview/{file_type}")
+def admin_excel_preview(file_type: str):
+    if file_type not in _EXCEL_FILES:
+        raise HTTPException(status_code=400, detail="Invalid file type")
+    path = EXCEL_DIR / _EXCEL_FILES[file_type]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    df = pd.read_excel(path).fillna("")
+    return {
+        "columns": list(df.columns),
+        "rows": df.head(20).to_dict(orient="records"),
+        "total_rows": len(df),
+    }
+
+
+@app.post("/admin/excel/upload")
+async def admin_excel_upload(file_type: str = Form(...), file: UploadFile = File(...)):
+    global TREATMENTS, TREATMENT_MAP, CATEGORY_FIELDS, MINIMUM_FIELDS
+    if file_type not in _EXCEL_FILES:
+        raise HTTPException(status_code=400, detail="Invalid file type")
+    if not (file.filename or "").endswith(".xlsx"):
+        raise HTTPException(status_code=400, detail="Only .xlsx files are accepted")
+    path = EXCEL_DIR / _EXCEL_FILES[file_type]
+    with open(path, "wb") as f:
+        shutil.copyfileobj(file.file, f)
+    if file_type in ("treatments", "questions"):
+        TREATMENTS = load_treatments()
+        _existing = {t["id"] for t in TREATMENTS}
+        for _t in _EXTRA_TREATMENTS:
+            if _t["id"] not in _existing:
+                TREATMENTS.append(_t)
+        TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
+    elif file_type == "category_questions":
+        CATEGORY_FIELDS, MINIMUM_FIELDS = load_category_fields()
+    df = pd.read_excel(path)
+    return {"success": True, "rows": len(df), "filename": _EXCEL_FILES[file_type]}
+
+
+@app.get("/admin/excel/download/{file_type}")
+def admin_excel_download(file_type: str):
+    if file_type not in _EXCEL_FILES:
+        raise HTTPException(status_code=400, detail="Invalid file type")
+    path = EXCEL_DIR / _EXCEL_FILES[file_type]
+    if not path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    return FileResponse(
+        path=str(path),
+        filename=_EXCEL_FILES[file_type],
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+# ------------------------------------------------------------
 # Category field registry
 # Defines what to ask per category and how to guide "I don't know"
 # TODO: Replace with category_questions.xlsx once prepared
 # ------------------------------------------------------------
-CATEGORY_FIELDS: Dict[str, List[Dict]] = {
-    "טיפולי פנים": [
-        {
-            "field": "goal",
-            "priority": "high",
-            "question": "מה המטרה הראשית שלך?",
-            "options": ["אקנה", "לחות", "זוהר", "אנטי-אייג'ינג", "פיגמנטציה", "ריענון כללי"],
-            "guidance": None,
-        },
-        {
-            "field": "skin_type",
-            "priority": "high",
-            "question": "מה סוג העור שלך?",
-            "options": ["שמן", "יבש", "מעורב", "רגיש", "נורמלי"],
-            "guidance": "שאלי על תחושת העור אחרי שטיפת פנים, האם יש ברק אחרי שעה-שעתיים, ואם יש נטייה לקשקשים או אודם",
-        },
-        {
-            "field": "age_range",
-            "priority": "medium",
-            "question": "מה טווח הגיל שלך?",
-            "options": ["עד 25", "25-40", "40+"],
-            "guidance": None,
-        },
-        {
-            "field": "pregnant",
-            "priority": "critical",
-            "question": "את בהריון או מניקה כרגע?",
-            "options": ["כן", "לא"],
-            "guidance": None,
-        },
-    ],
-    "לייזר": [
-        {
-            "field": "area",
-            "priority": "high",
-            "question": "באיזה אזור מעוניינת בטיפול לייזר?",
-            "options": ["פנים", "גוף", "ביקיני", "רגליים", "בית שחי"],
-            "guidance": None,
-        },
-        {
-            "field": "skin_tone",
-            "priority": "high",
-            "question": "מה גוון העור שלך?",
-            "options": ["בהיר מאוד", "בהיר", "בינוני", "כהה"],
-            "guidance": "שאלי האם העור משחיר בקלות בשמש, ומה קורה אחרי חשיפה לשמש - האם משחיר ואז מחוויר או נשאר כהה",
-        },
-        {
-            "field": "hair_color",
-            "priority": "high",
-            "question": "מה צבע השיער באזור הטיפול?",
-            "options": ["שחור / כהה מאוד", "חום כהה", "חום בהיר", "בלונד / אדמוני / אפור"],
-            "guidance": None,
-        },
-        {
-            "field": "pregnant",
-            "priority": "critical",
-            "question": "את בהריון או מניקה כרגע?",
-            "options": ["כן", "לא"],
-            "guidance": None,
-        },
-    ],
-    "מניקור ופדיקור": [
-        {
-            "field": "service_type",
-            "priority": "high",
-            "question": "מה את מחפשת?",
-            "options": ["מניקור רגיל", "לק גל", "עיצוב ציפורניים", "פדיקור אסתטי", "פדיקור טיפולי"],
-            "guidance": None,
-        },
-    ],
-    "_default": [
-        {
-            "field": "goal",
-            "priority": "high",
-            "question": "מה המטרה שלך?",
-            "options": [],
-            "guidance": None,
-        },
-        {
-            "field": "pregnant",
-            "priority": "critical",
-            "question": "את בהריון או מניקה?",
-            "options": ["כן", "לא"],
-            "guidance": None,
-        },
-    ],
-}
-
-# Minimum fields that must be filled before a recommendation is made
-MINIMUM_FIELDS: Dict[str, List[str]] = {
-    "טיפולי פנים": ["goal", "skin_type", "pregnant"],
-    "קוסמטיקה": ["goal", "skin_type", "pregnant"],
-    "טיפולי קוסמטיקה": ["goal", "skin_type", "pregnant"],
-    "לייזר": ["area", "pregnant"],
-    "מניקור ופדיקור": ["service_type"],
-    "_default": ["goal"],
-}
-
-CATEGORY_FIELDS["קוסמטיקה"] = CATEGORY_FIELDS["טיפולי פנים"]
-CATEGORY_FIELDS["טיפולי קוסמטיקה"] = CATEGORY_FIELDS["טיפולי פנים"]
+CATEGORY_FIELDS, MINIMUM_FIELDS = load_category_fields()
 
 
 # ------------------------------------------------------------
@@ -778,15 +860,32 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # Add end_time column if it doesn't exist (migration for existing DB)
-    try:
-        conn.execute("ALTER TABLE appointments ADD COLUMN end_time TEXT")
-    except Exception:
-        pass
-    try:
-        conn.execute("ALTER TABLE appointments ADD COLUMN employee_name TEXT")
-    except Exception:
-        pass
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            google_id TEXT UNIQUE NOT NULL,
+            email TEXT NOT NULL,
+            name TEXT,
+            picture TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS chat_sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            messages TEXT NOT NULL,
+            skin_profile TEXT,
+            category TEXT,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+    """)
+    for col in ["end_time", "employee_name", "user_id"]:
+        try:
+            conn.execute(f"ALTER TABLE appointments ADD COLUMN {col} TEXT")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -905,6 +1004,226 @@ def get_analytics():
         "by_hour": [{"hour": f"{r['hour']}:00", "count": r["count"]} for r in by_hour],
         "recent": [dict(r) for r in recent],
     }
+
+# ------------------------------------------------------------
+# Recommendation engine
+# ------------------------------------------------------------
+
+def score_treatment(treatment: dict, profile: dict) -> float:
+    text = " ".join(filter(None, [
+        treatment.get("suitable_for_all_skins", ""),
+        treatment.get("keywords", ""),
+        treatment.get("aftercare", ""),
+        treatment.get("results_timing", ""),
+        treatment.get("category", ""),
+        treatment.get("class_name", ""),
+    ])).lower()
+
+    limitations = (treatment.get("medical_limitations") or "").lower()
+    pregnancy_text = (treatment.get("pregnancy_breastfeeding") or "").lower()
+
+    score = 0.0
+
+    goal = (profile.get("goal") or "").lower()
+    if goal and goal in text:
+        score += 3.0
+
+    skin_type = (profile.get("skin_type") or "").lower()
+    if skin_type and skin_type in text:
+        score += 2.5
+
+    age = (profile.get("age_range") or "").lower()
+    if age and age in text:
+        score += 1.0
+
+    area = (profile.get("area") or "").lower()
+    if area and area in text:
+        score += 2.0
+
+    skin_tone = (profile.get("skin_tone") or "").lower()
+    if skin_tone:
+        if skin_tone in limitations:
+            score -= 5.0
+        elif skin_tone in text:
+            score += 1.5
+
+    pregnant = profile.get("pregnant", "")
+    if pregnant == "כן":
+        if "הריון" in limitations or "הנקה" in limitations:
+            score -= 10.0
+        if pregnancy_text and "לא" in pregnancy_text:
+            score -= 5.0
+
+    return score
+
+
+@app.get("/recommendations")
+def get_recommendations(
+    exclude_id: Optional[str] = None,
+    limit: int = 4,
+    current_user: Optional[dict] = Depends(get_current_user),
+):
+    profile = {}
+    preferred_category = None
+
+    if current_user:
+        conn = get_db()
+        row = conn.execute(
+            "SELECT skin_profile, category FROM chat_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
+            (current_user["id"],),
+        ).fetchone()
+        conn.close()
+        if row:
+            profile = json.loads(row["skin_profile"] or "{}")
+            preferred_category = row["category"]
+
+    candidates = [t for t in TREATMENTS if t["id"] != exclude_id]
+
+    if profile:
+        scored = [(t, score_treatment(t, profile)) for t in candidates]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        top = [t for t, s in scored if s > 0][:limit]
+        if len(top) < limit:
+            extras = [t for t, _ in scored if t not in top][: limit - len(top)]
+            top = top + extras
+    else:
+        conn = get_db()
+        rows = conn.execute(
+            "SELECT treatment_id, COUNT(*) as cnt FROM appointments GROUP BY treatment_id ORDER BY cnt DESC LIMIT 20"
+        ).fetchall()
+        conn.close()
+        popular_ids = {r["treatment_id"] for r in rows}
+        popular = [t for t in candidates if t["id"] in popular_ids]
+        rest = [t for t in candidates if t["id"] not in popular_ids]
+        if preferred_category:
+            rest = sorted(rest, key=lambda t: 0 if t.get("class_name") == preferred_category else 1)
+        top = (popular + rest)[:limit]
+
+    return [
+        {
+            "id": t["id"],
+            "name": t["name"],
+            "class_name": t.get("class_name", ""),
+            "category": t.get("category", ""),
+            "description": (t.get("suitable_for_all_skins") or t.get("aftercare") or "")[:100],
+        }
+        for t in top
+    ]
+
+
+# ------------------------------------------------------------
+# Auth endpoints
+# ------------------------------------------------------------
+
+class GoogleAuthRequest(BaseModel):
+    credential: str
+
+
+@app.post("/auth/google")
+def google_auth(body: GoogleAuthRequest):
+    try:
+        info = verify_google_token(body.credential)
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid Google token: {e}")
+
+    conn = get_db()
+    row = conn.execute("SELECT * FROM users WHERE google_id = ?", (info["google_id"],)).fetchone()
+
+    if row:
+        user_id = row["id"]
+        conn.execute(
+            "UPDATE users SET name = ?, picture = ? WHERE id = ?",
+            (info["name"], info["picture"], user_id),
+        )
+    else:
+        cursor = conn.execute(
+            "INSERT INTO users (google_id, email, name, picture) VALUES (?, ?, ?, ?)",
+            (info["google_id"], info["email"], info["name"], info["picture"]),
+        )
+        user_id = cursor.lastrowid
+
+    conn.commit()
+    conn.close()
+
+    token = create_jwt(user_id, info["email"], info["name"])
+    return {
+        "token": token,
+        "user": {
+            "id": user_id,
+            "email": info["email"],
+            "name": info["name"],
+            "picture": info["picture"],
+            "role": "client",
+        },
+    }
+
+
+@app.get("/auth/me")
+def get_me(current_user: Optional[dict] = Depends(get_current_user)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    conn = get_db()
+    row = conn.execute("SELECT id, email, name, picture, created_at FROM users WHERE id = ?", (current_user["id"],)).fetchone()
+    conn.close()
+    if not row:
+        raise HTTPException(status_code=404, detail="User not found")
+    return {**dict(row), "role": "client"}
+
+
+# ------------------------------------------------------------
+# Chat session endpoints
+# ------------------------------------------------------------
+
+class SaveSessionRequest(BaseModel):
+    messages: List[Dict]
+    skin_profile: Optional[Dict] = None
+    category: Optional[str] = None
+
+
+@app.post("/chat-sessions")
+def save_chat_session(
+    body: SaveSessionRequest,
+    current_user: Optional[dict] = Depends(get_current_user),
+):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    conn = get_db()
+    cursor = conn.execute(
+        "INSERT INTO chat_sessions (user_id, messages, skin_profile, category) VALUES (?, ?, ?, ?)",
+        (
+            current_user["id"],
+            json.dumps(body.messages, ensure_ascii=False),
+            json.dumps(body.skin_profile or {}, ensure_ascii=False),
+            body.category,
+        ),
+    )
+    conn.commit()
+    session_id = cursor.lastrowid
+    conn.close()
+    return {"id": session_id}
+
+
+@app.get("/chat-sessions")
+def get_chat_sessions(current_user: Optional[dict] = Depends(get_current_user)):
+    if not current_user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 20",
+        (current_user["id"],),
+    ).fetchall()
+    conn.close()
+
+    sessions = []
+    for row in rows:
+        s = dict(row)
+        s["messages"] = json.loads(s["messages"])
+        s["skin_profile"] = json.loads(s.get("skin_profile") or "{}")
+        sessions.append(s)
+    return sessions
+
 
 if __name__ == "__main__":
     import uvicorn

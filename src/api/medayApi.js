@@ -1,4 +1,11 @@
-const API_BASE = "http://127.0.0.1:8000";
+import { getGoogleToken } from "./authApi";
+
+const API_BASE = "http://127.0.0.1:8001";
+
+function authHeaders() {
+  const token = getGoogleToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
 
 /**
  * Fetches the full list of treatments from the database.
@@ -112,3 +119,61 @@ export async function analyzeSkin(base64, mimeType = "image/jpeg") {
   }
   return res.json();
 }
+
+export async function fetchRecommendations(excludeId = null, limit = 4) {
+  const params = new URLSearchParams({ limit });
+  if (excludeId) params.set("exclude_id", excludeId);
+  const res = await fetch(`${API_BASE}/recommendations?${params}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch recommendations");
+  return res.json();
+}
+
+export async function saveChatSession(messages, skinProfile = {}, category = null) {
+  const res = await fetch(`${API_BASE}/chat-sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ messages, skin_profile: skinProfile, category }),
+  });
+  if (!res.ok) throw new Error("Failed to save chat session");
+  return res.json();
+}
+
+export async function getChatSessions() {
+  const res = await fetch(`${API_BASE}/chat-sessions`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) throw new Error("Failed to fetch chat sessions");
+  return res.json();
+}
+
+export async function getExcelInfo() {
+  const res = await fetch(`${API_BASE}/admin/excel/info`);
+  if (!res.ok) throw new Error("Failed to fetch excel info");
+  return res.json();
+}
+
+export async function getExcelPreview(fileType) {
+  const res = await fetch(`${API_BASE}/admin/excel/preview/${fileType}`);
+  if (!res.ok) throw new Error("Failed to fetch preview");
+  return res.json();
+}
+
+export async function uploadExcel(fileType, file) {
+  const form = new FormData();
+  form.append("file_type", fileType);
+  form.append("file", file);
+  const res = await fetch(`${API_BASE}/admin/excel/upload`, {
+    method: "POST",
+    body: form,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || `Upload failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export const getExcelDownloadUrl = (fileType) =>
+  `${API_BASE}/admin/excel/download/${fileType}`;

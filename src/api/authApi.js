@@ -1,5 +1,18 @@
 export const AUTH_STORAGE_KEY = "meday_auth_user";
 export const CLIENTS_STORAGE_KEY = "meday_client_users";
+export const GOOGLE_JWT_KEY = "meday_google_jwt";
+
+export function getGoogleToken() {
+  return localStorage.getItem(GOOGLE_JWT_KEY);
+}
+
+export function setGoogleToken(token) {
+  localStorage.setItem(GOOGLE_JWT_KEY, token);
+}
+
+export function clearGoogleToken() {
+  localStorage.removeItem(GOOGLE_JWT_KEY);
+}
 
 export const STAFF_USERS = [
   { username: "admin", password: "admin123", role: "admin" },

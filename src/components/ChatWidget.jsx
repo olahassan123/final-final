@@ -1,7 +1,8 @@
 import { useRef, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import ReactMarkdown from "react-markdown";
-import { sendChat } from "../api/medayApi";
+import { sendChat, saveChatSession } from "../api/medayApi";
+import { useAuth } from "../context/useAuth";
 import {
   MessageCircle,
   X,
@@ -41,6 +42,7 @@ export default function ChatWidget() {
   const navigate = useNavigate();
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
+  const { user } = useAuth();
 
   const [flowState, setFlowState] = useState(DEFAULT_FLOW);
   const [selectedTreatment, setSelectedTreatment] = useState(null);
@@ -125,7 +127,13 @@ export default function ChatWidget() {
         questionNumber: resp.question_number ?? null,
         totalQuestions: resp.total_questions ?? null,
       };
-      setMessages((m) => [...m, botMsg]);
+      setMessages((m) => {
+        const next = [...m, botMsg];
+        if (resp.mode === "recommending" && user?.isGoogle) {
+          saveChatSession(next, resp.profile ?? {}, resp.category ?? null).catch(() => {});
+        }
+        return next;
+      });
     } catch {
       setMessages((m) => [
         ...m,
