@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Skill(run)",
+      "Skill(run:*)",
+      "PowerShell(Start-Process powershell -ArgumentList '-NoExit', '-Command', 'cd \"c:\\\\Users\\\\user\\\\final-final\\\\backend\"; .\\\\.venv\\\\Scripts\\\\Activate.ps1; uvicorn main:app --reload --port 8000' -WindowStyle Normal)",
+      "Bash(npm run dev > /tmp/vite.log 2>&1 & *)",
+      "Bash(curl -s http://localhost:5175)",
+      "Bash(curl -s http://localhost:8000/docs)"
+    ],
+    "additionalDirectories": [
+      "\\tmp"
+    ]
+  }
+}

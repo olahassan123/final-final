@@ -95,6 +95,80 @@ def to_text(x):
     return "" if s.lower() == "nan" else s
 
 
+def _default_chatbot_settings() -> List[Dict]:
+    return [
+        {"topic": "מחירים ועלויות",    "keywords": ["מחיר", "עולה", "עלות", "תשלום", "מבצע", "הנחה", "כמה עולה"], "redirect_message": "", "active": True},
+        {"topic": "זמינות תורים",       "keywords": ["פנוי", "תור", "זמין", "ביומן", "מתי אפשר", "לקבוע"],         "redirect_message": "", "active": True},
+        {"topic": "פרטי עובדות",        "keywords": ["מטפלת", "עובדת", "צוות", "מי עושה", "מי נותנת"],             "redirect_message": "", "active": True},
+        {"topic": "מדיניות ביטולים",   "keywords": ["ביטול", "החזר", "בטל", "שינוי תור", "לבטל"],                 "redirect_message": "", "active": True},
+        {"topic": "אבחון רפואי",        "keywords": ["אבחנה", "מחלה", "רופא", "מה יש לי", "לאבחן"],                "redirect_message": "", "active": True},
+        {"topic": "מתחרים",             "keywords": ["מתחרה", "אחרים", "מקום אחר", "השוואה", "עדיף"],              "redirect_message": "", "active": True},
+    ]
+
+
+def load_chatbot_settings() -> List[Dict]:
+    path = EXCEL_DIR / "chatbot_settings.xlsx"
+    if not path.exists():
+        return _default_chatbot_settings()
+    try:
+        df = pd.read_excel(path).fillna("")
+        settings = []
+        for _, row in df.iterrows():
+            topic = to_text(row.get("נושא", ""))
+            if not topic:
+                continue
+            active_val = to_text(row.get("פעיל", "כן")).strip().lower()
+            settings.append({
+                "topic": topic,
+                "keywords": [k.strip() for k in to_text(row.get("מילות_מפתח", "")).split(",") if k.strip()],
+                "redirect_message": to_text(row.get("הודעת_הפניה", "")),
+                "active": active_val in ("כן", "yes", "true", "1"),
+            })
+        return settings or _default_chatbot_settings()
+    except Exception as e:
+        print(f"[Chatbot settings load error] {e}")
+        return _default_chatbot_settings()
+
+
+def _ensure_default_chatbot_settings():
+    path = EXCEL_DIR / "chatbot_settings.xlsx"
+    if path.exists():
+        return
+    defaults = _default_chatbot_settings()
+    df = pd.DataFrame({
+        "נושא":          [s["topic"] for s in defaults],
+        "מילות_מפתח":   [",".join(s["keywords"]) for s in defaults],
+        "הודעת_הפניה":  [s["redirect_message"] for s in defaults],
+        "פעיל":          ["כן" for _ in defaults],
+    })
+    df.to_excel(path, index=False)
+    print("[Chatbot settings] Created default chatbot_settings.xlsx")
+
+
+def _build_blocked_topics_prompt(settings: List[Dict]) -> str:
+    active = [s for s in settings if s.get("active")]
+    if not active:
+        return ""
+    topic_lines = []
+    for s in active:
+        kw_hint = f" (לדוגמה: {', '.join(s['keywords'][:4])})" if s.get("keywords") else ""
+        topic_lines.append(f"- {s['topic']}{kw_hint}")
+    topics_block = "\n".join(topic_lines)
+    default_redirect = (
+        '"לגבי [נושא השאלה], הכי טוב לדבר ישירות עם הצוות שלנו 😊 '
+        'ניתן ליצור קשר בטלפון או בוואטסאפ ונשמח לעזור!"'
+    )
+    custom_lines = [
+        f"  עבור '{s['topic']}': {s['redirect_message']}"
+        for s in active if s.get("redirect_message")
+    ]
+    custom_block = ("\nהודעות הפניה מותאמות:\n" + "\n".join(custom_lines)) if custom_lines else ""
+    return (
+        f"נושאים שאסור לך לענות עליהם — הפני תמיד לצוות:\n{topics_block}\n\n"
+        f"כאשר נשאלת על אחד מהנושאים האסורים, השב:\n{default_redirect}{custom_block}\n\n"
+    )
+
+
 def load_treatments() -> List[Dict]:
     treatments_df = pd.read_excel(EXCEL_DIR / "Treatments.xlsx")
     faq_df = pd.read_excel(EXCEL_DIR / "questions.xlsx")
@@ -175,6 +249,8 @@ def load_category_fields():
     return category_fields, minimum_fields
 
 
+_ensure_default_chatbot_settings()
+CHATBOT_SETTINGS = load_chatbot_settings()
 TREATMENTS = load_treatments()
 
 # ── Hardcoded extra categories not yet in the Excel ──────────
@@ -224,6 +300,7 @@ _EXCEL_FILES = {
     "treatments": "Treatments.xlsx",
     "questions": "questions.xlsx",
     "category_questions": "category_questions.xlsx",
+    "chatbot_settings": "chatbot_settings.xlsx",
 }
 
 
@@ -277,7 +354,7 @@ def admin_excel_preview(file_type: str):
 
 @app.post("/admin/excel/upload")
 async def admin_excel_upload(file_type: str = Form(...), file: UploadFile = File(...)):
-    global TREATMENTS, TREATMENT_MAP, CATEGORY_FIELDS, MINIMUM_FIELDS
+    global TREATMENTS, TREATMENT_MAP, CATEGORY_FIELDS, MINIMUM_FIELDS, CHATBOT_SETTINGS
     if file_type not in _EXCEL_FILES:
         raise HTTPException(status_code=400, detail="Invalid file type")
     if not (file.filename or "").endswith(".xlsx"):
@@ -286,14 +363,13 @@ async def admin_excel_upload(file_type: str = Form(...), file: UploadFile = File
     with open(path, "wb") as f:
         shutil.copyfileobj(file.file, f)
     if file_type in ("treatments", "questions"):
-        TREATMENTS = load_treatments()
-        _existing = {t["id"] for t in TREATMENTS}
-        for _t in _EXTRA_TREATMENTS:
-            if _t["id"] not in _existing:
-                TREATMENTS.append(_t)
-        TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
+        excel_treatments = load_treatments()
+        _seed_treatments_to_db(excel_treatments)
+        _refresh_treatments_from_db()
     elif file_type == "category_questions":
         CATEGORY_FIELDS, MINIMUM_FIELDS = load_category_fields()
+    elif file_type == "chatbot_settings":
+        CHATBOT_SETTINGS = load_chatbot_settings()
     df = pd.read_excel(path)
     return {"success": True, "rows": len(df), "filename": _EXCEL_FILES[file_type]}
 
@@ -314,10 +390,131 @@ def admin_excel_download(file_type: str):
 
 # ------------------------------------------------------------
 # Category field registry
-# Defines what to ask per category and how to guide "I don't know"
-# TODO: Replace with category_questions.xlsx once prepared
 # ------------------------------------------------------------
 CATEGORY_FIELDS, MINIMUM_FIELDS = load_category_fields()
+
+
+@app.get("/admin/chatbot/config")
+def admin_chatbot_config():
+    """
+    Returns the live chatbot configuration derived from category_questions.xlsx.
+    Used by the admin panel to show which questions are asked per category,
+    their priority, options, and which fields must be collected before recommending.
+    """
+    result = []
+    for cat, fields in CATEGORY_FIELDS.items():
+        if cat == "_default":
+            continue
+        min_fields = MINIMUM_FIELDS.get(cat, [])
+        result.append({
+            "category": cat,
+            "total_fields": len(fields),
+            "minimum_fields": min_fields,
+            "can_recommend_after": len(min_fields),
+            "fields": [
+                {
+                    "field": f["field"],
+                    "priority": f["priority"],
+                    "question": f["question"],
+                    "options": f["options"],
+                    "has_guidance": bool(f.get("guidance")),
+                    "is_minimum": f["field"] in min_fields,
+                }
+                for f in fields
+            ],
+        })
+    # Sort by category name for stable display
+    result.sort(key=lambda x: x["category"])
+    return {
+        "categories": result,
+        "total_categories": len(result),
+        "blocked_topics": [
+            {"topic": s["topic"], "keywords": s["keywords"], "active": s["active"]}
+            for s in CHATBOT_SETTINGS
+        ],
+    }
+
+
+# ------------------------------------------------------------
+# Admin — Treatment CRUD
+# ------------------------------------------------------------
+
+class TreatmentUpsert(BaseModel):
+    name: str
+    class_name: Optional[str] = ""
+    category: Optional[str] = ""
+    keywords: Optional[str] = ""
+    suitable_for_all_skins: Optional[str] = ""
+    results_timing: Optional[str] = ""
+    aftercare: Optional[str] = ""
+    recommended_frequency: Optional[str] = ""
+    pregnancy_breastfeeding: Optional[str] = ""
+    medical_limitations: Optional[str] = ""
+
+
+@app.get("/admin/treatments-db")
+def list_treatments_db():
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM treatments_db ORDER BY class_name, name"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+@app.post("/admin/treatments-db", status_code=201)
+def create_treatment_db(data: TreatmentUpsert):
+    tid = f"admin_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
+    conn = get_db()
+    conn.execute("""
+        INSERT INTO treatments_db
+        (id, name, class_name, category, keywords, suitable_for_all_skins,
+         results_timing, aftercare, recommended_frequency,
+         pregnancy_breastfeeding, medical_limitations, source)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin')
+    """, (tid, data.name, data.class_name, data.category, data.keywords,
+          data.suitable_for_all_skins, data.results_timing, data.aftercare,
+          data.recommended_frequency, data.pregnancy_breastfeeding, data.medical_limitations))
+    conn.commit()
+    conn.close()
+    _refresh_treatments_from_db()
+    return {"id": tid, **data.model_dump(), "source": "admin"}
+
+
+@app.put("/admin/treatments-db/{treatment_id}")
+def update_treatment_db(treatment_id: str, data: TreatmentUpsert):
+    conn = get_db()
+    result = conn.execute(
+        "SELECT id FROM treatments_db WHERE id = ?", (treatment_id,)
+    ).fetchone()
+    if not result:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Treatment not found")
+    conn.execute("""
+        UPDATE treatments_db SET
+            name=?, class_name=?, category=?, keywords=?,
+            suitable_for_all_skins=?, results_timing=?, aftercare=?,
+            recommended_frequency=?, pregnancy_breastfeeding=?,
+            medical_limitations=?, updated_at=CURRENT_TIMESTAMP
+        WHERE id=?
+    """, (data.name, data.class_name, data.category, data.keywords,
+          data.suitable_for_all_skins, data.results_timing, data.aftercare,
+          data.recommended_frequency, data.pregnancy_breastfeeding,
+          data.medical_limitations, treatment_id))
+    conn.commit()
+    conn.close()
+    _refresh_treatments_from_db()
+    return {"id": treatment_id, **data.model_dump()}
+
+
+@app.delete("/admin/treatments-db/{treatment_id}")
+def delete_treatment_db(treatment_id: str):
+    conn = get_db()
+    conn.execute("DELETE FROM treatments_db WHERE id = ?", (treatment_id,))
+    conn.commit()
+    conn.close()
+    _refresh_treatments_from_db()
+    return {"ok": True}
 
 
 # ------------------------------------------------------------
@@ -441,7 +638,8 @@ def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) 
     system = (
         "אתה עוזרת AI של MeDay - קליניקת יופי וטיפולים קוסמטיים.\n"
         "ענה תמיד בעברית בצורה חמה, מקצועית ומזמינה.\n"
-        "בסס את תשובותיך על המידע שנמסר לך בלבד.\n\n"
+        "בסס את תשובותיך אך ורק על המידע שנמסר לך להלן. אל תמציאי מידע שאינו בהקשר.\n\n"
+        + _build_blocked_topics_prompt(CHATBOT_SETTINGS)
         + context
     )
 
@@ -472,17 +670,24 @@ def guided_conversation(
 ) -> Dict:
     """
     Call 2B — Guided recommendation flow with free-text input.
-    The LLM knows what field to ask next and extracts profile updates.
-    Returns {"reply": str, "profile_update": dict, "ready_to_recommend": bool}
+    Returns {"reply", "profile_update", "ready_to_recommend", "is_general_question", "switch_category"}
+
+    is_general_question: True when user asks something off-topic (hours, prices, etc.)
+      → backend answers without advancing or resetting the flow.
+    switch_category: non-null when user clearly wants a different service category
+      → backend resets flow to the new category.
+    ready_to_recommend: True when user explicitly asks for recommendations early,
+      or when the LLM determines enough data has been collected.
     """
     known = "\n".join([f"- {k}: {v}" for k, v in profile.items()]) or "עדיין לא נאסף מידע"
+    all_categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
 
     if next_field_info:
         next_instruction = (
             f"השאלה הבאה שצריך לשאול (אם עוד לא נענתה): {next_field_info['question']}\n"
             f"אפשרויות לשדה זה: {', '.join(next_field_info['options']) if next_field_info['options'] else 'תשובה חופשית'}"
         )
-        ready_instruction = "קבע ready_to_recommend: false אלא אם כן כבר נאסף מספיק מידע."
+        ready_instruction = "קבע ready_to_recommend: false אלא אם כן הלקוחה ביקשה המלצה עכשיו."
     else:
         next_instruction = "נאסף מספיק מידע. אין צורך לשאול שאלות נוספות."
         ready_instruction = "קבע ready_to_recommend: true."
@@ -495,15 +700,19 @@ def guided_conversation(
 
 {next_instruction}
 
-כללים:
+כללים — חשוב מאוד:
 1. ענה בעברית חמה ואישית
-2. אם הלקוחה ענתה על שאלה קודמת — חלצי את הערך ל-profile_update
-3. אם הלקוחה שאלה שאלה כללית — ענה עליה בקצרה ואז המשיכי לשאלה הבאה
-4. {ready_instruction}
-5. אל תמציאי מידע רפואי שאינו מוצג לך
+2. אם הלקוחה ענתה על שאלה קודמת — חלצי את הערך המדויק ל-profile_update
+3. אם הלקוחה שאלה שאלה כללית על הקליניקה (שעות, מחירים, כתובת, חנייה) — ענה בקצרה ב-reply, הגדר is_general_question: true, ואל תמלאי profile_update
+4. אם הלקוחה ביקשה "תמליצי לי עכשיו" / "מספיק שאלות" / "מה מתאים לי" — הגדר ready_to_recommend: true
+5. אם הלקוחה רוצה לעבור לקטגוריה אחרת (למשל מציפורניים לשיער) — הגדר switch_category לשם הקטגוריה המדויק מהרשימה
+6. {ready_instruction}
+7. אל תמציאי מידע רפואי שאינו מוצג לך
 
-החזירי ONLY valid JSON:
-{{"reply": "...", "profile_update": {{}}, "ready_to_recommend": false}}"""
+קטגוריות שירות זמינות: {', '.join(all_categories)}
+
+החזירי ONLY valid JSON (כל שדות חייבים להיות נוכחים):
+{{"reply": "...", "profile_update": {{}}, "ready_to_recommend": false, "is_general_question": false, "switch_category": null}}"""
 
     messages = [{"role": "system", "content": system}]
     for msg in history[-6:]:
@@ -517,12 +726,15 @@ def guided_conversation(
             messages=messages,
             temperature=0.7,
             response_format={"type": "json_object"},
+            max_tokens=400,
         )
         result = json.loads(resp.choices[0].message.content)
         return {
             "reply": result.get("reply", ""),
             "profile_update": result.get("profile_update", {}),
             "ready_to_recommend": bool(result.get("ready_to_recommend", False)),
+            "is_general_question": bool(result.get("is_general_question", False)),
+            "switch_category": result.get("switch_category") or None,
         }
     except Exception as e:
         print(f"[Guided conversation error] {e}")
@@ -530,6 +742,8 @@ def guided_conversation(
             "reply": "מצטערת, יש לי תקלה קטנה. אנא נסי שוב.",
             "profile_update": {},
             "ready_to_recommend": False,
+            "is_general_question": False,
+            "switch_category": None,
         }
 
 
@@ -805,15 +1019,52 @@ def chat(req: ChatRequest):
     next_field = get_next_field(category, profile)
     result = guided_conversation(req.message, history, profile, category, next_field)
 
+    # 6a. General question mid-flow — answer without changing mode or field
+    if result.get("is_general_question"):
+        reask_field = get_next_field(category, profile)
+        return ChatResponse(
+            reply=result["reply"],
+            mode="questioning",
+            profile=profile,
+            category=category,
+            current_field=current_field,
+            quick_replies=field_chips(reask_field) if reask_field else None,
+            **question_progress(category, current_field),
+        )
+
+    # 6b. Category pivot — user wants to switch service area
+    switch_cat = result.get("switch_category")
+    if switch_cat and switch_cat in CATEGORY_FIELDS:
+        profile = {}
+        category = switch_cat
+        pivot_field = get_next_field(category, profile)
+        if pivot_field:
+            return ChatResponse(
+                reply=result["reply"],
+                mode="questioning",
+                profile=profile,
+                category=category,
+                current_field=pivot_field["field"],
+                quick_replies=field_chips(pivot_field),
+                **question_progress(category, pivot_field["field"]),
+            )
+
     profile.update(result.get("profile_update", {}))
 
     # Re-evaluate after profile update
     next_field = get_next_field(category, profile)
 
-    if (result.get("ready_to_recommend") or next_field is None) and can_recommend(category, profile):
+    # Allow early recommendation when user explicitly requests it and we have something
+    user_wants_now = result.get("ready_to_recommend", False)
+    ready = can_recommend(category, profile) or (user_wants_now and len(profile) > 0)
+
+    if (user_wants_now or next_field is None) and ready:
         rec = build_recommendation(profile, category, history)
+        rec_reply = rec["reply"]
+        # Only prepend guided reply if it adds context (not if it would duplicate)
+        combined = (result["reply"] + "\n\n" + rec_reply) if result["reply"] and not user_wants_now else rec_reply
         return ChatResponse(
-            reply=result["reply"] + ("\n\n" + rec["reply"] if result["reply"] else rec["reply"]),
+            reply=combined,
             mode="recommending",
             profile=profile,
             category=category,
@@ -845,6 +1096,24 @@ def get_db():
 
 def init_db():
     conn = get_db()
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS treatments_db (
+            id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            class_name TEXT DEFAULT '',
+            category TEXT DEFAULT '',
+            keywords TEXT DEFAULT '',
+            suitable_for_all_skins TEXT DEFAULT '',
+            results_timing TEXT DEFAULT '',
+            aftercare TEXT DEFAULT '',
+            recommended_frequency TEXT DEFAULT '',
+            pregnancy_breastfeeding TEXT DEFAULT '',
+            medical_limitations TEXT DEFAULT '',
+            source TEXT DEFAULT 'admin',
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS appointments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -891,6 +1160,78 @@ def init_db():
 
 
 init_db()
+
+
+def _seed_treatments_to_db(treatments_list: List[Dict]):
+    """Overwrite Excel-sourced rows in DB from the in-memory treatments list."""
+    conn = get_db()
+    conn.execute("DELETE FROM treatments_db WHERE source = 'excel'")
+    for t in treatments_list:
+        conn.execute("""
+            INSERT OR REPLACE INTO treatments_db
+            (id, name, class_name, category, keywords, suitable_for_all_skins,
+             results_timing, aftercare, recommended_frequency,
+             pregnancy_breastfeeding, medical_limitations, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'excel')
+        """, (t["id"], t["name"], t["class_name"], t["category"], t["keywords"],
+              t["suitable_for_all_skins"], t["results_timing"], t["aftercare"],
+              t["recommended_frequency"], t["pregnancy_breastfeeding"], t["medical_limitations"]))
+    conn.commit()
+    conn.close()
+
+
+def _faq_map_from_excel() -> Dict[str, Dict]:
+    """Build name→{question: answer} map from questions.xlsx."""
+    try:
+        faq_df = pd.read_excel(EXCEL_DIR / "questions.xlsx")
+        m: Dict[str, Dict] = {}
+        for _, row in faq_df.iterrows():
+            name = to_text(row.get("שם_הטיפול", "")).lower()
+            q = to_text(row.get("שאלה", ""))
+            a = to_text(row.get("תשובה", ""))
+            if name and q and a:
+                m.setdefault(name, {})[q] = a
+        return m
+    except Exception:
+        return {}
+
+
+def _refresh_treatments_from_db():
+    """Reload TREATMENTS and TREATMENT_MAP from the DB (Excel rows + admin rows)."""
+    global TREATMENTS, TREATMENT_MAP
+    faq_map = _faq_map_from_excel()
+    conn = get_db()
+    rows = conn.execute(
+        "SELECT * FROM treatments_db ORDER BY class_name, name"
+    ).fetchall()
+    conn.close()
+    treatments = []
+    for r in rows:
+        d = dict(r)
+        d["faq"] = faq_map.get(d["name"].lower(), {})
+        d["ages"] = ""
+        d["complementary_products"] = ""
+        d["consultation_required"] = ""
+        treatments.append(d)
+    existing_ids = {t["id"] for t in treatments}
+    for _t in _EXTRA_TREATMENTS:
+        if _t["id"] not in existing_ids:
+            treatments.append(_t)
+    TREATMENTS = treatments
+    TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
+
+
+# Seed DB from Excel on first startup (only if table is empty)
+def _initial_seed():
+    conn = get_db()
+    count = conn.execute("SELECT COUNT(*) FROM treatments_db WHERE source='excel'").fetchone()[0]
+    conn.close()
+    if count == 0:
+        _seed_treatments_to_db(TREATMENTS)
+
+
+_initial_seed()
+_refresh_treatments_from_db()
 
 
 class AppointmentCreate(BaseModel):

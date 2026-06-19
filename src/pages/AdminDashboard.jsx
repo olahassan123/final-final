@@ -5,7 +5,7 @@ import CountUp from "react-countup";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, addContactInquiryFeedback, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
 import { JOB_APPLICATION_EVENT, JOB_APPLICATIONS_STORAGE_KEY, getJobApplications, updateJobApplicationStatus, addJobApplicationFeedback } from "../api/jobsApi";
-import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl } from "../api/medayApi";
+import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl, getChatbotConfig, listTreatmentsDB, createTreatmentDB, updateTreatmentDB, deleteTreatmentDB } from "../api/medayApi";
 import {
   Activity,
   AlertCircle,
@@ -462,6 +462,248 @@ function ActivityFeed({ recent, mainRef }) {
   );
 }
 
+const TREATMENT_FIELDS = [
+  { key: "name",                    label: "שם הטיפול",           required: true,  type: "text",     placeholder: "לדוגמה: ניקוי פנים עמוק" },
+  { key: "class_name",              label: "קטגוריה ראשית",       required: false, type: "text",     placeholder: "לדוגמה: טיפולי קוסמטיקה" },
+  { key: "category",                label: "תת-קטגוריה",          required: false, type: "text",     placeholder: "לדוגמה: טיפולי פנים" },
+  { key: "aftercare",               label: "תיאור הטיפול",        required: false, type: "textarea", placeholder: "מה קורה בטיפול, כמה זמן נמשך..." },
+  { key: "suitable_for_all_skins",  label: "למי מתאים",           required: false, type: "textarea", placeholder: "עור שמן, עור מעורב, גיל 25+..." },
+  { key: "medical_limitations",     label: "למי לא מתאים",        required: false, type: "textarea", placeholder: "הריון, אקנה פעיל, עור רגיש מאוד..." },
+  { key: "pregnancy_breastfeeding", label: "הריון והנקה",         required: false, type: "text",     placeholder: "לא מומלץ בהריון / בטוח בהריון" },
+  { key: "results_timing",          label: "תוצאות ומתי רואים",   required: false, type: "text",     placeholder: "שיפור מיידי / לאחר 3 טיפולים..." },
+  { key: "recommended_frequency",   label: "תדירות מומלצת",       required: false, type: "text",     placeholder: "סדרה של 6 טיפולים, פעם בשבועיים" },
+  { key: "keywords",                label: "מילות מפתח / הערות",  required: false, type: "text",     placeholder: "אנטי-אייג'ינג, עדין, ללא כאב..." },
+];
+
+const EMPTY_TREATMENT = Object.fromEntries(TREATMENT_FIELDS.map((f) => [f.key, ""]));
+
+function TreatmentForm({ initial = EMPTY_TREATMENT, onSave, onCancel, saving }) {
+  const [form, setForm] = useState(initial);
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  return (
+    <div className="rounded-2xl border border-[#E8C4A0]/60 bg-white p-5 shadow-sm" dir="rtl">
+      <div className="grid gap-4 sm:grid-cols-2">
+        {TREATMENT_FIELDS.map((f) => (
+          <div key={f.key} className={f.type === "textarea" ? "sm:col-span-2" : ""}>
+            <label className="mb-1 block text-xs font-bold text-gray-700">
+              {f.label}
+              {f.required && <span className="mr-1 text-red-500">*</span>}
+            </label>
+            {f.type === "textarea" ? (
+              <textarea
+                rows={2}
+                value={form[f.key] || ""}
+                onChange={(e) => set(f.key, e.target.value)}
+                placeholder={f.placeholder}
+                className="w-full resize-none rounded-xl border border-[#E8C4A0]/50 bg-[#FAF6F1] px-3 py-2 text-right text-sm text-gray-700 outline-none transition focus:border-[#C4795A] focus:ring-2 focus:ring-[#C4795A]/15"
+              />
+            ) : (
+              <input
+                type="text"
+                value={form[f.key] || ""}
+                onChange={(e) => set(f.key, e.target.value)}
+                placeholder={f.placeholder}
+                className="w-full rounded-xl border border-[#E8C4A0]/50 bg-[#FAF6F1] px-3 py-2 text-right text-sm text-gray-700 outline-none transition focus:border-[#C4795A] focus:ring-2 focus:ring-[#C4795A]/15"
+              />
+            )}
+          </div>
+        ))}
+      </div>
+      <div className="mt-4 flex justify-start gap-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={saving}
+          className="rounded-full border border-gray-200 bg-white px-5 py-2 text-sm font-bold text-gray-600 transition hover:bg-gray-50"
+        >
+          ביטול
+        </button>
+        <button
+          type="button"
+          disabled={saving || !form.name?.trim()}
+          onClick={() => onSave(form)}
+          className="inline-flex items-center gap-2 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-5 py-2 text-sm font-bold text-white shadow-lg shadow-[#C4795A]/20 disabled:opacity-50"
+        >
+          {saving ? createElement(RefreshCw, { size: 14, className: "animate-spin" }) : createElement(CheckCircle2, { size: 14 })}
+          {saving ? "שומר..." : "שמור טיפול"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function TreatmentsManagerPanel({ mainRef }) {
+  const [treatments, setTreatments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [confirmDelete, setConfirmDelete] = useState(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setTreatments(await listTreatmentsDB()); } catch { /* silent */ }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { load(); }, [load]);
+
+  const handleAdd = async (form) => {
+    setSaving(true);
+    try { await createTreatmentDB(form); await load(); setAdding(false); } catch { /* silent */ }
+    finally { setSaving(false); }
+  };
+
+  const handleUpdate = async (id, form) => {
+    setSaving(true);
+    try { await updateTreatmentDB(id, form); await load(); setEditingId(null); } catch { /* silent */ }
+    finally { setSaving(false); }
+  };
+
+  const handleDelete = async (id) => {
+    setDeletingId(id);
+    try { await deleteTreatmentDB(id); await load(); } catch { /* silent */ }
+    finally { setDeletingId(null); setConfirmDelete(null); }
+  };
+
+  const filtered = treatments.filter((t) =>
+    !search || t.name?.includes(search) || t.class_name?.includes(search) || t.category?.includes(search)
+  );
+
+  const grouped = filtered.reduce((acc, t) => {
+    const cat = t.class_name || "ללא קטגוריה";
+    (acc[cat] = acc[cat] || []).push(t);
+    return acc;
+  }, {});
+
+  return (
+    <div className="space-y-4" dir="rtl">
+      {/* Toolbar */}
+      <div className="flex items-center gap-3">
+        <div className="flex flex-1 items-center gap-2 rounded-xl border border-[#E8C4A0]/50 bg-white px-3 py-2 shadow-sm">
+          {createElement(Search, { size: 15, className: "shrink-0 text-[#C4795A]" })}
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="חיפוש לפי שם, קטגוריה..."
+            className="w-full bg-transparent text-right text-sm text-gray-700 outline-none placeholder:text-gray-400"
+          />
+        </div>
+        <button
+          type="button"
+          onClick={() => { setAdding(true); setEditingId(null); }}
+          className="inline-flex shrink-0 items-center gap-2 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-4 py-2 text-sm font-bold text-white shadow-lg shadow-[#C4795A]/20"
+        >
+          + הוסף טיפול
+        </button>
+      </div>
+
+      {/* Add form */}
+      {adding && (
+        <TreatmentForm
+          onSave={handleAdd}
+          onCancel={() => setAdding(false)}
+          saving={saving}
+        />
+      )}
+
+      {/* List */}
+      {loading ? (
+        <div className="space-y-2">
+          {[...Array(4)].map((_, i) => <div key={i} className="h-12 animate-pulse rounded-xl bg-white/70" />)}
+        </div>
+      ) : filtered.length === 0 ? (
+        <EmptyState icon={Sparkles} title="לא נמצאו טיפולים" text="הוסיפי טיפול חדש או עדכני את Treatments.xlsx." />
+      ) : (
+        Object.entries(grouped).map(([cat, items]) => (
+          <div key={cat} className="overflow-hidden rounded-2xl border border-[#E8C4A0]/60 bg-[#FAF6F1]">
+            <div className="border-b border-[#E8C4A0]/40 px-4 py-2 text-right">
+              <span className="text-xs font-extrabold text-[#8B5030]">{cat}</span>
+              <span className="mr-2 text-xs text-gray-400">{items.length} טיפולים</span>
+            </div>
+            <div className="divide-y divide-[#E8C4A0]/20">
+              {items.map((t) => (
+                <div key={t.id}>
+                  {editingId === t.id ? (
+                    <div className="p-3">
+                      <TreatmentForm
+                        initial={t}
+                        onSave={(form) => handleUpdate(t.id, form)}
+                        onCancel={() => setEditingId(null)}
+                        saving={saving}
+                      />
+                    </div>
+                  ) : (
+                    <div className="flex items-center justify-between gap-3 px-4 py-3 transition hover:bg-white/60">
+                      <div className="flex shrink-0 items-center gap-2">
+                        {/* Source badge */}
+                        <span className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${t.source === "admin" ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-gray-100 text-gray-400"}`}>
+                          {t.source === "admin" ? "ידני" : "Excel"}
+                        </span>
+                        {/* Edit */}
+                        <button
+                          type="button"
+                          onClick={() => { setEditingId(t.id); setAdding(false); }}
+                          className="rounded-lg border border-[#C4795A]/25 bg-white px-3 py-1 text-xs font-bold text-[#8B5030] transition hover:bg-[#F5EDE3]"
+                        >
+                          עריכה
+                        </button>
+                        {/* Delete */}
+                        {confirmDelete === t.id ? (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(t.id)}
+                              disabled={deletingId === t.id}
+                              className="rounded-lg bg-red-500 px-3 py-1 text-xs font-bold text-white transition hover:bg-red-600 disabled:opacity-50"
+                            >
+                              {deletingId === t.id ? "מוחק..." : "אשר מחיקה"}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setConfirmDelete(null)}
+                              className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500"
+                            >
+                              ביטול
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDelete(t.id)}
+                            className="rounded-lg border border-red-100 bg-white px-3 py-1 text-xs font-bold text-red-500 transition hover:bg-red-50"
+                          >
+                            מחיקה
+                          </button>
+                        )}
+                      </div>
+                      {/* Name + sub-category */}
+                      <div className="text-right">
+                        <p className="text-sm font-bold text-gray-900">{t.name}</p>
+                        {t.category && <p className="text-xs text-gray-400">{t.category}</p>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        ))
+      )}
+
+      <div className="flex justify-end">
+        <button onClick={load} className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-[#C4795A]">
+          {createElement(RefreshCw, { size: 12 })} רענן רשימה
+        </button>
+      </div>
+    </div>
+  );
+}
+
 const KB_FILES = [
   {
     type: "treatments",
@@ -480,6 +722,12 @@ const KB_FILES = [
     label: "שאלות לפי קטגוריה",
     filename: "category_questions.xlsx",
     description: "אילו שאלות הצ'אטבוט שואל לכל קטגוריה, באיזה סדר, עם אילו אפשרויות, ואיזה שדות נדרשים לפני המלצה",
+  },
+  {
+    type: "chatbot_settings",
+    label: "נושאים חסומים",
+    filename: "chatbot_settings.xlsx",
+    description: "נושאים שהצ'אטבוט לא יענה עליהם ויפנה לצוות — מחירים, זמינות, עובדות ועוד. הוסיפי שורות להוספת נושאים חדשים.",
   },
 ];
 
@@ -718,6 +966,197 @@ function KnowledgeBasePanel({ mainRef }) {
         </button>
       </div>
     </SectionCard>
+  );
+}
+
+const PRIORITY_STYLE = {
+  critical: { label: "קריטי", cls: "bg-red-50 text-red-700 border border-red-200" },
+  high:     { label: "גבוה",  cls: "bg-orange-50 text-orange-700 border border-orange-200" },
+  medium:   { label: "בינוני", cls: "bg-gray-100 text-gray-600 border border-gray-200" },
+};
+
+function ChatbotConfigPanel({ mainRef }) {
+  const [config, setConfig] = useState(null);
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [expanded, setExpanded] = useState({});
+
+  useEffect(() => {
+    getChatbotConfig()
+      .then(setConfig)
+      .catch(() => setConfig(null))
+      .finally(() => setLoadingConfig(false));
+  }, []);
+
+  const toggle = (cat) => setExpanded((prev) => ({ ...prev, [cat]: !prev[cat] }));
+
+  if (loadingConfig) {
+    return (
+      <div className="space-y-3">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="h-14 animate-pulse rounded-2xl bg-white/70" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!config || !config.categories?.length) {
+    return (
+      <EmptyState
+        icon={MessageCircle}
+        title="לא נמצאו הגדרות קטגוריות"
+        text="העלי קובץ category_questions.xlsx כדי להגדיר את שאלות הצ'אטבוט לפי קטגוריה."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* How the chatbot uses this legend */}
+      <div className="rounded-2xl bg-gradient-to-l from-[#FAF6F1] to-[#F5EDE3] p-4 text-right">
+        <p className="mb-2 text-sm font-extrabold text-gray-800">איך הצ׳אטבוט משתמש בהגדרות אלה?</p>
+        <div className="grid gap-3 text-xs leading-6 text-gray-600 sm:grid-cols-3">
+          <div className="flex items-start gap-2">
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-500" />
+            <span><span className="font-bold text-red-700">קריטי</span> — נשאל ראשון, חובה לפני כל שאלה אחרת</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-orange-500" />
+            <span><span className="font-bold text-orange-700">גבוה</span> — נשאל מיד אחרי קריטי, משפיע מאוד על ההמלצה</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-gray-400" />
+            <span><span className="font-bold text-gray-700">בינוני</span> — משפר את ההמלצה אם הלקוחה עונה</span>
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-gray-500">
+          שדות <span className="font-bold text-[#C4795A]">מינימום נדרש</span> חייבים להיות מלאים לפני שהצ׳אטבוט יציע המלצה.
+          הלקוחה יכולה גם לבקש "תמליצי לי עכשיו" אחרי שמולא לפחות שדה אחד.
+        </p>
+      </div>
+
+      {/* Mode flow diagram */}
+      <div className="flex items-center gap-2 overflow-x-auto rounded-2xl border border-[#E8C4A0]/60 bg-white/80 px-4 py-3">
+        {[
+          { label: "idle", desc: "שאלות כלליות" },
+          { label: "→" },
+          { label: "questioning", desc: "אוסף מידע" },
+          { label: "→" },
+          { label: "sub_discovery", desc: "עוזרת להבין" },
+          { label: "→" },
+          { label: "recommending", desc: "ממליצה" },
+        ].map((step, i) =>
+          step.label === "→" ? (
+            <ChevronRight key={i} size={14} className="shrink-0 text-gray-300" />
+          ) : (
+            <div key={i} className="shrink-0 text-center">
+              <span className="block rounded-lg bg-[#C4795A]/10 px-2 py-1 text-xs font-bold text-[#8B5030]">{step.label}</span>
+              <span className="mt-1 block text-[10px] text-gray-400">{step.desc}</span>
+            </div>
+          )
+        )}
+      </div>
+
+      {/* Blocked topics live view */}
+      {config.blocked_topics?.length > 0 && (
+        <div className="rounded-2xl border border-[#E8C4A0]/60 bg-[#FAF6F1] p-4">
+          <p className="mb-3 text-right text-sm font-extrabold text-gray-800">
+            נושאים חסומים — הצ׳אטבוט יפנה לצוות במקום לענות
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {config.blocked_topics.map((t) => (
+              <div
+                key={t.topic}
+                className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold ${
+                  t.active
+                    ? "bg-red-50 text-red-700 border border-red-200"
+                    : "bg-gray-100 text-gray-400 border border-gray-200 line-through"
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${t.active ? "bg-red-500" : "bg-gray-300"}`} />
+                {t.topic}
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-right text-xs text-gray-400">
+            לשינוי — ערכי את <span className="font-bold">chatbot_settings.xlsx</span> והעלי מחדש
+          </p>
+        </div>
+      )}
+
+      {/* Category cards */}
+      <div className="space-y-2">
+        {config.categories.map((cat) => (
+          <div key={cat.category} className="overflow-hidden rounded-2xl border border-[#E8C4A0]/60 bg-[#FAF6F1]">
+            <button
+              type="button"
+              onClick={() => toggle(cat.category)}
+              className="flex w-full items-center justify-between gap-3 p-4 text-right transition hover:bg-[#F5EDE3]"
+            >
+              <div className="flex shrink-0 items-center gap-2">
+                {createElement(expanded[cat.category] ? ChevronUp : ChevronDown, { size: 15, className: "text-gray-400" })}
+                <span className="rounded-lg bg-white px-2 py-0.5 text-xs font-semibold text-gray-600 shadow-sm">
+                  {cat.total_fields} שאלות
+                </span>
+                <span className="rounded-lg bg-[#C4795A]/10 px-2 py-0.5 text-xs font-bold text-[#8B5030]">
+                  מינימום {cat.can_recommend_after} שדות
+                </span>
+              </div>
+              <span className="text-sm font-extrabold text-gray-900">{cat.category}</span>
+            </button>
+
+            {expanded[cat.category] && (
+              <div className="space-y-2 border-t border-[#E8C4A0]/40 p-4">
+                {cat.fields.map((field) => {
+                  const pStyle = PRIORITY_STYLE[field.priority] ?? PRIORITY_STYLE.medium;
+                  return (
+                    <div
+                      key={field.field}
+                      className={`rounded-xl p-3 text-right ${field.is_minimum ? "border border-[#C4795A]/30 bg-white" : "border border-gray-100 bg-white/60"}`}
+                    >
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <span className={`rounded-lg px-2 py-0.5 text-[11px] font-bold ${pStyle.cls}`}>
+                            {pStyle.label}
+                          </span>
+                          {field.is_minimum && (
+                            <span className="rounded-lg border border-[#C4795A]/25 bg-[#C4795A]/8 px-2 py-0.5 text-[11px] font-bold text-[#C4795A]">
+                              מינימום
+                            </span>
+                          )}
+                          {field.has_guidance && (
+                            <span className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-600">
+                              כולל הנחיה
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-gray-900">{field.question}</p>
+                          <p className="text-[11px] text-gray-400 font-mono">{field.field}</p>
+                        </div>
+                      </div>
+                      {field.options?.length > 0 && (
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          {field.options.map((opt) => (
+                            <span key={opt} className="rounded-full bg-[#F5EDE3] px-2.5 py-0.5 text-xs font-semibold text-[#8B5030]">
+                              {opt}
+                            </span>
+                          ))}
+                          {field.has_guidance && (
+                            <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-500">
+                              + לא יודעת
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1349,12 +1788,24 @@ export default function AdminDashboard() {
             ) : null}
 
             {activeTab === "treatments" ? (
-              <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-                <PlaceholderPanel
+              <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5">
+                <SectionCard
                   icon={Sparkles}
                   title="ניהול טיפולים"
-                  text="כאן יופיע בהמשך אזור לניהול קטגוריות, טיפולים, תיאורים וזמינות להצגה באתר. בינתיים נתוני הביקוש מוצגים בלשונית ניתוח."
-                />
+                  subtitle="הוסיפי, ערכי ומחקי טיפולים — שינויים נשמרים מיידית ומגיעים לצ׳אטבוט"
+                  className="col-span-1"
+                >
+                  <TreatmentsManagerPanel mainRef={mainRef} />
+                </SectionCard>
+                <KnowledgeBasePanel mainRef={mainRef} />
+                <SectionCard
+                  icon={MessageCircle}
+                  title="הגדרות הצ׳אטבוט לפי קטגוריה"
+                  subtitle="שאלות, עדיפויות ותנאי המלצה — עודכן מ-category_questions.xlsx"
+                  className="col-span-1"
+                >
+                  <ChatbotConfigPanel mainRef={mainRef} />
+                </SectionCard>
               </Motion.div>
             ) : null}
 
@@ -1440,11 +1891,10 @@ export default function AdminDashboard() {
 
             {activeTab === "settings" ? (
               <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-                <KnowledgeBasePanel mainRef={mainRef} />
                 <PlaceholderPanel
                   icon={Settings}
                   title="הגדרות מערכת"
-                  text="כאן יתווספו בהמשך הגדרות ניהול, הרשאות, פרטי קליניקה והעדפות תצוגה. כרגע הדשבורד משתמש בהגדרות הקיימות של האתר."
+                  text="כאן יתווספו בהמשך הגדרות ניהול, הרשאות, פרטי קליניקה והעדפות תצוגה. בסיס הידע והגדרות הצ׳אטבוט נמצאים בלשונית טיפולים."
                 />
               </Motion.div>
             ) : null}

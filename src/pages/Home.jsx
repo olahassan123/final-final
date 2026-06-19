@@ -1,6 +1,6 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { motion, AnimatePresence, useInView } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, ArrowLeft, Star } from 'lucide-react';
 
 /* ─── Treatment categories shown in the home grid ──────────────── */
@@ -58,8 +58,7 @@ function ScanBox({ x, y, label, delay = 0, size = 52 }) {
 
 /* ─── Why Choose Us ───────────────────────────────────────────────── */
 function WhyChooseUs() {
-  const ref = useRef();
-  const inView = useInView(ref, { once: true, margin: '-80px' });
+  const inView = true;
 
   const points = [
     { num: '01', text: 'טיפולים משולבים ב-4 ידיים, זמינות של 14 שעות ביום כולל סופי שבוע — אנחנו תמיד כאן בשבילך.' },
@@ -77,7 +76,6 @@ function WhyChooseUs() {
 
   return (
     <section
-      ref={ref}
       className="py-24 md:py-32 relative overflow-hidden"
       style={{ background: 'linear-gradient(145deg, #FDF8F4 0%, #F7F0EA 45%, #EDF5F6 100%)' }}
     >
@@ -579,10 +577,6 @@ export default function Home() {
 
               {/* Hebrew heading */}
               <motion.h2
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.65 }}
                 className="font-black mb-6"
                 style={{
                   fontSize: 'clamp(2rem, 3.5vw, 3rem)',
@@ -596,10 +590,6 @@ export default function Home() {
 
               {/* body text */}
               <motion.p
-                initial={{ opacity: 0, y: 16 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.65, delay: 0.12 }}
                 className="text-gray-600 leading-relaxed mb-10"
                 style={{ fontSize: 'clamp(1rem, 1.2vw, 1.15rem)' }}
               >
@@ -613,10 +603,6 @@ export default function Home() {
                 href="https://wa.me/972"
                 target="_blank"
                 rel="noopener noreferrer"
-                initial={{ opacity: 0, y: 12 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true }}
-                transition={{ duration: 0.55, delay: 0.24 }}
                 whileHover={{ scale: 1.04, boxShadow: '0 8px 28px rgba(74,155,168,0.40)' }}
                 whileTap={{ scale: 0.97 }}
                 className="inline-flex items-center gap-2 px-10 py-4 rounded-xl font-bold text-white"
@@ -631,11 +617,7 @@ export default function Home() {
             </div>
 
             {/* ── Blob image (left in RTL — second child) ── */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.88 }}
-              whileInView={{ opacity: 1, scale: 1 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+            <div
               className="flex-shrink-0"
               style={{ width: 'clamp(260px, 34vw, 430px)', height: 'clamp(260px, 34vw, 430px)' }}
             >
@@ -660,7 +642,7 @@ export default function Home() {
                   className="w-full h-full object-cover grayscale"
                 />
               </div>
-            </motion.div>
+            </div>
 
           </div>
         </div>
@@ -671,12 +653,7 @@ export default function Home() {
 
         {/* section header */}
         <div className="container mx-auto px-8 pt-20 pb-10 text-center">
-          <motion.div
-            initial={{ opacity: 0, y: 24 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.65 }}
-          >
+          <div>
             <p className="font-bold tracking-[0.3em] uppercase mb-3" style={{ fontSize: '0.78rem', color: '#4A9BA8' }}>
               ✦ TREATMENTS ✦
             </p>
@@ -691,7 +668,7 @@ export default function Home() {
             <p className="text-gray-400" style={{ fontSize: 'clamp(0.95rem, 1.2vw, 1.1rem)' }}>
               בחרי את הטיפול המושלם עבורך
             </p>
-          </motion.div>
+          </div>
         </div>
 
         {/* full-bleed tiles grid — no container, edge to edge */}
@@ -703,10 +680,6 @@ export default function Home() {
             <motion.button
               key={cat.slug}
               onClick={() => navigate(`/categories/${cat.slug}`)}
-              initial={{ opacity: 0, y: 20 }}
-              whileInView={{ opacity: 1, y: 0 }}
-              viewport={{ once: true }}
-              transition={{ duration: 0.45, delay: i * 0.055, ease: [0.22, 1, 0.36, 1] }}
               className="relative overflow-hidden group cursor-pointer text-right"
               style={{ outline: 'none' }}
             >
@@ -774,12 +747,12 @@ export default function Home() {
           />
         ))}
         <div className="relative z-10 container mx-auto px-6 text-center">
-          <motion.div initial={{ opacity: 0, y: 40 }} whileInView={{ opacity: 1, y: 0 }} viewport={{ once: true }} transition={{ duration: 0.85 }}>
+          <div>
             <div className="flex justify-center gap-1 mb-6">
               {[...Array(5)].map((_, i) => (
-                <motion.div key={i} initial={{ opacity: 0, scale: 0 }} whileInView={{ opacity: 1, scale: 1 }} viewport={{ once: true }} transition={{ delay: i * 0.1, type: 'spring' }}>
+                <div key={i}>
                   <Star size={24} className="fill-[#C4795A] text-[#C4795A]" />
-                </motion.div>
+                </div>
               ))}
             </div>
             <h2 className="text-4xl md:text-6xl font-black text-white mb-6 leading-tight">
@@ -800,7 +773,7 @@ export default function Home() {
             >
               גלי את כל הטיפולים ←
             </motion.button>
-          </motion.div>
+          </div>
         </div>
       </section>
 

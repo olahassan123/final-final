@@ -177,3 +177,43 @@ export async function uploadExcel(fileType, file) {
 
 export const getExcelDownloadUrl = (fileType) =>
   `${API_BASE}/admin/excel/download/${fileType}`;
+
+export async function getChatbotConfig() {
+  const res = await fetch(`${API_BASE}/admin/chatbot/config`);
+  if (!res.ok) throw new Error("Failed to fetch chatbot config");
+  return res.json();
+}
+
+export async function listTreatmentsDB() {
+  const res = await fetch(`${API_BASE}/admin/treatments-db`);
+  if (!res.ok) throw new Error("Failed to fetch treatments");
+  return res.json();
+}
+
+export async function createTreatmentDB(data) {
+  const res = await fetch(`${API_BASE}/admin/treatments-db`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to create treatment");
+  return res.json();
+}
+
+export async function updateTreatmentDB(id, data) {
+  const res = await fetch(`${API_BASE}/admin/treatments-db/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) throw new Error("Failed to update treatment");
+  return res.json();
+}
+
+export async function deleteTreatmentDB(id) {
+  const res = await fetch(`${API_BASE}/admin/treatments-db/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("Failed to delete treatment");
+  return res.json();
+}

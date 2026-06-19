@@ -1,19 +1,43 @@
-import { useRef } from "react";
+import { useRef, useState } from "react";
 import { Link, Navigate, useParams } from "react-router-dom";
 import {
   ArrowRight, ChevronLeft, Sparkles, Scissors, Heart, Star,
-  Zap, Eye, Award, ShieldCheck, Brush, LayoutGrid, Layers,
+  Zap, Eye, Award, ShieldCheck, Brush, LayoutGrid, Layers, ChevronDown,
 } from "lucide-react";
-import { motion, useMotionValue, useSpring, useTransform, useInView } from "framer-motion";
+import { motion, AnimatePresence, useMotionValue, useSpring, useTransform, useInView } from "framer-motion";
 import { getCategoryBySlug, getCategoryTreatments } from "../data/serviceCatalog";
-import SkinAnalysisWidget from "../components/SkinAnalysisWidget";
+
+/* ── per-category hero photos ────────────────────────────────── */
+const CATEGORY_PHOTOS = {
+  "manicure-pedicure":      "photo-1596755389378-c31d21fd1273",
+  "hair-design":            "photo-1560869713-7d0a29430803",
+  "body-treatments":        "photo-1544161515-4ab6ce6db874",
+  "cosmetology":            "photo-1570172619644-dfd03ed5d881",
+  "hair-removal":           "photo-1552693673-1bf958298935",
+  "professional-makeup":    "photo-1522337360788-8b13dee7a37e",
+  "permanent-makeup-brows": "photo-1616394584738-fc6e612e71b9",
+  "personal-styling":       "photo-1490481651871-ab68de25d43d",
+  "aesthetic-treatments":   "photo-1487412720507-e7ab37603c6f",
+};
+
+const CATEGORY_EN = {
+  "manicure-pedicure":      "MANICURE & PEDICURE",
+  "hair-design":            "HAIR DESIGN",
+  "body-treatments":        "BODY TREATMENTS",
+  "cosmetology":            "COSMETOLOGY",
+  "hair-removal":           "HAIR REMOVAL",
+  "professional-makeup":    "PROFESSIONAL MAKEUP",
+  "permanent-makeup-brows": "PERMANENT MAKEUP",
+  "personal-styling":       "PERSONAL STYLING",
+  "aesthetic-treatments":   "AESTHETIC TREATMENTS",
+};
 
 /* ── shared category meta (mirrors CategorySelectionPage) ─────── */
 const CATEGORY_META = {
   "manicure-pedicure":      { Icon: Sparkles,    gradient: "from-[#f9a8d4] to-[#ec4899]", accent: "#ec4899", light: "#fdf2f8" },
   "hair-design":            { Icon: Scissors,    gradient: "from-[#c4b5fd] to-[#7c3aed]", accent: "#7c3aed", light: "#f5f3ff" },
   "body-treatments":        { Icon: Heart,       gradient: "from-[#6ee7b7] to-[#059669]", accent: "#059669", light: "#ecfdf5" },
-  "cosmetology":            { Icon: Star,        gradient: "from-[#fca5a5] to-[#dc2626]", accent: "#dc2626", light: "#fef2f2" },
+  "cosmetology":            { Icon: Star,        gradient: "from-[#7dd3d8] to-[#4A9BA8]", accent: "#4A9BA8", light: "#EDF5F6" },
   "hair-removal":           { Icon: Zap,         gradient: "from-[#93c5fd] to-[#2563eb]", accent: "#2563eb", light: "#eff6ff" },
   "professional-makeup":    { Icon: Brush,       gradient: "from-[#fcd34d] to-[#d97706]", accent: "#d97706", light: "#fffbeb" },
   "permanent-makeup-brows": { Icon: Eye,         gradient: "from-[#a5b4fc] to-[#4f46e5]", accent: "#4f46e5", light: "#eef2ff" },
@@ -116,45 +140,231 @@ function TreatmentLinkCard({ categorySlug, treatment, sectionTitle, index, accen
   );
 }
 
-/* ── section block (for cosmetology layout) ───────────────────── */
-function SectionBlock({ section, categorySlug, accent, light, baseIndex }) {
-  const ref = useRef();
-  const inView = useInView(ref, { once: true, margin: "-60px" });
+/* ── Cosmetology section — warm peach + teal bar style ────────── */
+const SECTION_META = {
+  "classic":          { eyebrow: "CLASSIC FACIALS"      },
+  "pamper":           { eyebrow: "PAMPER & GLOW"        },
+  "tech-special":     { eyebrow: "ADVANCED TECH"        },
+  "special-events":   { eyebrow: "SPECIAL EVENTS"       },
+  "everyday-styling": { eyebrow: "EVERYDAY & LESSONS"   },
+};
+
+function CosmeticSectionBlock({ section }) {
+  const [openSlug, setOpenSlug] = useState(null);
+  const meta = SECTION_META[section.slug] || SECTION_META["classic"];
 
   return (
-    <motion.div
-      ref={ref}
-      initial={{ opacity: 0, y: 40 }}
-      animate={inView ? { opacity: 1, y: 0 } : {}}
-      transition={{ duration: 0.7, ease: [0.22, 1, 0.36, 1] }}
-      className="rounded-3xl overflow-hidden"
-      style={{ background: light }}
+    <div
+      className="relative overflow-hidden"
+      dir="rtl"
+      style={{ isolation: "isolate", background: "#FBE9DC" }}
     >
-      {/* section header */}
+      {/* ── teal title bar ── */}
       <div
-        className="px-7 py-5 border-b border-white/50"
-        style={{ background: `${accent}12` }}
+        className="w-full px-10 py-5 flex items-center"
+        style={{ background: "#4A9BA8" }}
       >
-        <h2 className="text-2xl font-bold text-gray-900">{section.title}</h2>
-        {section.subtitle && (
-          <p className="text-sm mt-1" style={{ color: accent }}>{section.subtitle}</p>
-        )}
+        <div className="flex-1 text-right">
+          <span
+            className="font-black text-white leading-tight block"
+            style={{ fontSize: "clamp(1.25rem, 2.2vw, 1.7rem)" }}
+          >
+            {section.title}
+          </span>
+          <span
+            className="font-medium text-white/75 block mt-0.5"
+            style={{ fontSize: "0.85rem" }}
+          >
+            {section.subtitle}
+          </span>
+        </div>
       </div>
 
-      <div className="p-6 grid grid-cols-1 gap-4 lg:grid-cols-2" style={{ perspective: "1000px" }}>
-        {section.treatments.map((treatment, i) => (
-          <TreatmentLinkCard
-            key={treatment.slug}
-            categorySlug={categorySlug}
-            treatment={treatment}
-            sectionTitle={section.title}
-            index={baseIndex + i}
-            accent={accent}
-            light="rgba(255,255,255,0.6)"
+      {/* ── treatment rows — 2-column text layout ── */}
+      <div className="px-10 py-8 grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-8">
+        {section.treatments.map((treatment) => {
+          const isOpen = openSlug === treatment.slug;
+          return (
+            <div key={treatment.slug} className="text-right">
+              <h3
+                className="font-black mb-2 leading-snug"
+                style={{ fontSize: "clamp(1rem, 1.3vw, 1.18rem)", color: "#1A0E06" }}
+              >
+                {treatment.name}
+              </h3>
+              <p className="text-sm leading-relaxed mb-3" style={{ color: "#5C4033" }}>
+                {treatment.summary}
+              </p>
+
+              {/* expandable details */}
+              <AnimatePresence initial={false}>
+                {isOpen && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
+                    style={{ overflow: "hidden" }}
+                  >
+                    <div className="mb-3 space-y-1.5">
+                      {(treatment.details || []).slice(1).map((line, i) => (
+                        <p key={i} className="text-sm leading-relaxed" style={{ color: "#5C4033" }}>
+                          • {line}
+                        </p>
+                      ))}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+
+              {/* read more toggle */}
+              <button
+                onClick={() => setOpenSlug(isOpen ? null : treatment.slug)}
+                className="inline-flex items-center gap-1 text-sm font-semibold mb-4"
+                style={{ color: "#4A9BA8" }}
+              >
+                <span>{isOpen ? "סגור ▲" : "לקרוא עוד ▼"}</span>
+              </button>
+
+              {/* CTA — bordered style */}
+              <div>
+                <a
+                  href="https://wa.me/972"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-2 px-5 py-2 text-sm font-bold rounded-full transition-colors duration-200"
+                  style={{
+                    border: "2px solid #4A9BA8",
+                    color: "#4A9BA8",
+                    background: "transparent",
+                  }}
+                  onMouseEnter={e => {
+                    e.currentTarget.style.background = "#4A9BA8";
+                    e.currentTarget.style.color = "#fff";
+                  }}
+                  onMouseLeave={e => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.color = "#4A9BA8";
+                  }}
+                >
+                  לתיאום תור
+                </a>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/* ── Promo description block — light warm bg + coral heading ──── */
+function PromoDescriptionBlock({ heading, paragraphs }) {
+  return (
+    <div
+      className="relative overflow-hidden text-center"
+      dir="rtl"
+      style={{ background: "#FBF0E8" }}
+    >
+      {/* large ring watermarks — very subtle */}
+      <div className="absolute pointer-events-none" style={{ bottom: "-120px", left: "-120px" }}>
+        {[380, 280, 190, 110].map((size, i) => (
+          <div
+            key={i}
+            className="absolute rounded-full"
+            style={{
+              width: size, height: size,
+              border: "28px solid rgba(196,121,90,0.09)",
+              top: "50%", left: "50%",
+              transform: "translate(-50%,-50%)",
+            }}
           />
         ))}
       </div>
-    </motion.div>
+      <div className="absolute pointer-events-none" style={{ top: "-100px", right: "-100px" }}>
+        {[300, 210, 130].map((size, i) => (
+          <div
+            key={i}
+            className="absolute rounded-full"
+            style={{
+              width: size, height: size,
+              border: "24px solid rgba(74,155,168,0.07)",
+              top: "50%", left: "50%",
+              transform: "translate(-50%,-50%)",
+            }}
+          />
+        ))}
+      </div>
+
+      <div
+        className="relative z-10 mx-auto px-8"
+        style={{ maxWidth: "820px", paddingTop: "5rem", paddingBottom: "5rem" }}
+      >
+        {/* decorative eyebrow line */}
+        <div className="flex items-center justify-center gap-4 mb-8">
+          <div className="h-px w-14" style={{ background: "linear-gradient(to left, #C4795A, transparent)" }} />
+          <span className="text-xs font-bold tracking-[0.3em] uppercase" style={{ color: "#C4795A" }}>
+            ✦ MeDay Beauty ✦
+          </span>
+          <div className="h-px w-14" style={{ background: "linear-gradient(to right, #C4795A, transparent)" }} />
+        </div>
+
+        {/* coral heading — large & bold */}
+        <h2
+          className="font-black leading-snug mb-10"
+          style={{
+            fontSize: "clamp(1.6rem, 3vw, 2.4rem)",
+            color: "#C4795A",
+            letterSpacing: "-0.01em",
+          }}
+        >
+          {heading}
+        </h2>
+
+        {/* thin divider under heading */}
+        <div className="flex items-center justify-center gap-3 mb-10">
+          <div className="h-px flex-1" style={{ background: "rgba(196,121,90,0.2)" }} />
+          <div className="w-2 h-2 rounded-sm rotate-45" style={{ background: "#C4795A", opacity: 0.5 }} />
+          <div className="h-px flex-1" style={{ background: "rgba(196,121,90,0.2)" }} />
+        </div>
+
+        {/* paragraphs */}
+        {paragraphs.map((para, i) => (
+          <div key={i}>
+            <p
+              className="leading-loose mx-auto"
+              style={{
+                fontSize: "clamp(0.95rem, 1.1vw, 1.05rem)",
+                color: "#5C3A22",
+                maxWidth: "640px",
+              }}
+            >
+              {para}
+            </p>
+            {i < paragraphs.length - 1 && (
+              <div className="my-6 flex items-center justify-center gap-3">
+                <div className="h-px w-10" style={{ background: "rgba(196,121,90,0.25)" }} />
+                <span style={{ color: "#C4795A", fontSize: "0.9rem" }}>◆</span>
+                <div className="h-px w-10" style={{ background: "rgba(196,121,90,0.25)" }} />
+              </div>
+            )}
+          </div>
+        ))}
+
+        {/* CTA */}
+        <div className="mt-12">
+          <a
+            href="https://wa.me/972"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-9 py-3.5 font-bold text-white rounded-full transition-opacity hover:opacity-90"
+            style={{ background: "linear-gradient(135deg, #4A9BA8, #3A7E8A)", fontSize: "1rem", boxShadow: "0 6px 22px rgba(74,155,168,0.30)" }}
+          >
+            לתיאום תור
+          </a>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -189,136 +399,87 @@ export default function ServiceCategoryPage() {
   const totalCount = treatments.length;
 
   return (
-    <div className="min-h-screen bg-[#fdf8ff]" dir="rtl">
+    <div className="min-h-screen bg-[#FAF7F2]" dir="rtl">
 
       {/* ══ HERO HEADER ══ */}
-      <section className="relative overflow-hidden pb-16 pt-20 px-6">
-        {/* background */}
-        <div className="absolute inset-0 bg-gradient-to-b from-[#12090f] via-[#1e0d28] to-[#fdf8ff]" />
+      <section className="relative overflow-hidden" style={{ minHeight: "52vh" }}>
 
-        {/* color glow matching this category */}
-        <div
-          className="absolute top-0 right-1/3 w-[500px] h-[500px] rounded-full blur-[130px] pointer-events-none"
-          style={{ background: `${accent}22` }}
-        />
-        <div
-          className="absolute top-10 left-1/4 w-[300px] h-[300px] rounded-full blur-[100px] pointer-events-none"
-          style={{ background: `${accent}14` }}
+        {/* full-bleed category photo */}
+        <img
+          src={`https://images.unsplash.com/${CATEGORY_PHOTOS[categorySlug] || "photo-1570172619644-dfd03ed5d881"}?auto=format&fit=crop&w=1400&q=85`}
+          alt={category.name}
+          className="absolute inset-0 w-full h-full object-cover object-center"
         />
 
-        {/* micro stars */}
-        {[...Array(12)].map((_, i) => (
-          <motion.div
-            key={i}
-            className="absolute w-1 h-1 rounded-full bg-white/35"
-            style={{ top: `${10 + Math.random() * 65}%`, left: `${Math.random() * 100}%` }}
-            animate={{ opacity: [0.15, 0.8, 0.15] }}
-            transition={{ duration: 2.5 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
-          />
-        ))}
+        {/* warm light overlay — keeps image visible but brightens for text readability */}
+        <div
+          className="absolute inset-0"
+          style={{
+            background: "linear-gradient(to bottom, rgba(253,248,244,0.22) 0%, rgba(253,248,244,0.52) 55%, rgba(253,248,244,0.88) 100%)",
+          }}
+        />
 
-        <div className="relative z-10 max-w-5xl mx-auto">
+        {/* centred content */}
+        <div
+          className="relative z-10 flex flex-col items-center justify-center text-center px-6"
+          style={{ minHeight: "52vh", paddingTop: "5rem" }}
+        >
           {/* breadcrumb */}
-          <motion.div
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={{ duration: 0.5 }}
+          <Link
+            to="/categories"
+            className="inline-flex items-center gap-2 text-sm font-medium mb-8 transition-opacity hover:opacity-70"
+            style={{ color: "#9B5C38" }}
           >
-            <Link
-              to="/categories"
-              className="inline-flex items-center gap-2 text-white/50 hover:text-white/80 text-sm font-medium transition-colors mb-8"
-            >
-              <ArrowRight size={16} />
-              כל הקטגוריות
-            </Link>
-          </motion.div>
+            <ArrowRight size={15} />
+            כל הקטגוריות
+          </Link>
 
-          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-8">
-            <div>
-              {/* badge */}
-              <motion.div
-                initial={{ opacity: 0, y: -15 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.55, delay: 0.1 }}
-                className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white/80 text-sm font-bold mb-6"
-              >
-                <Sparkles size={14} className="text-[#e8a5b5]" />
-                MeDay Beauty Center
-              </motion.div>
+          {/* English name — coral watermark style */}
+          <motion.p
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.55 }}
+            className="font-black uppercase tracking-[0.18em] mb-1"
+            style={{ fontSize: "clamp(1.3rem, 3.2vw, 2.8rem)", color: "#E8825A" }}
+          >
+            {CATEGORY_EN[categorySlug] || category.name.toUpperCase()}
+            <span className="ml-3" style={{ color: "#C4795A" }}>✦✦</span>
+          </motion.p>
 
-              {/* icon + title */}
-              <motion.div
-                initial={{ opacity: 0, y: 25 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.7, delay: 0.18, ease: [0.22, 1, 0.36, 1] }}
-                className="flex items-center gap-5"
-              >
-                <div className={`w-16 h-16 rounded-2xl bg-gradient-to-br ${gradient} flex items-center justify-center shadow-2xl flex-shrink-0`}
-                  style={{ boxShadow: `0 12px 30px ${accent}55` }}>
-                  <Icon size={30} className="text-white" />
-                </div>
-                <h1 className="text-4xl md:text-6xl font-black text-white leading-tight">
-                  {category.name}
-                </h1>
-              </motion.div>
-
-              {category.description && (
-                <motion.p
-                  initial={{ opacity: 0, y: 15 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.7, delay: 0.3 }}
-                  className="mt-5 text-white/50 max-w-2xl leading-relaxed"
-                >
-                  {category.description}
-                </motion.p>
-              )}
-            </div>
-
-            {/* count badge */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.7 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.5, delay: 0.35, type: "spring" }}
-              className="flex-shrink-0 rounded-2xl px-7 py-5 text-center backdrop-blur-sm border border-white/10"
-              style={{ backgroundColor: `${accent}20` }}
-            >
-              <div className="flex items-center gap-3">
-                <LayoutGrid size={22} style={{ color: accent }} />
-                <div className="text-right">
-                  <p className="text-3xl font-black text-white">{totalCount}</p>
-                  <p className="text-xs font-semibold text-white/60">טיפולים זמינים</p>
-                </div>
-              </div>
-            </motion.div>
-          </div>
+          {/* Hebrew title — large dark teal */}
+          <motion.h1
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.7, delay: 0.12, ease: [0.22, 1, 0.36, 1] }}
+            className="font-black leading-tight"
+            style={{
+              fontSize: "clamp(2.8rem, 7vw, 5.5rem)",
+              color: "#3A7E8A",
+              textShadow: "0 2px 28px rgba(253,248,244,0.80)",
+            }}
+          >
+            {category.name}
+          </motion.h1>
         </div>
       </section>
 
-      {/* ══ SKIN ANALYSIS (cosmetology only) ══ */}
-      {categorySlug === "cosmetology" && (
-        <div className="px-6 -mt-4 mb-4 max-w-5xl mx-auto">
-          <SkinAnalysisWidget />
-        </div>
-      )}
 
       {/* ══ TREATMENTS ══ */}
-      <section className="px-6 pb-24 -mt-4 max-w-5xl mx-auto">
+      <section className={category.promoHeading ? "" : "pb-24"}>
 
-        {hasSectionLayout ? (
+        {category.promoHeading ? (
+          <PromoDescriptionBlock
+            heading={category.promoHeading}
+            paragraphs={category.promoParagraphs || []}
+          />
+        ) : hasSectionLayout ? (
           <div className="space-y-6">
-            {category.sections.map((section, si) => {
-              const baseIndex = category.sections.slice(0, si).reduce((acc, s) => acc + s.treatments.length, 0);
-              return (
-                <SectionBlock
-                  key={section.slug}
-                  section={section}
-                  categorySlug={category.slug}
-                  accent={accent}
-                  light={light}
-                  baseIndex={baseIndex}
-                />
-              );
-            })}
+            {category.sections.map((section) => (
+              <CosmeticSectionBlock
+                key={section.slug}
+                section={section}
+              />
+            ))}
           </div>
 
         ) : treatments.length > 0 ? (
