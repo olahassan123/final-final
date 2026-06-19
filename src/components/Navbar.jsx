@@ -56,52 +56,69 @@ function getTreatmentCategoryLinks() {
 }
 
 function LogoMark() {
-  const brown = '#3D2418';
-  const font   = '"Abril Fatface", Georgia, serif';
-  const sz     = '2.2rem';
-
-  const letter = { fontFamily: font, fontSize: sz, fontWeight: 400, color: brown, lineHeight: 1 };
-
-  const raised = {
-    display: 'inline-flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: '3px',
-    marginBottom: '-11px',
-  };
-
   return (
-    <div style={{ direction: 'ltr', display: 'inline-flex', flexDirection: 'column', alignItems: 'center', userSelect: 'none' }}>
+    <div style={{
+      direction: 'ltr',
+      display: 'inline-flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      userSelect: 'none',
+      gap: '0px',
+    }}>
 
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0px' }}>
-
-        <span style={letter}>M</span>
-
-        <span style={raised}>
-          <span style={letter}>E</span>
-          <span style={{ fontSize: '0.5rem', color: brown, lineHeight: 1 }}>✦</span>
-        </span>
-
-        <span style={letter}>D</span>
-
-        <span style={raised}>
-          <span style={letter}>A</span>
-          <span style={{ fontSize: '0.5rem', color: brown, lineHeight: 1 }}>✦</span>
-        </span>
-
-        <span style={letter}>Y</span>
-
+      {/* top ornament */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginBottom: '3px' }}>
+        <div style={{ width: '22px', height: '0.5px', background: 'linear-gradient(to right, transparent, #C4795A)' }} />
+        <svg width="7" height="7" viewBox="0 0 7 7" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <polygon points="3.5,0 7,3.5 3.5,7 0,3.5" fill="#C4795A" opacity="0.75" />
+          <polygon points="3.5,1.5 5.5,3.5 3.5,5.5 1.5,3.5" fill="#F5EDE3" />
+        </svg>
+        <div style={{ width: '22px', height: '0.5px', background: 'linear-gradient(to left, transparent, #C4795A)' }} />
       </div>
 
-      {/* beauty center */}
+      {/* wordmark: italic copper "Me" + bold dark "Day" */}
+      <div style={{ display: 'flex', alignItems: 'baseline', lineHeight: 1 }}>
+        <span style={{
+          fontFamily: '"Cormorant Garamond", Georgia, serif',
+          fontSize: '2.35rem',
+          fontWeight: 700,
+          fontStyle: 'italic',
+          color: '#C4795A',
+          lineHeight: 1,
+          letterSpacing: '-0.01em',
+        }}>
+          Me
+        </span>
+        <span style={{
+          fontFamily: '"Abril Fatface", Georgia, serif',
+          fontSize: '2.35rem',
+          fontWeight: 400,
+          color: '#3D2418',
+          lineHeight: 1,
+          letterSpacing: '0.01em',
+        }}>
+          Day
+        </span>
+      </div>
+
+      {/* bottom rule + center diamond */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: '5px', marginTop: '4px', marginBottom: '3px', width: '100%' }}>
+        <div style={{ flex: 1, height: '0.5px', background: 'linear-gradient(to right, transparent, #C4795A)', opacity: 0.5 }} />
+        <svg width="5" height="5" viewBox="0 0 5 5">
+          <polygon points="2.5,0 5,2.5 2.5,5 0,2.5" fill="#C4795A" opacity="0.7" />
+        </svg>
+        <div style={{ flex: 1, height: '0.5px', background: 'linear-gradient(to left, transparent, #C4795A)', opacity: 0.5 }} />
+      </div>
+
+      {/* tagline */}
       <div style={{
         fontFamily: '"Cormorant Garamond", Georgia, serif',
-        fontSize: '0.55rem',
-        fontWeight: 400,
-        color: brown,
-        letterSpacing: '0.40em',
-        marginTop: '14px',
-        opacity: 0.70,
+        fontSize: '0.46rem',
+        fontWeight: 300,
+        color: '#3D2418',
+        letterSpacing: '0.55em',
+        opacity: 0.58,
+        textTransform: 'uppercase',
       }}>
         beauty center
       </div>
