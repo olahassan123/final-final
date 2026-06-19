@@ -35,7 +35,34 @@ import {
   Users,
 } from "lucide-react";
 
-const CHART_COLORS = ["#C4795A", "#E8A5B5", "#D4A882", "#9B5C38", "#C67C8B", "#B79A74"];
+const CHART_COLORS = ["#C4795A", "#4A9BA8", "#D4A256", "#C67C8B", "#9B5C38", "#2E7A87"];
+
+const STAT_THEMES = [
+  {
+    gradient: "linear-gradient(135deg, #C4795A 0%, #9B5C38 100%)",
+    glow: "rgba(196,121,90,0.40)",
+    shimmer: "rgba(255,255,255,0.15)",
+    icon: "rgba(255,255,255,0.20)",
+  },
+  {
+    gradient: "linear-gradient(135deg, #4A9BA8 0%, #2E7A87 100%)",
+    glow: "rgba(74,155,168,0.40)",
+    shimmer: "rgba(255,255,255,0.15)",
+    icon: "rgba(255,255,255,0.20)",
+  },
+  {
+    gradient: "linear-gradient(135deg, #D4A256 0%, #9B6E24 100%)",
+    glow: "rgba(212,162,86,0.40)",
+    shimmer: "rgba(255,255,255,0.15)",
+    icon: "rgba(255,255,255,0.20)",
+  },
+  {
+    gradient: "linear-gradient(135deg, #C67C8B 0%, #9B4E68 100%)",
+    glow: "rgba(198,124,139,0.40)",
+    shimmer: "rgba(255,255,255,0.15)",
+    icon: "rgba(255,255,255,0.20)",
+  },
+];
 const MONTH_HE = ["ינו׳", "פבר׳", "מרץ", "אפר׳", "מאי", "יוני", "יולי", "אוג׳", "ספט׳", "אוק׳", "נוב׳", "דצמ׳"];
 const formatMonth = (s) => {
   const [, month] = (s || "").split("-");
@@ -82,9 +109,39 @@ const inView = (mainRef) => ({ initial: "hidden", whileInView: "show", viewport:
 function PageGlow() {
   return (
     <div className="pointer-events-none absolute inset-0 overflow-hidden">
-      <div className="absolute -right-36 top-0 h-96 w-96 rounded-full bg-[#E8C4A0]/35 blur-3xl" />
-      <div className="absolute left-[-8rem] top-40 h-[28rem] w-[28rem] rounded-full bg-[#F2D4BE]/45 blur-3xl" />
-      <div className="absolute bottom-0 right-1/3 h-80 w-80 rounded-full bg-white/55 blur-3xl" />
+      <div className="absolute -right-24 -top-16 h-[32rem] w-[32rem] rounded-full bg-[#C4795A]/20 blur-3xl" />
+      <div className="absolute -left-20 top-48 h-[38rem] w-[38rem] rounded-full bg-[#4A9BA8]/12 blur-3xl" />
+      <div className="absolute bottom-[-4rem] right-1/3 h-[28rem] w-[28rem] rounded-full bg-[#E8C4A0]/28 blur-3xl" />
+      <div className="absolute bottom-20 left-8 h-56 w-56 rounded-full bg-[#C4795A]/10 blur-2xl" />
+      <div className="absolute top-1/2 right-1/2 h-48 w-48 rounded-full bg-[#D4A256]/08 blur-2xl" />
+    </div>
+  );
+}
+
+function LogoMark({ size = "md" }) {
+  const isLg = size === "lg";
+  const wordSize = isLg ? "2.1rem" : "1.55rem";
+  const tagSize = isLg ? "0.44rem" : "0.33rem";
+  return (
+    <div style={{ direction: "ltr", display: "inline-flex", flexDirection: "column", alignItems: "center", userSelect: "none", gap: 0 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}>
+        <div style={{ width: 18, height: "0.5px", background: "linear-gradient(to right, transparent, #C4795A)" }} />
+        <svg width="6" height="6" viewBox="0 0 6 6" fill="none">
+          <polygon points="3,0 6,3 3,6 0,3" fill="#C4795A" opacity="0.85" />
+          <polygon points="3,1.4 4.6,3 3,4.6 1.4,3" fill="#1C0C04" />
+        </svg>
+        <div style={{ width: 18, height: "0.5px", background: "linear-gradient(to left, transparent, #C4795A)" }} />
+      </div>
+      <div style={{ display: "flex", alignItems: "baseline", lineHeight: 1 }}>
+        <span style={{ fontFamily: '"Cormorant Garamond", Georgia, serif', fontSize: wordSize, fontWeight: 700, fontStyle: "italic", color: "#C4795A", lineHeight: 1 }}>Me</span>
+        <span style={{ fontFamily: '"Abril Fatface", Georgia, serif', fontSize: wordSize, fontWeight: 400, color: "#E8C4A0", lineHeight: 1 }}>Day</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 4, marginTop: 3, width: "100%" }}>
+        <div style={{ flex: 1, height: "0.5px", background: "linear-gradient(to right, transparent, #C4795A)", opacity: 0.5 }} />
+        <svg width="4" height="4" viewBox="0 0 4 4"><polygon points="2,0 4,2 2,4 0,2" fill="#C4795A" opacity="0.7" /></svg>
+        <div style={{ flex: 1, height: "0.5px", background: "linear-gradient(to left, transparent, #C4795A)", opacity: 0.5 }} />
+      </div>
+      <div style={{ fontFamily: '"Cormorant Garamond", Georgia, serif', fontSize: tagSize, fontWeight: 300, color: "#E8C4A0", letterSpacing: "0.5em", opacity: 0.55, textTransform: "uppercase", marginTop: 2 }}>beauty center</div>
     </div>
   );
 }
@@ -105,40 +162,64 @@ function SectionCard({ icon: Icon, title, subtitle, children, className = "" }) 
   return (
     <Motion.section
       variants={fadeUp}
-      className={`rounded-3xl border border-white/75 bg-white/75 p-5 shadow-xl shadow-[#9B5C38]/5 backdrop-blur-xl ${className}`}
-      whileHover={{ y: -3, boxShadow: "0 18px 48px rgba(155,92,56,0.10)" }}
+      className={`overflow-hidden rounded-3xl border border-white/70 bg-white/78 shadow-xl shadow-[#9B5C38]/8 backdrop-blur-xl ${className}`}
+      whileHover={{ y: -4, boxShadow: "0 22px 56px rgba(155,92,56,0.13)" }}
     >
-      <div className="mb-5 flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#C4795A] to-[#9B5C38] text-white shadow-lg shadow-[#C4795A]/25">
-          {createElement(Icon, { size: 18 })}
+      {/* gradient accent bar */}
+      <div style={{ height: 3, background: "linear-gradient(90deg, #4A9BA8 0%, #C4795A 50%, #E8C4A0 100%)" }} />
+      <div className="p-5">
+        <div className="mb-5 flex items-start gap-3">
+          <div
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-white"
+            style={{
+              background: "linear-gradient(135deg, #C4795A 0%, #9B5C38 100%)",
+              boxShadow: "0 6px 20px rgba(196,121,90,0.35)",
+            }}
+          >
+            {createElement(Icon, { size: 19 })}
+          </div>
+          <div className="min-w-0 text-right">
+            <h2 className="text-base font-extrabold text-gray-900">{title}</h2>
+            {subtitle ? <p className="mt-1 text-xs leading-5 text-gray-500">{subtitle}</p> : null}
+          </div>
         </div>
-        <div className="min-w-0 text-right">
-          <h2 className="text-base font-extrabold text-gray-900">{title}</h2>
-          {subtitle ? <p className="mt-1 text-xs leading-5 text-gray-500">{subtitle}</p> : null}
-        </div>
+        {children}
       </div>
-      {children}
     </Motion.section>
   );
 }
 
 function StatCard({ icon: Icon, label, value, helper, index = 0 }) {
+  const theme = STAT_THEMES[index % STAT_THEMES.length];
   return (
     <Motion.article
       variants={fadeUp}
-      whileHover={{ y: -6, boxShadow: "0 18px 50px rgba(196,121,90,0.15)" }}
-      className="group relative overflow-hidden rounded-3xl border border-white/75 bg-white/80 p-5 shadow-xl shadow-[#9B5C38]/5 backdrop-blur-xl"
+      whileHover={{ y: -7, boxShadow: `0 22px 56px ${theme.glow}` }}
+      className="group relative overflow-hidden rounded-3xl p-5 shadow-xl"
+      style={{ background: theme.gradient, boxShadow: `0 8px 28px ${theme.glow}` }}
     >
-      <div className="absolute -left-12 -top-12 h-32 w-32 rounded-full bg-[#F2D4BE]/55 blur-2xl transition-opacity group-hover:opacity-80" />
+      {/* shimmer bubble */}
+      <div
+        className="pointer-events-none absolute -left-10 -top-10 h-36 w-36 rounded-full blur-2xl transition-opacity group-hover:opacity-60"
+        style={{ background: theme.shimmer }}
+      />
+      {/* sparkle corner */}
+      <div
+        className="pointer-events-none absolute -bottom-6 -right-6 h-28 w-28 rounded-full blur-2xl"
+        style={{ background: theme.shimmer }}
+      />
       <div className="relative flex items-start justify-between gap-4">
         <div className="text-right">
-          <p className="text-3xl font-black tabular-nums text-gray-900">
+          <p className="text-3xl font-black tabular-nums text-white drop-shadow-sm">
             <CountUp end={value || 0} duration={1.7} delay={0.15 + index * 0.08} separator="," />
           </p>
-          <p className="mt-1 text-sm font-bold text-[#8B5030]">{label}</p>
-          {helper ? <p className="mt-1 text-xs text-gray-400">{helper}</p> : null}
+          <p className="mt-1 text-sm font-bold text-white/85">{label}</p>
+          {helper ? <p className="mt-1 text-xs text-white/55">{helper}</p> : null}
         </div>
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-[#C4795A]/10 text-[#C4795A]">
+        <div
+          className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-white"
+          style={{ background: theme.icon, backdropFilter: "blur(8px)", border: "1px solid rgba(255,255,255,0.25)" }}
+        >
           {createElement(Icon, { size: 22 })}
         </div>
       </div>
@@ -156,18 +237,21 @@ function WarmBar({ label, count, max, color, index = 0, mainRef }) {
       viewport={{ root: mainRef, once: true }}
       transition={{ duration: 0.35, delay: index * 0.05 }}
     >
-      <span className="truncate text-right text-xs font-semibold text-gray-500 group-hover:text-gray-800">{label}</span>
-      <div className="h-2.5 overflow-hidden rounded-full bg-[#F5EDE3]">
+      <span className="truncate text-right text-xs font-semibold text-gray-500 group-hover:text-gray-800 transition-colors">{label}</span>
+      <div className="h-3 overflow-hidden rounded-full" style={{ background: `${color}18` }}>
         <Motion.div
           className="h-full rounded-full"
           initial={{ width: 0 }}
           whileInView={{ width: `${pct}%` }}
           viewport={{ root: mainRef, once: true }}
           transition={{ duration: 0.9, delay: index * 0.04 + 0.1, ease: [0.22, 1, 0.36, 1] }}
-          style={{ background: `linear-gradient(90deg, ${color}88, ${color})` }}
+          style={{
+            background: `linear-gradient(90deg, ${color}99, ${color})`,
+            boxShadow: count > 0 ? `0 0 10px ${color}60, 0 2px 6px ${color}40` : "none",
+          }}
         />
       </div>
-      <span className="text-left text-xs font-black tabular-nums" style={{ color }}>{count}</span>
+      <span className="text-left text-xs font-black tabular-nums" style={{ color, textShadow: `0 0 8px ${color}50` }}>{count}</span>
     </Motion.div>
   );
 }
@@ -176,19 +260,29 @@ function MonthBar({ label, count, max, index = 0 }) {
   const pct = max > 0 ? Math.round((count / max) * 100) : 0;
   return (
     <div className="flex min-w-0 flex-1 flex-col items-center gap-2">
-      <Motion.span className="text-xs font-black text-[#8B5030]" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: index * 0.08 + 0.35 }}>
+      <Motion.span
+        className="text-xs font-black"
+        style={{ color: count > 0 ? "#C4795A" : "#9CA3AF", textShadow: count > 0 ? "0 0 10px rgba(196,121,90,0.5)" : "none" }}
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: index * 0.08 + 0.35 }}
+      >
         {count || ""}
       </Motion.span>
-      <div className="flex h-24 w-full items-end overflow-hidden rounded-t-2xl bg-[#F5EDE3]/80">
+      <div className="flex h-24 w-full items-end overflow-hidden rounded-t-2xl" style={{ background: "rgba(196,121,90,0.08)" }}>
         <Motion.div
-          className="w-full rounded-t-2xl bg-gradient-to-t from-[#C4795A] to-[#E8C4A0]"
+          className="w-full rounded-t-2xl"
           initial={{ height: 0 }}
           animate={{ height: `${pct}%` }}
           transition={{ duration: 0.85, delay: index * 0.08 + 0.1, ease: [0.34, 1.56, 0.64, 1] }}
-          style={{ minHeight: count > 0 ? 5 : 0 }}
+          style={{
+            minHeight: count > 0 ? 5 : 0,
+            background: "linear-gradient(to top, #9B5C38, #C4795A, #E8C4A0)",
+            boxShadow: count > 0 ? "0 -4px 16px rgba(196,121,90,0.45), 0 0 8px rgba(196,121,90,0.3)" : "none",
+          }}
         />
       </div>
-      <span className="text-center text-xs text-gray-400">{label}</span>
+      <span className="text-center text-xs font-semibold text-gray-400">{label}</span>
     </div>
   );
 }
@@ -337,14 +431,20 @@ function ContactInquiriesSection({ inquiries, onStatusChange, onFeedbackAdd, mai
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${isHandled ? "bg-emerald-50 text-emerald-700" : "bg-[#C4795A]/10 text-[#8B5030]"}`}>
+                  <span
+                    className="rounded-full px-3 py-1 text-xs font-bold text-white"
+                    style={isHandled
+                      ? { background: "linear-gradient(135deg, #10B981, #059669)", boxShadow: "0 3px 10px rgba(16,185,129,0.35)" }
+                      : { background: "linear-gradient(135deg, #4A9BA8, #2E7A87)", boxShadow: "0 3px 10px rgba(74,155,168,0.40)" }
+                    }
+                  >
                     {isHandled ? "טופל" : "חדש"}
                   </span>
                   {isHandled ? (
                     <button
                       type="button"
                       onClick={() => onStatusChange(inquiry.id, "new")}
-                      className="rounded-full border border-[#C4795A]/25 bg-white/80 px-4 py-2 text-xs font-bold text-[#8B5030] transition hover:bg-[#F5EDE3]"
+                      className="rounded-full border border-[#4A9BA8]/30 bg-white/80 px-4 py-2 text-xs font-bold text-[#2E7A87] transition hover:bg-[#EBF8FA]"
                     >
                       החזר לחדש
                     </button>
@@ -352,7 +452,8 @@ function ContactInquiriesSection({ inquiries, onStatusChange, onFeedbackAdd, mai
                     <button
                       type="button"
                       onClick={() => onStatusChange(inquiry.id, "handled")}
-                      className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-4 py-2 text-xs font-bold text-white shadow-lg shadow-[#C4795A]/20 transition hover:shadow-[#C4795A]/30"
+                      className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold text-white transition"
+                      style={{ background: "linear-gradient(135deg, #10B981, #059669)", boxShadow: "0 4px 14px rgba(16,185,129,0.35)" }}
                     >
                       <CheckCircle2 size={14} />
                       טופל
@@ -1273,14 +1374,20 @@ function JobApplicationsSection({ applications, onStatusChange, onFeedbackAdd, m
                   </div>
 
                   <div className="flex flex-wrap items-center gap-2 lg:justify-end">
-                    <span className={`rounded-full px-3 py-1 text-xs font-bold ${isHandled ? "bg-emerald-50 text-emerald-700" : "bg-[#C4795A]/10 text-[#8B5030]"}`}>
+                    <span
+                      className="rounded-full px-3 py-1 text-xs font-bold text-white"
+                      style={isHandled
+                        ? { background: "linear-gradient(135deg, #10B981, #059669)", boxShadow: "0 3px 10px rgba(16,185,129,0.35)" }
+                        : { background: "linear-gradient(135deg, #4A9BA8, #2E7A87)", boxShadow: "0 3px 10px rgba(74,155,168,0.40)" }
+                      }
+                    >
                       {isHandled ? "טופל" : "חדש"}
                     </span>
                     {isHandled ? (
                       <button
                         type="button"
                         onClick={() => onStatusChange(app.id, "חדש")}
-                        className="rounded-full border border-[#C4795A]/25 bg-white/80 px-4 py-2 text-xs font-bold text-[#8B5030] transition hover:bg-[#F5EDE3]"
+                        className="rounded-full border border-[#4A9BA8]/30 bg-white/80 px-4 py-2 text-xs font-bold text-[#2E7A87] transition hover:bg-[#EBF8FA]"
                       >
                         החזר לחדש
                       </button>
@@ -1288,7 +1395,8 @@ function JobApplicationsSection({ applications, onStatusChange, onFeedbackAdd, m
                       <button
                         type="button"
                         onClick={() => onStatusChange(app.id, "טופל")}
-                        className="inline-flex items-center gap-1.5 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-4 py-2 text-xs font-bold text-white shadow-lg shadow-[#C4795A]/20 transition hover:shadow-[#C4795A]/30"
+                        className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold text-white transition"
+                        style={{ background: "linear-gradient(135deg, #10B981, #059669)", boxShadow: "0 4px 14px rgba(16,185,129,0.35)" }}
                       >
                         <CheckCircle2 size={14} />
                         טופל
@@ -1356,25 +1464,38 @@ function JobApplicationsSection({ applications, onStatusChange, onFeedbackAdd, m
 function Sidebar({ collapsed, onToggle, activeTab, onTabChange }) {
   return (
     <Motion.aside
-      className="hidden h-full shrink-0 flex-col overflow-hidden border-l border-white/75 bg-white/65 shadow-xl shadow-[#9B5C38]/5 backdrop-blur-xl lg:flex"
-      animate={{ width: collapsed ? 72 : 236 }}
+      className="hidden h-full shrink-0 flex-col overflow-hidden lg:flex"
+      style={{
+        background: "linear-gradient(180deg, #160804 0%, #2C1A0A 45%, #3D2418 100%)",
+        borderLeft: "1px solid rgba(196,121,90,0.18)",
+        boxShadow: "-4px 0 32px rgba(0,0,0,0.25), inset -1px 0 0 rgba(196,121,90,0.08)",
+      }}
+      animate={{ width: collapsed ? 72 : 240 }}
       transition={{ type: "spring", stiffness: 300, damping: 30 }}
     >
-      <div className="flex items-center gap-3 border-b border-[#E8C4A0]/35 px-4 py-5">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-[#C4795A] to-[#9B5C38] text-white shadow-lg shadow-[#C4795A]/25">
-          <BarChart2 size={18} />
-        </div>
-        <AnimatePresence>
-          {!collapsed && (
-            <Motion.div initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -8 }}>
-              <p className="whitespace-nowrap text-sm font-black text-gray-900">MeDay Admin</p>
-              <p className="whitespace-nowrap text-xs text-gray-400">ניהול קליניקה</p>
+      {/* Logo zone */}
+      <div
+        className="flex items-center justify-center border-b px-4 py-5"
+        style={{ borderColor: "rgba(196,121,90,0.18)", minHeight: 84 }}
+      >
+        <AnimatePresence mode="wait">
+          {collapsed ? (
+            <Motion.div key="collapsed-logo" initial={{ opacity: 0, scale: 0.7 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.7 }}>
+              <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+                <polygon points="11,0 22,11 11,22 0,11" fill="#C4795A" opacity="0.9" />
+                <polygon points="11,5 17,11 11,17 5,11" fill="#2C1A0A" />
+              </svg>
+            </Motion.div>
+          ) : (
+            <Motion.div key="full-logo" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>
+              <LogoMark size="sm" />
             </Motion.div>
           )}
         </AnimatePresence>
       </div>
 
-      <nav className="flex-1 space-y-1 px-3 py-4">
+      {/* Nav */}
+      <nav className="flex-1 space-y-1 px-2.5 py-4">
         {NAV_ITEMS.map((item, index) => {
           const Icon = item.icon;
           const isActive = activeTab === item.key;
@@ -1383,22 +1504,49 @@ function Sidebar({ collapsed, onToggle, activeTab, onTabChange }) {
               key={item.label}
               type="button"
               onClick={() => onTabChange(item.key)}
-              className={`flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-right transition ${isActive ? "bg-[#C4795A]/12 text-[#8B5030] shadow-sm" : "text-gray-500 hover:bg-white/70 hover:text-gray-900"}`}
+              className="flex w-full items-center gap-3 rounded-2xl px-3 py-3 text-right transition-all duration-200"
+              style={
+                isActive
+                  ? {
+                      background: "linear-gradient(90deg, rgba(196,121,90,0.22) 0%, rgba(196,121,90,0.06) 100%)",
+                      boxShadow: "inset 2px 0 0 #C4795A, 0 0 20px rgba(196,121,90,0.08)",
+                      color: "#E8C4A0",
+                    }
+                  : { color: "rgba(232,196,160,0.40)" }
+              }
               initial={{ opacity: 0, x: 18 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ delay: index * 0.05 + 0.1 }}
+              whileHover={!isActive ? { color: "rgba(232,196,160,0.80)", backgroundColor: "rgba(255,255,255,0.04)" } : {}}
               whileTap={{ scale: 0.96 }}
             >
-              <Icon size={18} className="shrink-0" />
+              <Icon size={18} className="shrink-0" style={{ filter: isActive ? "drop-shadow(0 0 6px rgba(196,121,90,0.6))" : "none" }} />
               <AnimatePresence>
-                {!collapsed && <Motion.span className="whitespace-nowrap text-sm font-bold" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}>{item.label}</Motion.span>}
+                {!collapsed && (
+                  <Motion.span
+                    className="whitespace-nowrap text-sm font-bold"
+                    initial={{ opacity: 0 }}
+                    animate={{ opacity: 1 }}
+                    exit={{ opacity: 0 }}
+                  >
+                    {item.label}
+                  </Motion.span>
+                )}
               </AnimatePresence>
             </Motion.button>
           );
         })}
       </nav>
 
-      <button type="button" onClick={onToggle} className="m-3 flex items-center justify-center rounded-2xl bg-[#FAF6F1] p-3 text-[#8B5030] transition hover:bg-[#F5EDE3]">
+      {/* Collapse toggle */}
+      <button
+        type="button"
+        onClick={onToggle}
+        className="m-3 flex items-center justify-center rounded-2xl p-3 transition-all duration-200"
+        style={{ background: "rgba(196,121,90,0.10)", color: "#C4795A" }}
+        onMouseEnter={e => { e.currentTarget.style.background = "rgba(196,121,90,0.20)"; }}
+        onMouseLeave={e => { e.currentTarget.style.background = "rgba(196,121,90,0.10)"; }}
+      >
         <Motion.div animate={{ rotate: collapsed ? 180 : 0 }}>
           <ChevronRight size={16} />
         </Motion.div>
@@ -1409,7 +1557,7 @@ function Sidebar({ collapsed, onToggle, activeTab, onTabChange }) {
 
 function MobileTabBar({ activeTab, onTabChange }) {
   return (
-    <div className="flex gap-2 overflow-x-auto rounded-3xl border border-white/70 bg-white/60 p-2 shadow-sm backdrop-blur lg:hidden">
+    <div className="flex gap-2 overflow-x-auto rounded-3xl border border-white/60 bg-white/55 p-2 shadow-md backdrop-blur-xl lg:hidden">
       {NAV_ITEMS.map((item) => {
         const Icon = item.icon;
         const isActive = activeTab === item.key;
@@ -1418,7 +1566,16 @@ function MobileTabBar({ activeTab, onTabChange }) {
             key={item.key}
             type="button"
             onClick={() => onTabChange(item.key)}
-            className={`flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-xs font-bold transition ${isActive ? "bg-[#C4795A] text-white shadow-lg shadow-[#C4795A]/20" : "bg-white/75 text-[#8B5030] hover:bg-[#F5EDE3]"}`}
+            className="flex shrink-0 items-center gap-2 rounded-full px-4 py-2 text-xs font-bold transition-all duration-200"
+            style={
+              isActive
+                ? {
+                    background: "linear-gradient(135deg, #C4795A, #9B5C38)",
+                    color: "white",
+                    boxShadow: "0 4px 16px rgba(196,121,90,0.40)",
+                  }
+                : { background: "rgba(255,255,255,0.75)", color: "#8B5030" }
+            }
           >
             <Icon size={15} />
             {item.label}
@@ -1429,22 +1586,58 @@ function MobileTabBar({ activeTab, onTabChange }) {
   );
 }
 
-function TopBar({ onRefresh, refreshing }) {
+function TopBar({ onRefresh, refreshing, unreadCount = 0, currentTab }) {
+  const tabLabel = NAV_ITEMS.find(i => i.key === currentTab)?.label ?? "";
   return (
-    <div className="sticky top-0 z-20 border-b border-white/70 bg-[#FAF6F1]/80 px-4 py-3 backdrop-blur-xl sm:px-6">
+    <div
+      className="sticky top-0 z-20 px-4 py-3 sm:px-6"
+      style={{
+        background: "rgba(250,247,242,0.82)",
+        backdropFilter: "blur(20px)",
+        borderBottom: "1px solid rgba(196,121,90,0.12)",
+        boxShadow: "0 1px 20px rgba(155,92,56,0.06)",
+      }}
+    >
       <div className="mx-auto flex max-w-7xl items-center gap-3">
-        <div className="flex min-w-0 flex-1 items-center gap-2 rounded-full border border-white/75 bg-white/70 px-4 py-2 shadow-sm">
+        {/* breadcrumb */}
+        {tabLabel && (
+          <div className="hidden items-center gap-2 sm:flex">
+            <span className="text-xs font-bold text-[#C4795A]">Admin</span>
+            <ChevronRight size={12} className="text-[#C4795A]/40" />
+            <span className="text-xs font-bold text-gray-700">{tabLabel}</span>
+          </div>
+        )}
+        <div
+          className="flex min-w-0 flex-1 items-center gap-2 rounded-full px-4 py-2"
+          style={{ background: "rgba(255,255,255,0.80)", border: "1px solid rgba(196,121,90,0.18)", boxShadow: "0 2px 8px rgba(155,92,56,0.06)" }}
+        >
           <Search size={15} className="shrink-0 text-[#C4795A]" />
           <input type="text" placeholder="חיפוש..." dir="rtl" className="w-full bg-transparent text-sm text-gray-700 outline-none placeholder:text-gray-400" />
         </div>
-        <button type="button" onClick={onRefresh} className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-[#8B5030] shadow-sm transition hover:bg-[#F5EDE3]">
+        <button
+          type="button"
+          onClick={onRefresh}
+          className="flex h-10 w-10 items-center justify-center rounded-full transition-all duration-200"
+          style={{ background: "rgba(255,255,255,0.80)", color: "#8B5030", border: "1px solid rgba(196,121,90,0.15)" }}
+        >
           <Motion.span animate={refreshing ? { rotate: 360 } : {}} transition={{ duration: 0.8, repeat: refreshing ? Infinity : 0, ease: "linear" }}>
             <RefreshCw size={17} />
           </Motion.span>
         </button>
-        <button type="button" className="relative flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-[#8B5030] shadow-sm transition hover:bg-[#F5EDE3]">
+        <button
+          type="button"
+          className="relative flex h-10 w-10 items-center justify-center rounded-full transition-all duration-200"
+          style={{ background: "rgba(255,255,255,0.80)", color: "#8B5030", border: "1px solid rgba(196,121,90,0.15)" }}
+        >
           <Bell size={17} />
-          <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-[#C4795A]" />
+          {unreadCount > 0 && (
+            <span
+              className="absolute -right-1 -top-1 flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1 text-[9px] font-black text-white"
+              style={{ background: "linear-gradient(135deg, #C4795A, #9B5C38)", boxShadow: "0 2px 8px rgba(196,121,90,0.5)" }}
+            >
+              {unreadCount > 9 ? "9+" : unreadCount}
+            </span>
+          )}
         </button>
       </div>
     </div>
@@ -1610,36 +1803,96 @@ export default function AdminDashboard() {
       />
 
       <div className="relative z-10 flex min-w-0 flex-1 flex-col overflow-hidden">
-        <TopBar onRefresh={() => load(true)} refreshing={refreshing} />
+        <TopBar
+          onRefresh={() => load(true)}
+          refreshing={refreshing}
+          unreadCount={contactInquiries.filter(i => i.status === "new").length + jobApplications.filter(a => a.status === "חדש").length}
+          currentTab={activeTab}
+        />
 
         <main ref={mainRef} className="flex-1 overflow-y-auto px-4 pb-10 pt-5 sm:px-6">
           <div className="mx-auto max-w-7xl space-y-6">
-            <Motion.header variants={fadeUp} initial="hidden" animate="show" className="relative overflow-hidden rounded-[2rem] bg-gradient-to-br from-[#2C1A0A] via-[#5E3420] to-[#C4795A] p-6 text-white shadow-2xl shadow-[#9B5C38]/20 sm:p-8">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_15%,rgba(232,196,160,0.45),transparent_34%),radial-gradient(circle_at_85%_0%,rgba(255,255,255,0.22),transparent_28%)]" />
-              <div className="relative grid gap-6 lg:grid-cols-[1fr_auto] lg:items-end">
-                <div className="text-right">
-                  <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-bold backdrop-blur">
-                    <Sparkles size={14} className="text-[#E8C4A0]" />
-                    MeDay Beauty Center
+            <Motion.header
+              variants={fadeUp}
+              initial="hidden"
+              animate="show"
+              className="relative overflow-hidden rounded-[2rem] text-white shadow-2xl shadow-[#9B5C38]/25"
+              style={{
+                background: "linear-gradient(135deg, #160804 0%, #2C1A0A 30%, #5E3420 70%, #C4795A 100%)",
+                boxShadow: "0 20px 60px rgba(22,8,4,0.45), 0 0 0 1px rgba(196,121,90,0.20)",
+              }}
+            >
+              {/* multi-layer glow overlay */}
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  background: [
+                    "radial-gradient(circle at 10% 10%, rgba(232,196,160,0.30) 0%, transparent 40%)",
+                    "radial-gradient(circle at 90% 0%, rgba(255,255,255,0.12) 0%, transparent 30%)",
+                    "radial-gradient(circle at 50% 100%, rgba(196,121,90,0.20) 0%, transparent 50%)",
+                  ].join(", "),
+                }}
+              />
+              <div className="relative p-6 sm:p-8">
+                <div className="grid gap-6 lg:grid-cols-[1fr_auto] lg:items-center">
+                  <div className="text-right">
+                    {/* eyebrow badge */}
+                    <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-xs font-bold backdrop-blur">
+                      <Sparkles size={13} style={{ color: "#E8C4A0" }} />
+                      <span style={{ color: "#E8C4A0" }}>MeDay Beauty Center</span>
+                    </div>
+                    {/* title with gradient text */}
+                    <h1
+                      className="text-4xl font-black leading-tight sm:text-5xl"
+                      style={{
+                        background: "linear-gradient(135deg, #FFFFFF 30%, #E8C4A0 100%)",
+                        WebkitBackgroundClip: "text",
+                        WebkitTextFillColor: "transparent",
+                        backgroundClip: "text",
+                        filter: "drop-shadow(0 2px 12px rgba(232,196,160,0.30))",
+                      }}
+                    >
+                      אזור ניהול
+                    </h1>
+                    {/* diamond divider */}
+                    <div className="my-4 flex items-center gap-4">
+                      <div style={{ flex: 1, height: 1, background: "linear-gradient(to left, rgba(232,196,160,0.40), transparent)", maxWidth: 120 }} />
+                      <svg width="8" height="8" viewBox="0 0 8 8">
+                        <polygon points="4,0 8,4 4,8 0,4" fill="#E8C4A0" opacity="0.75" />
+                        <polygon points="4,2 6,4 4,6 2,4" fill="#2C1A0A" />
+                      </svg>
+                      <div style={{ flex: 1, height: 1, background: "linear-gradient(to right, rgba(232,196,160,0.40), transparent)", maxWidth: 120 }} />
+                    </div>
+                    <p className="max-w-xl text-sm leading-7" style={{ color: "rgba(255,255,255,0.60)" }}>
+                      {new Intl.DateTimeFormat("he-IL", { weekday: "long", year: "numeric", month: "long", day: "numeric" }).format(new Date())}
+                      {" · "}
+                      מבט מקצועי על הפעילות של הקליניקה
+                    </p>
                   </div>
-                  <h1 className="text-4xl font-black leading-tight sm:text-5xl">אזור ניהול</h1>
-                  <p className="mt-3 max-w-2xl text-sm leading-7 text-white/70">
-                    מבט מקצועי ועדין על התורים, הטיפולים המבוקשים ותובנות הפעילות של הקליניקה.
-                  </p>
-                </div>
-                <div className="flex flex-wrap gap-3 lg:justify-end">
-                  <button type="button" onClick={() => window.location.assign("/")} className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-5 py-3 text-sm font-bold text-white backdrop-blur transition hover:bg-white/20">
-                    <Home size={17} />
-                    חזרה לדף הראשי
-                  </button>
-                  <button type="button" onClick={() => window.location.assign("/secretary")} className="inline-flex items-center gap-2 rounded-full bg-white px-5 py-3 text-sm font-bold text-[#8B5030] shadow-lg transition hover:bg-[#FAF6F1]">
-                    <CalendarDays size={17} />
-                    יומן וניהול תורים
-                  </button>
-                  <button type="button" onClick={() => exportCsv(analytics.recent)} className="inline-flex items-center gap-2 rounded-full border border-white/25 bg-white/10 px-5 py-3 text-sm font-bold text-white backdrop-blur transition hover:bg-white/20">
-                    <Download size={17} />
-                    ייצוא CSV
-                  </button>
+                  <div className="flex flex-wrap gap-3 lg:flex-col lg:items-end">
+                    <button
+                      type="button"
+                      onClick={() => window.location.assign("/")}
+                      className="inline-flex items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-bold text-white backdrop-blur transition"
+                      style={{ borderColor: "rgba(255,255,255,0.22)", background: "rgba(255,255,255,0.08)" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "rgba(255,255,255,0.16)"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.08)"; }}
+                    >
+                      <Home size={16} />
+                      חזרה לאתר
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.location.assign("/secretary")}
+                      className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold transition"
+                      style={{ background: "rgba(255,255,255,0.95)", color: "#8B5030", boxShadow: "0 4px 16px rgba(0,0,0,0.20)" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#FAF6F1"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
+                    >
+                      <CalendarDays size={16} />
+                      יומן תורים
+                    </button>
+                  </div>
                 </div>
               </div>
             </Motion.header>
@@ -1648,29 +1901,15 @@ export default function AdminDashboard() {
 
             {activeTab === "dashboard" ? (
               <>
-            <Motion.div variants={fadeUp} {...inView(mainRef)} className="flex flex-col gap-3 rounded-3xl border border-white/70 bg-white/60 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap gap-2">
-                {RANGES.map((range) => (
-                  <button
-                    key={range.key}
-                    type="button"
-                    onClick={() => setActiveRange(range.key)}
-                    className={`rounded-full px-4 py-2 text-xs font-bold transition ${activeRange === range.key ? "bg-[#C4795A] text-white shadow-lg shadow-[#C4795A]/20" : "bg-white/75 text-[#8B5030] hover:bg-[#F5EDE3]"}`}
-                  >
-                    {range.label}
-                  </button>
-                ))}
-              </div>
-              <p className="px-2 text-xs text-gray-400">מתעדכן אוטומטית כל דקה</p>
-            </Motion.div>
-
+            {/* KPI cards */}
             <Motion.div variants={stagger} initial="hidden" whileInView="show" viewport={{ root: mainRef, once: true }} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-              <StatCard index={0} icon={Users} label="סה״כ תורים" value={data.total ?? 0} helper="כלל ההזמנות בטווח" />
+              <StatCard index={0} icon={Users} label="סה״כ תורים" value={data.total ?? 0} helper="כלל ההזמנות" />
               <StatCard index={1} icon={Calendar} label="תורים היום" value={data.today ?? 0} helper="פעילות יומית" />
               <StatCard index={2} icon={TrendingUp} label="תורים השבוע" value={data.this_week ?? 0} helper="מומנטום שבועי" />
               <StatCard index={3} icon={Sparkles} label="סוגי טיפולים" value={analytics.byTreatment.length} helper="טיפולים עם ביקוש" />
             </Motion.div>
 
+            {/* Monthly trend + AI insights */}
             <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
               <SectionCard icon={TrendingUp} title="מגמה חודשית" subtitle="6 חודשים אחרונים" className="lg:col-span-2">
                 {analytics.monthlyTrend.length > 0 ? (
@@ -1684,74 +1923,25 @@ export default function AdminDashboard() {
               <AiInsights data={data} mainRef={mainRef} />
             </Motion.div>
 
-            <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-              <SectionCard icon={Sparkles} title="טיפולים מבוקשים" subtitle="עניין לקוחות לפי סוג טיפול">
-                {analytics.byTreatment.length === 0 ? (
-                  <EmptyState icon={Sparkles} title="אין עדיין עניין בטיפולים" text="לאחר הזמנות ראשונות נראה כאן את הטיפולים המובילים." />
-                ) : (
-                  <div className="space-y-3">
-                    {analytics.byTreatment.map((treatment, index) => <WarmBar key={treatment.name} label={treatment.name} count={treatment.count} max={maxTreatment} color={CHART_COLORS[index % CHART_COLORS.length]} index={index} mainRef={mainRef} />)}
-                  </div>
-                )}
-              </SectionCard>
-
-              <SectionCard icon={BarChart2} title="תורים לפי קטגוריה" subtitle="חלוקה בין תחומי הטיפול">
-                {donutSegs.length === 0 ? (
-                  <EmptyState icon={BarChart2} />
-                ) : (
-                  <div className="flex flex-col items-center gap-5 sm:flex-row">
-                    <DonutChart segments={donutSegs} total={data.total ?? 0} />
-                    <div className="w-full flex-1 space-y-2">
-                      {donutSegs.map((segment) => (
-                        <div key={segment.label} className="flex items-center gap-2 rounded-2xl bg-[#FAF6F1] px-3 py-2">
-                          <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: segment.color }} />
-                          <span className="min-w-0 flex-1 truncate text-xs font-semibold text-gray-600">{segment.label}</span>
-                          <span className="text-xs font-black tabular-nums" style={{ color: segment.color }}>{segment.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </SectionCard>
-            </Motion.div>
-
-            <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-              <SectionCard icon={Calendar} title="תורים לפי יום" subtitle="ימים עמוסים יותר ביומן">
-                {analytics.byDay.length === 0 ? (
-                  <EmptyState icon={Calendar} />
-                ) : (
-                  <div className="space-y-3">
-                    {analytics.byDay.map((day, index) => <WarmBar key={day.day} label={day.day} count={day.count} max={maxDay} color="#C4795A" index={index} mainRef={mainRef} />)}
-                  </div>
-                )}
-              </SectionCard>
-
-              <SectionCard icon={Clock} title="שעות עמוסות" subtitle="חלונות זמן שכדאי לעקוב אחריהם">
-                {analytics.byHour.length === 0 ? (
-                  <EmptyState icon={Clock} />
-                ) : (
-                  <div className="space-y-3">
-                    {analytics.byHour.map((hour, index) => <WarmBar key={hour.hour} label={hour.hour} count={hour.count} max={maxHour} color="#9B5C38" index={index} mainRef={mainRef} />)}
-                  </div>
-                )}
-              </SectionCard>
-            </Motion.div>
-
+            {/* Contact shortcut */}
             <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-              <ContactInquiriesShortcut
-                inquiries={contactInquiries}
-                onOpen={() => setActiveTab("inquiries")}
-              />
+              <ContactInquiriesShortcut inquiries={contactInquiries} onOpen={() => setActiveTab("inquiries")} />
             </Motion.div>
 
+            {/* Activity + calendar shortcut */}
             <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
               <ActivityFeed recent={analytics.recent} mainRef={mainRef} />
               <SectionCard icon={CalendarDays} title="קיצור לניהול" subtitle="מעבר מהיר ליומן הקליניקה">
-                <div className="rounded-3xl bg-[#FAF6F1] p-5 text-right">
+                <div className="rounded-2xl p-5 text-right" style={{ background: "linear-gradient(135deg, rgba(196,121,90,0.06), rgba(74,155,168,0.04))" }}>
                   <p className="text-sm leading-7 text-gray-600">
                     ניהול תורים, זמינות צוות ועדכון שעות מתבצעים במסך היומן.
                   </p>
-                  <button type="button" onClick={() => window.location.assign("/secretary")} className="mt-5 inline-flex items-center gap-2 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-5 py-3 text-sm font-bold text-white shadow-lg shadow-[#C4795A]/25">
+                  <button
+                    type="button"
+                    onClick={() => window.location.assign("/secretary")}
+                    className="mt-5 inline-flex items-center gap-2 rounded-full px-5 py-3 text-sm font-bold text-white"
+                    style={{ background: "linear-gradient(135deg, #C4795A, #9B5C38)", boxShadow: "0 6px 20px rgba(196,121,90,0.35)" }}
+                  >
                     <CalendarDays size={17} />
                     פתיחת יומן
                   </button>
@@ -1811,29 +2001,56 @@ export default function AdminDashboard() {
 
             {activeTab === "analytics" ? (
               <>
-                <Motion.div variants={fadeUp} {...inView(mainRef)} className="flex flex-col gap-3 rounded-3xl border border-white/70 bg-white/60 p-3 shadow-sm backdrop-blur sm:flex-row sm:items-center sm:justify-between">
+                {/* Range selector + export */}
+                <Motion.div
+                  variants={fadeUp}
+                  {...inView(mainRef)}
+                  className="flex flex-col gap-3 overflow-hidden rounded-3xl p-3 shadow-md sm:flex-row sm:items-center sm:justify-between"
+                  style={{
+                    background: "linear-gradient(135deg, rgba(255,255,255,0.80) 0%, rgba(242,212,190,0.30) 100%)",
+                    border: "1px solid rgba(196,121,90,0.18)",
+                    backdropFilter: "blur(16px)",
+                  }}
+                >
                   <div className="flex flex-wrap gap-2">
                     {RANGES.map((range) => (
                       <button
                         key={range.key}
                         type="button"
                         onClick={() => setActiveRange(range.key)}
-                        className={`rounded-full px-4 py-2 text-xs font-bold transition ${activeRange === range.key ? "bg-[#C4795A] text-white shadow-lg shadow-[#C4795A]/20" : "bg-white/75 text-[#8B5030] hover:bg-[#F5EDE3]"}`}
+                        className="rounded-full px-4 py-2 text-xs font-bold transition-all duration-200"
+                        style={activeRange === range.key
+                          ? { background: "linear-gradient(135deg, #C4795A, #9B5C38)", color: "white", boxShadow: "0 4px 14px rgba(196,121,90,0.35)" }
+                          : { background: "rgba(255,255,255,0.75)", color: "#8B5030" }
+                        }
                       >
                         {range.label}
                       </button>
                     ))}
                   </div>
-                  <p className="px-2 text-xs text-gray-400">מתעדכן אוטומטית כל דקה</p>
+                  <div className="flex items-center gap-3">
+                    <p className="px-2 text-xs text-gray-400">מתעדכן אוטומטית כל דקה</p>
+                    <button
+                      type="button"
+                      onClick={() => exportCsv(analytics.recent)}
+                      className="inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-xs font-bold text-white transition"
+                      style={{ background: "linear-gradient(135deg, #4A9BA8, #2E7A87)", boxShadow: "0 3px 12px rgba(74,155,168,0.35)" }}
+                    >
+                      <Download size={13} />
+                      ייצוא CSV
+                    </button>
+                  </div>
                 </Motion.div>
 
+                {/* KPIs */}
                 <Motion.div variants={stagger} initial="hidden" whileInView="show" viewport={{ root: mainRef, once: true }} className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                  <StatCard index={0} icon={Users} label="סה״כ תורים" value={data.total ?? 0} helper="כלל ההזמנות בטווח" />
+                  <StatCard index={0} icon={Users} label="סה״כ תורים" value={data.total ?? 0} helper="בטווח שנבחר" />
                   <StatCard index={1} icon={Calendar} label="תורים היום" value={data.today ?? 0} helper="פעילות יומית" />
                   <StatCard index={2} icon={TrendingUp} label="תורים השבוע" value={data.this_week ?? 0} helper="מומנטום שבועי" />
                   <StatCard index={3} icon={Sparkles} label="סוגי טיפולים" value={analytics.byTreatment.length} helper="טיפולים עם ביקוש" />
                 </Motion.div>
 
+                {/* Treatment demand + donut */}
                 <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                   <SectionCard icon={Sparkles} title="טיפולים מבוקשים" subtitle="עניין לקוחות לפי סוג טיפול">
                     {analytics.byTreatment.length === 0 ? (
@@ -1853,8 +2070,8 @@ export default function AdminDashboard() {
                         <DonutChart segments={donutSegs} total={data.total ?? 0} />
                         <div className="w-full flex-1 space-y-2">
                           {donutSegs.map((segment) => (
-                            <div key={segment.label} className="flex items-center gap-2 rounded-2xl bg-[#FAF6F1] px-3 py-2">
-                              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: segment.color }} />
+                            <div key={segment.label} className="flex items-center gap-2 rounded-2xl bg-[#FAF6F1] px-3 py-2 transition hover:bg-[#F5EDE3]">
+                              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: segment.color, boxShadow: `0 0 6px ${segment.color}80` }} />
                               <span className="min-w-0 flex-1 truncate text-xs font-semibold text-gray-600">{segment.label}</span>
                               <span className="text-xs font-black tabular-nums" style={{ color: segment.color }}>{segment.value}</span>
                             </div>
@@ -1865,6 +2082,7 @@ export default function AdminDashboard() {
                   </SectionCard>
                 </Motion.div>
 
+                {/* Day + hour heatmaps */}
                 <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-2">
                   <SectionCard icon={Calendar} title="תורים לפי יום" subtitle="ימים עמוסים יותר ביומן">
                     {analytics.byDay.length === 0 ? (
@@ -1881,7 +2099,7 @@ export default function AdminDashboard() {
                       <EmptyState icon={Clock} />
                     ) : (
                       <div className="space-y-3">
-                        {analytics.byHour.map((hour, index) => <WarmBar key={hour.hour} label={hour.hour} count={hour.count} max={maxHour} color="#9B5C38" index={index} mainRef={mainRef} />)}
+                        {analytics.byHour.map((hour, index) => <WarmBar key={hour.hour} label={hour.hour} count={hour.count} max={maxHour} color="#4A9BA8" index={index} mainRef={mainRef} />)}
                       </div>
                     )}
                   </SectionCard>
