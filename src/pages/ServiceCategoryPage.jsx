@@ -184,6 +184,7 @@ function CosmeticSectionBlock({ section }) {
       <div className="px-10 py-8 grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-8">
         {section.treatments.map((treatment) => {
           const isOpen = openSlug === treatment.slug;
+          const extraDetails = (treatment.details || []).slice(1).filter(Boolean);
           return (
             <div key={treatment.slug} className="text-right">
               <h3
@@ -197,6 +198,7 @@ function CosmeticSectionBlock({ section }) {
               </p>
 
               {/* expandable details */}
+              {extraDetails.length > 0 && (
               <AnimatePresence initial={false}>
                 {isOpen && (
                   <motion.div
@@ -207,7 +209,7 @@ function CosmeticSectionBlock({ section }) {
                     style={{ overflow: "hidden" }}
                   >
                     <div className="mb-3 space-y-1.5">
-                      {(treatment.details || []).slice(1).map((line, i) => (
+                      {extraDetails.map((line, i) => (
                         <p key={i} className="text-sm leading-relaxed" style={{ color: "#5C4033" }}>
                           • {line}
                         </p>
@@ -216,8 +218,10 @@ function CosmeticSectionBlock({ section }) {
                   </motion.div>
                 )}
               </AnimatePresence>
+              )}
 
               {/* read more toggle */}
+              {extraDetails.length > 0 && (
               <button
                 onClick={() => setOpenSlug(isOpen ? null : treatment.slug)}
                 className="inline-flex items-center gap-1 text-sm font-semibold mb-4"
@@ -225,11 +229,12 @@ function CosmeticSectionBlock({ section }) {
               >
                 <span>{isOpen ? "סגור ▲" : "לקרוא עוד ▼"}</span>
               </button>
+              )}
 
               {/* CTA — bordered style */}
               <div>
                 <a
-                  href="https://wa.me/972"
+                  href="https://api.whatsapp.com/send?phone=97248306544"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 px-5 py-2 text-sm font-bold rounded-full transition-colors duration-200"
@@ -354,7 +359,7 @@ function PromoDescriptionBlock({ heading, paragraphs }) {
         {/* CTA */}
         <div className="mt-12">
           <a
-            href="https://wa.me/972"
+            href="https://api.whatsapp.com/send?phone=97248306544"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-9 py-3.5 font-bold text-white rounded-full transition-opacity hover:opacity-90"

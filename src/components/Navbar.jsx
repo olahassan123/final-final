@@ -20,6 +20,17 @@ const navLinks = [
   { label: "צור קשר", href: "#contact" },
 ];
 
+const PROFESSIONAL_TEAM_PATH = "/professional-team";
+
+const displayNavLinks = [
+  {
+    label: "אודות",
+    href: "/about",
+    dropdown: [{ label: "צוות מקצועי", href: PROFESSIONAL_TEAM_PATH }],
+  },
+  ...navLinks.slice(1),
+];
+
 const roleLabels = {
   admin: "מנהל",
   employee: "עובד",
@@ -53,6 +64,22 @@ function getTreatmentCategoryLinks() {
     label: category.name,
     href: `/categories/${category.slug}`,
   }));
+}
+
+function DropdownItemLink({ item, onClick, className }) {
+  if (item.external) {
+    return (
+      <a href={item.href} onClick={onClick} className={className}>
+        {item.label}
+      </a>
+    );
+  }
+
+  return (
+    <Link to={item.href} onClick={onClick} className={className}>
+      {item.label}
+    </Link>
+  );
 }
 
 function LogoMark() {
@@ -177,10 +204,14 @@ export default function Navbar({ onLoginClick }) {
     if (href.startsWith("#")) {
       event.preventDefault();
 
-      if (location.pathname !== "/") {
-        navigate(`/${href}`);
+      const target = document.querySelector(href);
+
+      if (href === "#contact" && target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      } else if (location.pathname !== "/") {
+        navigate({ pathname: "/", hash: href });
       } else {
-        document.querySelector(href)?.scrollIntoView({ behavior: "smooth" });
+        target?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     }
 
@@ -218,9 +249,10 @@ export default function Navbar({ onLoginClick }) {
           </Link>
 
           <div className="hidden items-center gap-x-8 lg:flex">
-            {navLinks.map((link, index) => {
+            {displayNavLinks.map((link, index) => {
               const isTreatmentsDropdown = link.isTreatmentsDropdown;
               const dropdownItems = isTreatmentsDropdown ? treatmentCategories : link.dropdown;
+              const isAboutDropdown = link.href === "/about";
 
               return (
                 <div
@@ -230,22 +262,45 @@ export default function Navbar({ onLoginClick }) {
                   onMouseLeave={() => dropdownItems && scheduleDropdownClose()}
                 >
                   {dropdownItems ? (
-                    <button
-                      type="button"
-                      onFocus={() => openDropdown(index)}
-                      onClick={() => {
-                        window.clearTimeout(closeTimerRef.current);
-                        setActiveDropdown((current) => (current === index ? null : index));
-                      }}
-                      className="flex items-center gap-1 font-medium text-gray-700 transition-colors hover:text-primary-dark"
-                    >
-                      {link.label}
-                      <ChevronDown
-                        className={`h-4 w-4 transition-transform ${
-                          activeDropdown === index ? "rotate-180" : ""
+                    isAboutDropdown ? (
+                      <Link
+                        to={link.href}
+                        onFocus={() => openDropdown(index)}
+                        onClick={() => {
+                          closeMenus();
+                          resetWindowScroll();
+                        }}
+                        className={`flex items-center gap-1 font-semibold transition-colors ${
+                          location.pathname === link.href
+                            ? "text-primary"
+                            : "text-gray-700 hover:text-primary-dark"
                         }`}
-                      />
-                    </button>
+                      >
+                        {link.label}
+                        <ChevronDown
+                          className={`h-4 w-4 transition-transform ${
+                            activeDropdown === index ? "rotate-180" : ""
+                          }`}
+                        />
+                      </Link>
+                    ) : (
+                      <button
+                        type="button"
+                        onFocus={() => openDropdown(index)}
+                        onClick={() => {
+                          window.clearTimeout(closeTimerRef.current);
+                          setActiveDropdown((current) => (current === index ? null : index));
+                        }}
+                        className="flex items-center gap-1 font-medium text-gray-700 transition-colors hover:text-primary-dark"
+                      >
+                        {link.label}
+                        <ChevronDown
+                          className={`h-4 w-4 transition-transform ${
+                            activeDropdown === index ? "rotate-180" : ""
+                          }`}
+                        />
+                      </button>
+                    )
                   ) : link.href.startsWith("#") ? (
                     <a
                       href={link.href}
@@ -266,20 +321,30 @@ export default function Navbar({ onLoginClick }) {
 
                   {dropdownItems && activeDropdown === index ? (
                     <div
-                      className="absolute right-0 top-full mt-3 w-80 overflow-hidden rounded-2xl border border-accent-light bg-white/95 p-2 shadow-2xl shadow-[#9B5C38]/15 backdrop-blur-xl"
+                      className={`absolute right-0 top-full mt-3 overflow-hidden shadow-2xl shadow-[#9B5C38]/15 backdrop-blur-xl ${
+                        isAboutDropdown
+                          ? "w-44 rounded-none border-0 bg-[#F8DCC9]"
+                          : "w-80 rounded-2xl border border-accent-light bg-white/95 p-2"
+                      }`}
                       onMouseEnter={() => openDropdown(index)}
                       onMouseLeave={scheduleDropdownClose}
                     >
-                      <div className="grid max-h-[70vh] grid-cols-1 gap-1 overflow-y-auto sm:grid-cols-2">
+                      <div
+                        className={`grid max-h-[70vh] grid-cols-1 overflow-y-auto ${
+                          isAboutDropdown ? "gap-0" : "gap-1 sm:grid-cols-2"
+                        }`}
+                      >
                         {dropdownItems.map((item) => (
-                          <Link
+                          <DropdownItemLink
                             key={item.href + item.label}
-                            to={item.href}
                             onClick={handleCategoryNavigate}
-                            className="block rounded-xl px-3 py-2.5 text-right text-sm font-semibold text-gray-700 transition hover:bg-secondary hover:text-primary-dark"
-                          >
-                            {item.label}
-                          </Link>
+                            item={item}
+                            className={`block px-3 py-2.5 text-right text-sm font-semibold transition ${
+                              isAboutDropdown
+                                ? "text-[#3D2418] hover:bg-[#F1C7AB]"
+                                : "rounded-xl text-gray-700 hover:bg-secondary hover:text-primary-dark"
+                            }`}
+                          />
                         ))}
                       </div>
                     </div>
@@ -354,24 +419,33 @@ export default function Navbar({ onLoginClick }) {
           <div className="flex justify-center pb-2">
             <LogoMark />
           </div>
-          {navLinks.map((link) => {
+          {displayNavLinks.map((link) => {
             const dropdownItems = link.isTreatmentsDropdown ? treatmentCategories : link.dropdown;
+            const isAboutDropdown = link.href === "/about";
 
             return (
               <div key={link.label} className="border-b border-gray-50 pb-3">
                 {dropdownItems ? (
                   <div className="space-y-2 py-2">
-                    <p className="text-base font-bold text-gray-800">{link.label}</p>
+                    {isAboutDropdown ? (
+                      <Link
+                        to={link.href}
+                        className="block text-base font-bold text-gray-800"
+                        onClick={handleCategoryNavigate}
+                      >
+                        {link.label}
+                      </Link>
+                    ) : (
+                      <p className="text-base font-bold text-gray-800">{link.label}</p>
+                    )}
                     <div className="grid gap-2 sm:grid-cols-2">
                       {dropdownItems.map((item) => (
-                        <Link
+                        <DropdownItemLink
                           key={item.href + item.label}
-                          to={item.href}
                           onClick={handleCategoryNavigate}
-                          className="block rounded-xl px-3 py-2 text-sm font-semibold text-gray-600 transition hover:bg-primary/5 hover:text-primary-dark"
-                        >
-                          {item.label}
-                        </Link>
+                          item={item}
+                          className="block rounded-xl bg-primary/5 px-3 py-2 text-sm font-semibold text-gray-600 transition hover:bg-primary/10 hover:text-primary-dark"
+                        />
                       ))}
                     </div>
                   </div>

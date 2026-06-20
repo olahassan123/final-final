@@ -4,6 +4,8 @@ import { GoogleOAuthProvider } from "@react-oauth/google";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import Home from "./pages/Home";
+import AboutPage from "./pages/AboutPage";
+import ProfessionalTeamPage from "./pages/ProfessionalTeamPage";
 import TreatmentDetailsPage from "./pages/TreatmentDetailsPage";
 import ChatWidget from "./components/ChatWidget";
 import CategorySelectionPage from "./pages/CategorySelectionPage";
@@ -50,13 +52,36 @@ function FloatingAuthButton({ onLoginClick }) {
 }
 
 function ScrollToTop() {
-  const { pathname, search } = useLocation();
+  const { pathname, search, hash } = useLocation();
 
   useEffect(() => {
+    if (hash) {
+      const targetId = decodeURIComponent(hash.slice(1));
+      let firstFrame;
+      let secondFrame;
+      let timeoutId;
+
+      const scrollToTarget = () => {
+        const target = document.getElementById(targetId);
+        target?.scrollIntoView({ behavior: "smooth", block: "start" });
+      };
+
+      firstFrame = requestAnimationFrame(() => {
+        secondFrame = requestAnimationFrame(scrollToTarget);
+      });
+      timeoutId = window.setTimeout(scrollToTarget, 180);
+
+      return () => {
+        cancelAnimationFrame(firstFrame);
+        cancelAnimationFrame(secondFrame);
+        window.clearTimeout(timeoutId);
+      };
+    }
+
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
     document.documentElement.scrollTop = 0;
     document.body.scrollTop = 0;
-  }, [pathname, search]);
+  }, [pathname, search, hash]);
 
   return null;
 }
@@ -65,6 +90,7 @@ function AppContent() {
   const location = useLocation();
   const [isLoginOpen, setIsLoginOpen] = useState(false);
   const isInternal = location.pathname === "/secretary" || location.pathname === "/admin";
+  const hasCustomFooter = location.pathname === "/professional-team";
 
   return (
     <div dir="rtl" className="min-h-screen bg-secondary flex flex-col">
@@ -74,6 +100,8 @@ function AppContent() {
       <main className="flex-grow">
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/professional-team" element={<ProfessionalTeamPage />} />
           <Route path="/categories" element={<CategorySelectionPage />} />
           <Route path="/categories/:categorySlug" element={<ServiceCategoryPage />} />
           <Route
@@ -110,7 +138,7 @@ function AppContent() {
         </Routes>
       </main>
       {!isInternal && <ChatWidget />}
-      {!isInternal && <Footer />}
+      {!isInternal && !hasCustomFooter && <Footer />}
       {isLoginOpen ? <LoginModal onClose={() => setIsLoginOpen(false)} /> : null}
     </div>
   );
