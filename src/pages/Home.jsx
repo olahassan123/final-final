@@ -2,10 +2,17 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, ArrowLeft, Star } from 'lucide-react';
+import facialTreatment from "../assets/facialTreatment.jpg";
+import eyebrows from "../assets/eyebrows.jpg";
+import spa from "../assets/spa.jpg";
+import nails from "../assets/nails.jpg";
+
+
+
 
 /* ─── Treatment categories shown in the home grid ──────────────── */
 const CATEGORIES = [
-  { slug: 'manicure-pedicure',      name: 'מניקור ופדיקור',         type: 'image', img: 'photo-1596755389378-c31d21fd1273' },
+  { slug: 'manicure-pedicure',      name: 'מניקור ופדיקור',         type: 'image', img: nails },
   { slug: 'hair-design',            name: 'עיצוב שיער',             type: 'solid', bg: '#4A9BA8',  text: '#fff' },
   { slug: 'cosmetology',            name: 'טיפולי קוסמטיקה',        type: 'image', img: 'photo-1570172619644-dfd03ed5d881' },
   { slug: 'body-treatments',        name: 'טיפולי גוף',             type: 'solid', bg: '#F5DDD0',  text: '#3D2B1F' },
@@ -242,7 +249,7 @@ function WhyChooseUs() {
               style={{ boxShadow: '0 28px 72px rgba(74,155,168,0.20), 0 8px 24px rgba(0,0,0,0.08)' }}
             >
               <img
-                src="https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&w=700&q=85"
+                src={facialTreatment}
                 alt="טיפול פנים מקצועי ב-MeDay"
                 className="w-full h-full object-cover"
               />
@@ -297,10 +304,10 @@ export default function Home() {
 
   /* carousel */
   const slides = [
-    { src: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&w=900&q=90', alt: 'ניתוח עור AI',       type: 'scan' },
-    { src: 'https://images.unsplash.com/photo-1570172619644-dfd03ed5d881?auto=format&fit=crop&w=900&q=90', alt: 'טיפול פנים',         type: 'label', badge: 'טיפול פנים מקצועי' },
-    { src: 'https://images.unsplash.com/photo-1616394584738-fc6e612e71b9?auto=format&fit=crop&w=900&q=90', alt: 'עיצוב גבות',         type: 'label', badge: 'עיצוב גבות ועיניים' },
-    { src: 'https://images.unsplash.com/photo-1544161515-4ab6ce6db874?auto=format&fit=crop&w=900&q=90',   alt: 'חוויית ספא',         type: 'label', badge: 'חוויית ספא מפנקת'   },
+    { src: nails, alt: 'מניקור ופדיקור',       type: 'label', badge: 'מניקור ופדיקור' },
+    { src: facialTreatment, alt: 'טיפול פנים',         type: 'label', badge: 'טיפול פנים מקצועי' },
+    { src: eyebrows, alt: 'עיצוב גבות',         type: 'label', badge: 'עיצוב גבות ועיניים' },
+    { src: spa,   alt: 'חוויית ספא',         type: 'label', badge: 'חוויית ספא מפנקת'   },
   ];
   const [currentSlide, setCurrentSlide] = useState(0);
   useEffect(() => {
@@ -445,7 +452,7 @@ export default function Home() {
                 >
                   {/* Primary: WhatsApp booking — teal per brand system */}
                   <motion.a
-                    href="https://wa.me/972"
+                    href="https://wa.me/97248306544"
                     target="_blank"
                     rel="noopener noreferrer"
                     whileHover={{ scale: 1.05, boxShadow: '0 8px 28px rgba(74,155,168,0.42)' }}
@@ -600,7 +607,7 @@ export default function Home() {
 
               {/* CTA */}
               <motion.a
-                href="https://wa.me/972"
+                href="https://wa.me/97248306544"
                 target="_blank"
                 rel="noopener noreferrer"
                 whileHover={{ scale: 1.04, boxShadow: '0 8px 28px rgba(74,155,168,0.40)' }}
