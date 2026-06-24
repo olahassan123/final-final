@@ -1,4 +1,13 @@
 import { useRef, useState } from "react";
+import manicureSlide from "../assets/slide1.jpg";
+import hairSlide from "../assets/slide2.jpg";
+import cosmoSlide from "../assets/Como.jpg";
+import bodySlide from "../assets/body-treatments.png";
+import hairRemovalSlide from "../assets/hair-removal.png";
+import makeupSlide from "../assets/makeup-professional.png";
+import eyebrowsSlide from "../assets/eyebrows.png";
+import personalStylingSlide from "../assets/personal_styling.png";
+import aestheticSlide from "../assets/aesth.png";
 import { Link, Navigate, useParams } from "react-router-dom";
 import {
   ArrowRight, ChevronLeft, Sparkles, Scissors, Heart, Star,
@@ -9,15 +18,15 @@ import { getCategoryBySlug, getCategoryTreatments } from "../data/serviceCatalog
 
 /* ── per-category hero photos ────────────────────────────────── */
 const CATEGORY_PHOTOS = {
-  "manicure-pedicure":      "photo-1596755389378-c31d21fd1273",
-  "hair-design":            "photo-1560869713-7d0a29430803",
-  "body-treatments":        "photo-1544161515-4ab6ce6db874",
-  "cosmetology":            "photo-1570172619644-dfd03ed5d881",
-  "hair-removal":           "photo-1552693673-1bf958298935",
-  "professional-makeup":    "photo-1522337360788-8b13dee7a37e",
-  "permanent-makeup-brows": "photo-1616394584738-fc6e612e71b9",
-  "personal-styling":       "photo-1490481651871-ab68de25d43d",
-  "aesthetic-treatments":   "photo-1487412720507-e7ab37603c6f",
+  "manicure-pedicure":      manicureSlide,
+  "hair-design":            hairSlide,
+  "body-treatments":        bodySlide,
+  "cosmetology":            cosmoSlide,
+  "hair-removal":           hairRemovalSlide,
+  "professional-makeup":    makeupSlide,
+  "permanent-makeup-brows": eyebrowsSlide,
+  "personal-styling":       personalStylingSlide,
+  "aesthetic-treatments":   aestheticSlide,
 };
 
 const CATEGORY_EN = {
@@ -406,7 +415,7 @@ export default function ServiceCategoryPage() {
 
         {/* full-bleed category photo */}
         <img
-          src={`https://images.unsplash.com/${CATEGORY_PHOTOS[categorySlug] || "photo-1570172619644-dfd03ed5d881"}?auto=format&fit=crop&w=1400&q=85`}
+          src={(() => { const p = CATEGORY_PHOTOS[categorySlug] || "photo-1570172619644-dfd03ed5d881"; return p.startsWith?.("photo-") ? `https://images.unsplash.com/${p}?auto=format&fit=crop&w=1400&q=85` : p; })()}
           alt={category.name}
           className="absolute inset-0 w-full h-full object-cover object-center"
         />
