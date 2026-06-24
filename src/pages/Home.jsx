@@ -2,25 +2,27 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Sparkles, ArrowLeft, Star } from 'lucide-react';
-import facialTreatment from "../assets/facialTreatment.jpg";
-import eyebrows from "../assets/eyebrows.jpg";
-import spa from "../assets/spa.jpg";
-import nails from "../assets/nails.jpg";
-
-
-
+import makeupSlide from "../assets/makeup-professional.png";
+import manicureSlide from "../assets/slide1.jpg";
+import hairSlide from "../assets/slide2.jpg";
+import cosmoSlide from "../assets/Como.jpg";
+import eyebrowsSlide from "../assets/eyebrows.png";
+import hairRemovalSlide from "../assets/hair-removal.png";
+import bodySlide from "../assets/body-treatments.png";
+import aestheticSlide from "../assets/aesth.png";
+import personalStylingSlide from "../assets/personal_styling.png";
 
 /* ─── Treatment categories shown in the home grid ──────────────── */
 const CATEGORIES = [
-  { slug: 'manicure-pedicure',      name: 'מניקור ופדיקור',         type: 'image', img: nails },
-  { slug: 'hair-design',            name: 'עיצוב שיער',             type: 'solid', bg: '#4A9BA8',  text: '#fff' },
-  { slug: 'cosmetology',            name: 'טיפולי קוסמטיקה',        type: 'image', img: 'photo-1570172619644-dfd03ed5d881' },
-  { slug: 'body-treatments',        name: 'טיפולי גוף',             type: 'solid', bg: '#F5DDD0',  text: '#3D2B1F' },
-  { slug: 'hair-removal',           name: 'הסרת שיעור',             type: 'image', img: 'photo-1552693673-1bf958298935' },
-  { slug: 'professional-makeup',    name: 'איפור מקצועי',           type: 'solid', bg: '#E8825A',  text: '#fff' },
-  { slug: 'permanent-makeup-brows', name: 'איפור קבוע ועיצוב גבות', type: 'image', img: 'photo-1616394584738-fc6e612e71b9' },
-  { slug: 'personal-styling',       name: 'סטיילינג אישי',          type: 'solid', bg: '#EDB89A',  text: '#3D2B1F' },
-  { slug: 'aesthetic-treatments',   name: 'טיפולי אסתטיקה',         type: 'image', img: 'photo-1487412720507-e7ab37603c6f' },
+  { slug: 'manicure-pedicure',      name: 'מניקור ופדיקור',         type: 'image', img: manicureSlide },
+  { slug: 'hair-design',            name: 'עיצוב שיער',             type: 'image', img: hairSlide },
+  { slug: 'cosmetology',            name: 'טיפולי קוסמטיקה',        type: 'image', img: cosmoSlide },
+  { slug: 'body-treatments',        name: 'טיפולי גוף',             type: 'image', img: bodySlide },
+  { slug: 'hair-removal',           name: 'הסרת שיעור',             type: 'image', img: hairRemovalSlide },
+  { slug: 'professional-makeup',    name: 'איפור מקצועי',           type: 'image', img: makeupSlide },
+  { slug: 'permanent-makeup-brows', name: 'איפור קבוע ועיצוב גבות', type: 'image', img: eyebrowsSlide },
+  { slug: 'personal-styling',       name: 'סטיילינג אישי',          type: 'image', img: personalStylingSlide },
+  { slug: 'aesthetic-treatments',   name: 'טיפולי אסתטיקה',         type: 'image', img: aestheticSlide },
 ];
 
 /* ─── Scan Box ─────────────────────────────────────────────────── */
@@ -249,7 +251,7 @@ function WhyChooseUs() {
               style={{ boxShadow: '0 28px 72px rgba(74,155,168,0.20), 0 8px 24px rgba(0,0,0,0.08)' }}
             >
               <img
-                src={facialTreatment}
+                src={cosmoSlide}
                 alt="טיפול פנים מקצועי ב-MeDay"
                 className="w-full h-full object-cover"
               />
@@ -304,10 +306,16 @@ export default function Home() {
 
   /* carousel */
   const slides = [
-    { src: nails, alt: 'מניקור ופדיקור',       type: 'label', badge: 'מניקור ופדיקור' },
-    { src: facialTreatment, alt: 'טיפול פנים',         type: 'label', badge: 'טיפול פנים מקצועי' },
-    { src: eyebrows, alt: 'עיצוב גבות',         type: 'label', badge: 'עיצוב גבות ועיניים' },
-    { src: spa,   alt: 'חוויית ספא',         type: 'label', badge: 'חוויית ספא מפנקת'   },
+    { src: 'https://images.unsplash.com/photo-1531746020798-e6953c6e8e04?auto=format&fit=crop&w=900&q=90', alt: 'ניתוח עור AI', type: 'scan' },
+    { src: makeupSlide, alt: 'איפור מקצועי', type: 'label', badge: 'איפור מקצועי' },
+    { src: manicureSlide, alt: 'מניקור ופדיקור', type: 'label', badge: 'מניקור ופדיקור' },
+    { src: hairSlide, alt: 'עיצוב שיער', type: 'label', badge: 'עיצוב שיער' },
+    { src: cosmoSlide, alt: 'טיפולי קוסמטיקה', type: 'label', badge: 'טיפולי קוסמטיקה' },
+    { src: eyebrowsSlide, alt: 'איפור קבוע ועיצוב גבות', type: 'label', badge: 'איפור קבוע ועיצוב גבות' },
+    { src: bodySlide, alt: 'טיפולי גוף', type: 'label', badge: 'טיפולי גוף' },
+    { src: hairRemovalSlide, alt: 'הסרת שיעור', type: 'label', badge: 'הסרת שיעור' },
+    { src: aestheticSlide, alt: 'טיפולי אסתטיקה', type: 'label', badge: 'טיפולי אסתטיקה' },
+    { src: personalStylingSlide, alt: 'סטיילינג אישי', type: 'label', badge: 'סטיילינג אישי' },
   ];
   const [currentSlide, setCurrentSlide] = useState(0);
   useEffect(() => {
@@ -334,7 +342,7 @@ export default function Home() {
             key={currentSlide}
             src={slides[currentSlide].src}
             alt={slides[currentSlide].alt}
-            className="absolute inset-0 w-full h-full object-cover object-top"
+            className="absolute inset-0 w-full h-full object-cover object-center"
             initial={{ opacity: 0, scale: 1.04 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0 }}
@@ -415,7 +423,7 @@ export default function Home() {
                       textShadow: '0 2px 20px rgba(250,247,242,0.70)',
                     }}
                   >
-                    העור שלך
+                    הפכי לגרסה
                   </motion.h1>
                   <motion.h1
                     variants={word}
@@ -429,7 +437,7 @@ export default function Home() {
                       filter: 'drop-shadow(0 2px 12px rgba(250,247,242,0.60))',
                     }}
                   >
-                    בידיים מקצועיות
+                    שחלמת עליה
                   </motion.h1>
                 </motion.div>
 
@@ -693,7 +701,7 @@ export default function Home() {
               {cat.type === 'image' ? (
                 <>
                   <img
-                    src={`https://images.unsplash.com/${cat.img}?auto=format&fit=crop&w=450&q=80`}
+                    src={cat.img?.startsWith("photo-") ? `https://images.unsplash.com/${cat.img}?auto=format&fit=crop&w=450&q=80` : cat.img}
                     alt={cat.name}
                     className="absolute inset-0 w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
                   />

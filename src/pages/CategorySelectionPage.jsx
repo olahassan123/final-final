@@ -2,18 +2,27 @@ import React from "react";
 import { useNavigate } from "react-router-dom";
 import { motion } from "framer-motion";
 import { serviceCatalog } from "../data/serviceCatalog";
+import makeupSlide from "../assets/makeup-professional.png";
+import manicureSlide from "../assets/slide1.jpg";
+import hairSlide from "../assets/slide2.jpg";
+import cosmoSlide from "../assets/Como.jpg";
+import eyebrowsSlide from "../assets/eyebrows.png";
+import hairRemovalSlide from "../assets/hair-removal.png";
+import aestheticSlide from "../assets/aesth.png";
+import personalStylingSlide from "../assets/personal_styling.png";
+import bodySlide from "../assets/body-treatments.png";
 
 /* ── Unsplash photo per category ───────────────────────────────── */
 const CATEGORY_PHOTOS = {
-  "manicure-pedicure":      "photo-1596755389378-c31d21fd1273",
-  "hair-design":            "photo-1560869713-7d0a29430803",
-  "body-treatments":        "photo-1544161515-4ab6ce6db874",
-  "cosmetology":            "photo-1570172619644-dfd03ed5d881",
-  "hair-removal":           "photo-1552693673-1bf958298935",
-  "professional-makeup":    "photo-1522337360788-8b13dee7a37e",
-  "permanent-makeup-brows": "photo-1616394584738-fc6e612e71b9",
-  "personal-styling":       "photo-1490481651871-ab68de25d43d",
-  "aesthetic-treatments":   "photo-1487412720507-e7ab37603c6f",
+  "manicure-pedicure":      manicureSlide,
+  "hair-design":            hairSlide,
+  "body-treatments":        bodySlide,
+  "cosmetology":            cosmoSlide,
+  "hair-removal":           hairRemovalSlide,
+  "professional-makeup":    makeupSlide,
+  "permanent-makeup-brows": eyebrowsSlide,
+  "personal-styling":       personalStylingSlide,
+  "aesthetic-treatments":   aestheticSlide,
 };
 
 /* scrolling ticker items */
@@ -70,9 +79,9 @@ function CategoryCard({ category, index }) {
         {/* ── full-width image zone ── */}
         <div className="relative h-44 overflow-hidden bg-[#F5EFE8]">
           <img
-            src={`https://images.unsplash.com/${photo}?auto=format&fit=crop&w=600&q=80`}
+            src={photo?.startsWith("photo-") ? `https://images.unsplash.com/${photo}?auto=format&fit=crop&w=600&q=80` : photo}
             alt={category.name}
-            className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+            className="w-full h-full object-cover object-center transition-transform duration-700 group-hover:scale-105"
             onError={e => { e.currentTarget.style.display = "none"; }}
           />
           {/* brand colour tint over the photo */}

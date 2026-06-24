@@ -1,4 +1,13 @@
 import { useRef, useState } from "react";
+import manicureSlide from "../assets/slide1.jpg";
+import hairSlide from "../assets/slide2.jpg";
+import cosmoSlide from "../assets/Como.jpg";
+import bodySlide from "../assets/body-treatments.png";
+import hairRemovalSlide from "../assets/hair-removal.png";
+import makeupSlide from "../assets/makeup-professional.png";
+import eyebrowsSlide from "../assets/eyebrows.png";
+import personalStylingSlide from "../assets/personal_styling.png";
+import aestheticSlide from "../assets/aesth.png";
 import { Link, Navigate, useParams } from "react-router-dom";
 import {
   ArrowRight, ChevronLeft, Sparkles, Scissors, Heart, Star,
@@ -9,15 +18,15 @@ import { getCategoryBySlug, getCategoryTreatments } from "../data/serviceCatalog
 
 /* ── per-category hero photos ────────────────────────────────── */
 const CATEGORY_PHOTOS = {
-  "manicure-pedicure":      "photo-1596755389378-c31d21fd1273",
-  "hair-design":            "photo-1560869713-7d0a29430803",
-  "body-treatments":        "photo-1544161515-4ab6ce6db874",
-  "cosmetology":            "photo-1570172619644-dfd03ed5d881",
-  "hair-removal":           "photo-1552693673-1bf958298935",
-  "professional-makeup":    "photo-1522337360788-8b13dee7a37e",
-  "permanent-makeup-brows": "photo-1616394584738-fc6e612e71b9",
-  "personal-styling":       "photo-1490481651871-ab68de25d43d",
-  "aesthetic-treatments":   "photo-1487412720507-e7ab37603c6f",
+  "manicure-pedicure":      manicureSlide,
+  "hair-design":            hairSlide,
+  "body-treatments":        bodySlide,
+  "cosmetology":            cosmoSlide,
+  "hair-removal":           hairRemovalSlide,
+  "professional-makeup":    makeupSlide,
+  "permanent-makeup-brows": eyebrowsSlide,
+  "personal-styling":       personalStylingSlide,
+  "aesthetic-treatments":   aestheticSlide,
 };
 
 const CATEGORY_EN = {
@@ -149,6 +158,57 @@ const SECTION_META = {
   "everyday-styling": { eyebrow: "EVERYDAY & LESSONS"   },
 };
 
+const TREATMENT_PREVIEW_LINE_LIMIT = 4;
+const TREATMENT_PREVIEW_CHAR_LIMIT = 260;
+
+function getTreatmentContentLines(treatment) {
+  const source = treatment.details?.length
+    ? treatment.details
+    : treatment.description
+      ? treatment.description.split(/\n+/)
+      : [treatment.summary];
+
+  return source
+    .map((line) => String(line || "").trim())
+    .filter(Boolean)
+    .filter((line, index, lines) => lines.indexOf(line) === index);
+}
+
+function truncateText(text, maxLength) {
+  if (text.length <= maxLength) return text;
+
+  const sliced = text.slice(0, maxLength);
+  const withoutLastPartialWord = sliced.replace(/\s+\S*$/, "").trim();
+  return `${withoutLastPartialWord || sliced.trim()}...`;
+}
+
+function isLongTreatmentContent(lines) {
+  const contentLength = lines.join(" ").length;
+  return (
+    lines.length > TREATMENT_PREVIEW_LINE_LIMIT ||
+    contentLength > TREATMENT_PREVIEW_CHAR_LIMIT
+  );
+}
+
+function getTreatmentPreviewLines(lines) {
+  const preview = [];
+  let remainingChars = TREATMENT_PREVIEW_CHAR_LIMIT;
+
+  for (const line of lines) {
+    if (preview.length >= TREATMENT_PREVIEW_LINE_LIMIT || remainingChars <= 0) break;
+
+    if (line.length > remainingChars) {
+      preview.push(truncateText(line, remainingChars));
+      break;
+    }
+
+    preview.push(line);
+    remainingChars -= line.length + 1;
+  }
+
+  return preview;
+}
+
 function CosmeticSectionBlock({ section }) {
   const [openSlug, setOpenSlug] = useState(null);
   const meta = SECTION_META[section.slug] || SECTION_META["classic"];
@@ -184,7 +244,12 @@ function CosmeticSectionBlock({ section }) {
       <div className="px-10 py-8 grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-8">
         {section.treatments.map((treatment) => {
           const isOpen = openSlug === treatment.slug;
-          const extraDetails = (treatment.details || []).slice(1).filter(Boolean);
+          const contentLines = getTreatmentContentLines(treatment);
+          const shouldCollapse = isLongTreatmentContent(contentLines);
+          const visibleLines = isOpen || !shouldCollapse
+            ? contentLines
+            : getTreatmentPreviewLines(contentLines);
+
           return (
             <div key={treatment.slug} className="text-right">
               <h3
@@ -193,38 +258,30 @@ function CosmeticSectionBlock({ section }) {
               >
                 {treatment.name}
               </h3>
-              <p className="text-sm leading-relaxed mb-3" style={{ color: "#5C4033" }}>
-                {treatment.summary}
-              </p>
-
-              {/* expandable details */}
-              {extraDetails.length > 0 && (
-              <AnimatePresence initial={false}>
-                {isOpen && (
+              {visibleLines.length > 0 && (
+              <AnimatePresence initial={false} mode="popLayout">
                   <motion.div
+                    key={isOpen || !shouldCollapse ? "full" : "preview"}
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: "auto", opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
                     transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                     style={{ overflow: "hidden" }}
                   >
-                    <div className="mb-3 space-y-1.5">
-                      {extraDetails.map((line, i) => (
-                        <p key={i} className="text-sm leading-relaxed" style={{ color: "#5C4033" }}>
-                          • {line}
-                        </p>
+                    <div className="mb-3 space-y-1.5 text-base leading-relaxed" style={{ color: "#5C4033" }}>
+                      {visibleLines.map((line, i) => (
+                        <p key={`${treatment.slug}-line-${i}`}>{line}</p>
                       ))}
                     </div>
                   </motion.div>
-                )}
               </AnimatePresence>
               )}
 
               {/* read more toggle */}
-              {extraDetails.length > 0 && (
+              {shouldCollapse && (
               <button
                 onClick={() => setOpenSlug(isOpen ? null : treatment.slug)}
-                className="inline-flex items-center gap-1 text-sm font-semibold mb-4"
+                className="inline-flex items-center gap-1 text-base font-semibold mb-4"
                 style={{ color: "#4A9BA8" }}
               >
                 <span>{isOpen ? "סגור ▲" : "לקרוא עוד ▼"}</span>
@@ -411,7 +468,12 @@ export default function ServiceCategoryPage() {
 
         {/* full-bleed category photo */}
         <img
-          src={`https://images.unsplash.com/${CATEGORY_PHOTOS[categorySlug] || "photo-1570172619644-dfd03ed5d881"}?auto=format&fit=crop&w=1400&q=85`}
+          src={(() => {
+            const photo = CATEGORY_PHOTOS[categorySlug] || "photo-1570172619644-dfd03ed5d881";
+            return photo?.startsWith("photo-")
+              ? `https://images.unsplash.com/${photo}?auto=format&fit=crop&w=1400&q=85`
+              : photo;
+          })()}
           alt={category.name}
           className="absolute inset-0 w-full h-full object-cover object-center"
         />

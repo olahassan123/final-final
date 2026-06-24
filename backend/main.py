@@ -80,7 +80,13 @@ app.add_middleware(
 # ------------------------------------------------------------
 # Groq setup
 # ------------------------------------------------------------
-groq_client = Groq(api_key=os.getenv("GROQ_API_KEY", ""))
+GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+groq_client = Groq(api_key=GROQ_API_KEY)
+
+
+def groq_is_configured() -> bool:
+    key = (GROQ_API_KEY or "").strip()
+    return bool(key and key.startswith("gsk_") and "." not in key)
 
 # ------------------------------------------------------------
 # Load Excel data once on startup
@@ -560,6 +566,82 @@ def question_progress(category: str, field: Optional[str]) -> Dict:
 
 
 # ------------------------------------------------------------
+# Local chat fallback
+# Keeps the chatbot usable when Groq is not configured locally.
+# ------------------------------------------------------------
+def detect_category_locally(message: str) -> Optional[str]:
+    text = (message or "").lower()
+    categories = [c for c in sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"])) if c]
+
+    for category in categories:
+        if category.lower() in text:
+            return category
+
+    keyword_groups = [
+        (("אקנה", "פצע", "פצעונים", "עור", "קמטים", "פיגמנט", "כתמים", "יובש", "קוסמטיקה"), "קוסמטיקה"),
+        (("ציפורן", "ציפורניים", "מניקור", "פדיקור", "לק"), "מניקור ופדיקור"),
+        (("שיער", "פן", "תסרוקת", "החלקה", "צבע"), "עיצוב שיער"),
+        (("איפור", "גבות", "ריסים"), "איפור מקצועי"),
+        (("סטיילינג", "לבוש", "מלתחה", "תדמית"), "סטיילינג אישי"),
+        (("גוף", "עיסוי", "מסאז", "חיטוב"), "טיפולי גוף"),
+        (("לייזר", "הסרת שיער", "שעווה"), "הסרת שיער"),
+    ]
+    for keywords, category in keyword_groups:
+        if any(keyword in text for keyword in keywords) and category in categories:
+            return category
+
+    return None
+
+
+def local_general_answer(message: str, selected: Optional[Dict] = None) -> str:
+    if selected:
+        return (
+            f"בטח. לגבי {selected['name']}: "
+            f"{selected.get('aftercare') or selected.get('suitable_for_all_skins') or 'יש לנו מידע על הטיפול הזה במערכת.'} "
+            "אם תרצי, כתבי לי מה חשוב לך לדעת ואכוון אותך."
+        )
+
+    categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
+    return (
+        "אני כאן כדי לעזור לבחור טיפול מתאים או לענות על שאלה כללית. "
+        "אפשר לבחור קטגוריה כמו " + ", ".join(categories[:5]) + ", "
+        "או לכתוב לי מה מפריע לך ומה המטרה שלך."
+    )
+
+
+def local_guided_conversation(profile: Dict, next_field_info: Optional[Dict]) -> Dict:
+    if not next_field_info:
+        return {
+            "reply": "יש לי מספיק פרטים כדי להציע כיוון מתאים.",
+            "profile_update": {},
+            "ready_to_recommend": True,
+        }
+    return {
+        "reply": next_field_info["question"],
+        "profile_update": {},
+        "ready_to_recommend": False,
+    }
+
+
+def local_recommendation(profile: Dict, category: str) -> Dict:
+    category_treatments = [t for t in TREATMENTS if t.get("class_name") == category]
+    if not category_treatments:
+        category_treatments = TREATMENTS[:3]
+
+    suggested = [
+        {"id": t["id"], "name": t["name"], "category": t.get("category", "")}
+        for t in category_treatments[:3]
+    ]
+    names = ", ".join(t["name"] for t in category_treatments[:3])
+    reply = (
+        "לפי הפרטים שנתת, אלו הטיפולים שהכי כדאי לבדוק: "
+        f"{names}. "
+        "כדאי לבחור טיפול ולקרוא את הפרטים, או לפנות לצוות כדי לוודא התאמה אישית מלאה."
+    )
+    return {"reply": reply, "suggested_treatments": suggested}
+
+
+# ------------------------------------------------------------
 # LLM helpers
 # ------------------------------------------------------------
 
@@ -568,6 +650,13 @@ def classify_intent(message: str, history: List[Dict]) -> Dict:
     Call 1 — Intent Router.
     Returns {"intent": "general"|"recommendation", "category": str|None}
     """
+    if not groq_is_configured():
+        category = detect_category_locally(message)
+        return {
+            "intent": "recommendation" if category else "general",
+            "category": category,
+        }
+
     categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
 
     history_text = ""
@@ -614,6 +703,9 @@ def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) 
     Call 2A — Pure conversation, no flow logic.
     Handles general questions and treatment-specific questions.
     """
+    if not groq_is_configured():
+        return local_general_answer(message, selected)
+
     if selected:
         faq_text = "\n".join(
             [f"ש: {q}\nת: {a}" for q, a in selected.get("faq", {}).items()]
@@ -658,7 +750,7 @@ def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) 
         return resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"[General answer error] {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return local_general_answer(message, selected)
 
 
 def guided_conversation(
@@ -679,6 +771,9 @@ def guided_conversation(
     ready_to_recommend: True when user explicitly asks for recommendations early,
       or when the LLM determines enough data has been collected.
     """
+    if not groq_is_configured():
+        return local_guided_conversation(profile, next_field_info)
+
     known = "\n".join([f"- {k}: {v}" for k, v in profile.items()]) or "עדיין לא נאסף מידע"
     all_categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
 
@@ -738,13 +833,7 @@ def guided_conversation(
         }
     except Exception as e:
         print(f"[Guided conversation error] {e}")
-        return {
-            "reply": "מצטערת, יש לי תקלה קטנה. אנא נסי שוב.",
-            "profile_update": {},
-            "ready_to_recommend": False,
-            "is_general_question": False,
-            "switch_category": None,
-        }
+        return local_guided_conversation(profile, next_field_info)
 
 
 def sub_discovery(
@@ -757,6 +846,9 @@ def sub_discovery(
     Sub-discovery call — helps the client figure out an answer they don't know.
     When resolved, the reply contains [RESOLVED: value] which the backend strips.
     """
+    if not groq_is_configured():
+        return "אין בעיה. נסי לתאר לי במילים שלך מה את מרגישה או מה המטרה שלך, ואני אמשיך לכוון אותך."
+
     fields = get_fields_for_category(category)
     field_info = next((f for f in fields if f["field"] == field), None)
     guidance = field_info["guidance"] if field_info else None
@@ -795,6 +887,9 @@ def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> D
     Final recommendation call — filters treatments to category, picks best matches.
     Returns {"reply": str, "suggested_treatments": list}
     """
+    if not groq_is_configured():
+        return local_recommendation(profile, category)
+
     category_treatments = [t for t in TREATMENTS if t.get("class_name") == category]
     if not category_treatments:
         category_treatments = TREATMENTS[:10]
@@ -833,7 +928,7 @@ def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> D
         reply = resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"[Recommendation error] {e}")
-        reply = "מצטערת, יש לי תקלה בהפקת ההמלצות. אנא פני לצוות שלנו ישירות."
+        return local_recommendation(profile, category)
 
     suggested = []
     for t in category_treatments:
@@ -1319,6 +1414,7 @@ def get_analytics():
     by_day = conn.execute("""
         SELECT strftime('%w', date) as day_num, COUNT(*) as count
         FROM appointments
+        WHERE strftime('%w', date) IS NOT NULL
         GROUP BY day_num
         ORDER BY day_num
     """).fetchall()
@@ -1326,6 +1422,7 @@ def get_analytics():
     by_hour = conn.execute("""
         SELECT substr(time, 1, 2) as hour, COUNT(*) as count
         FROM appointments
+        WHERE length(time) >= 2
         GROUP BY hour
         ORDER BY hour
     """).fetchall()
@@ -1341,8 +1438,8 @@ def get_analytics():
     return {
         "total": total,
         "by_treatment": [{"name": r["treatment_name"], "count": r["count"]} for r in by_treatment],
-        "by_day": [{"day": day_names[int(r["day_num"])], "count": r["count"]} for r in by_day],
-        "by_hour": [{"hour": f"{r['hour']}:00", "count": r["count"]} for r in by_hour],
+        "by_day": [{"day": day_names[int(r["day_num"])], "count": r["count"]} for r in by_day if r["day_num"] is not None],
+        "by_hour": [{"hour": f"{r['hour']}:00", "count": r["count"]} for r in by_hour if r["hour"]],
         "recent": [dict(r) for r in recent],
     }
 
@@ -1568,4 +1665,8 @@ def get_chat_sessions(current_user: Optional[dict] = Depends(get_current_user)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+
+    reload_enabled = os.getenv("UVICORN_RELOAD", "").lower() in {"1", "true", "yes", "on"}
+    host = os.getenv("HOST", "0.0.0.0")
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run("main:app", host=host, port=port, reload=reload_enabled)
