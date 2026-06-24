@@ -1,4 +1,4 @@
-import { createElement, useState, useEffect } from "react";
+import { createElement, useEffect, useState } from "react";
 import {
   AlertCircle,
   CalendarDays,
@@ -56,13 +56,13 @@ function ChatHistoryPanel({ sessions, loading }) {
           <History size={22} className="text-primary" />
           <h2 className="font-serif text-2xl font-black text-[#3d2e1a]">היסטוריית שיחות</h2>
         </div>
-        <p className="mt-4 text-sm text-gray-500">עדיין לא ניהלת שיחות ייעוץ. פתחי את הצ׳אט בעמוד הבית כדי להתחיל.</p>
+        <p className="mt-4 text-sm text-gray-500">עדיין לא נוהלה שיחת ייעוץ. אפשר לפתוח את הצ׳אט בעמוד הבית כדי להתחיל.</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-[2rem] border border-white/75 bg-white/85 shadow-2xl shadow-[#9B5C38]/10 overflow-hidden">
+    <div className="overflow-hidden rounded-[2rem] border border-white/75 bg-white/85 shadow-2xl shadow-[#9B5C38]/10">
       <div className="bg-gradient-meday px-6 py-5 text-white">
         <div className="flex items-center gap-3">
           <History size={22} />
@@ -92,36 +92,36 @@ function ChatHistoryPanel({ sessions, loading }) {
                 onClick={() => setExpanded(isOpen ? null : session.id)}
                 className="flex w-full items-start justify-between gap-4 px-6 py-4 text-right transition hover:bg-primary/5"
               >
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                <div className="min-w-0 flex-1">
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
                       {session.category ?? "ייעוץ כללי"}
                     </span>
                     <span className="text-xs text-gray-400">{date}</span>
                   </div>
-                  <p className="text-sm text-gray-600 truncate">{preview}...</p>
+                  <p className="truncate text-sm text-gray-600">{preview}...</p>
                   {profileEntries.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
-                      {profileEntries.map(([k, v]) => (
-                        <span key={k} className="text-[11px] bg-gray-100 text-gray-600 rounded-full px-2 py-0.5">
-                          {k}: {v}
+                      {profileEntries.map(([key, value]) => (
+                        <span key={key} className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] text-gray-600">
+                          {key}: {value}
                         </span>
                       ))}
                     </div>
                   )}
                 </div>
-                {isOpen ? <ChevronUp size={18} className="text-gray-400 shrink-0 mt-1" /> : <ChevronDown size={18} className="text-gray-400 shrink-0 mt-1" />}
+                {isOpen ? <ChevronUp size={18} className="mt-1 shrink-0 text-gray-400" /> : <ChevronDown size={18} className="mt-1 shrink-0 text-gray-400" />}
               </button>
 
               {isOpen && (
-                <div className="border-t border-gray-100 bg-gray-50/60 px-6 py-4 space-y-3 max-h-80 overflow-y-auto">
-                  {session.messages.map((msg, idx) => (
-                    <div key={idx} className={`flex ${msg.from === "user" ? "justify-end" : "justify-start"}`}>
+                <div className="max-h-80 space-y-3 overflow-y-auto border-t border-gray-100 bg-gray-50/60 px-6 py-4">
+                  {session.messages.map((msg, index) => (
+                    <div key={`${session.id}-${index}`} className={`flex ${msg.from === "user" ? "justify-end" : "justify-start"}`}>
                       <div
                         className={`max-w-[85%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed ${
                           msg.from === "user"
-                            ? "bg-primary text-white rounded-tl-none"
-                            : "bg-white border border-pink-100 text-gray-800 rounded-tr-none shadow-sm"
+                            ? "rounded-tl-none bg-primary text-white"
+                            : "rounded-tr-none border border-pink-100 bg-white text-gray-800 shadow-sm"
                         }`}
                       >
                         {msg.text}
@@ -139,15 +139,46 @@ function ChatHistoryPanel({ sessions, loading }) {
 }
 
 export default function ClientArea() {
-  const { user, getClientProfile, updateClientProfile } = useAuth();
-  const [profile, setProfile] = useState(() => user?.isGoogle ? null : getClientProfile(user?.username));
+  const {
+    user,
+    getClientProfile,
+    fetchClientProfile,
+    fetchClientAppointments,
+    updateClientProfile,
+  } = useAuth();
+  const [profile, setProfile] = useState(() => (user?.isGoogle ? null : getClientProfile(user?.username)));
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [isEditOpen, setIsEditOpen] = useState(false);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [appointments, setAppointments] = useState([]);
   const [chatSessions, setChatSessions] = useState([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
 
   useEffect(() => {
+    let active = true;
+
+    if (user?.role === "customer" && !user?.isGoogle) {
+      setProfileLoading(true);
+      // Customer profile loading: backend profile is the source of truth after login.
+      Promise.all([fetchClientProfile(), fetchClientAppointments()])
+        .then(([profileResult, appointmentsResult]) => {
+          if (!active) return;
+          if (profileResult.ok) {
+            setProfile(profileResult.client);
+          } else {
+            setProfile(getClientProfile(user?.username));
+          }
+          setAppointments(appointmentsResult.appointments || []);
+        })
+        .catch(() => {
+          if (active) setProfile(getClientProfile(user?.username));
+        })
+        .finally(() => {
+          if (active) setProfileLoading(false);
+        });
+    }
+
     if (user?.isGoogle) {
       setSessionsLoading(true);
       getChatSessions()
@@ -155,13 +186,18 @@ export default function ClientArea() {
         .catch(() => {})
         .finally(() => setSessionsLoading(false));
     }
-  }, [user]);
+
+    return () => {
+      active = false;
+    };
+  }, [fetchClientAppointments, fetchClientProfile, getClientProfile, user]);
+
   const displayName = user?.fullName || profile?.fullName || user?.username || "";
 
-  const saveProfile = (updates) => {
+  const saveProfile = async (updates) => {
     setMessage("");
     setError("");
-    const result = updateClientProfile(user.username, updates);
+    const result = await updateClientProfile(user.username, updates);
 
     if (!result.ok) {
       setError(result.error);
@@ -169,7 +205,9 @@ export default function ClientArea() {
     }
 
     setProfile(result.client);
-    setMessage("הפרופיל עודכן בהצלחה");
+    const appointmentsResult = await fetchClientAppointments();
+    setAppointments(appointmentsResult.appointments || []);
+    setMessage("הפרטים עודכנו בהצלחה");
     return result;
   };
 
@@ -210,7 +248,7 @@ export default function ClientArea() {
                   שלום <bdi dir="auto">{displayName}</bdi>
                 </h1>
                 <p className="mt-3 max-w-2xl text-sm leading-7 text-white/85 sm:text-base">
-                  אזור אישי לניהול פרטי הלקוחה, העדפות הטיפול ותכנון המשך הדרך בקליניקה.
+                  אזור אישי לניהול פרופיל לקוח/ה, העדפות טיפול, תורים והמשך הדרך במרכז.
                 </p>
               </div>
 
@@ -227,7 +265,7 @@ export default function ClientArea() {
                 variant="primary"
                 onClick={scrollToAppointments}
               >
-                תיאום תור
+                התורים שלי
               </ClientActionButton>
               <ClientActionButton icon={MessageCircle} onClick={openAiConsultation}>
                 ייעוץ AI
@@ -237,7 +275,7 @@ export default function ClientArea() {
                   icon={Edit3}
                   onClick={() => setIsEditOpen(true)}
                 >
-                  עריכת פרופיל
+                  עדכון פרטים
                 </ClientActionButton>
               )}
             </div>
@@ -258,25 +296,49 @@ export default function ClientArea() {
           </div>
         ) : null}
 
-        {profile ? (
+        {profileLoading ? (
+          <div className="rounded-[2rem] border border-white/75 bg-white/85 p-8 text-center text-sm font-bold text-primary-dark shadow-2xl shadow-[#9B5C38]/10">
+            טוענת פרופיל אישי...
+          </div>
+        ) : profile ? (
           <ClientProfile
             profile={profile}
+            appointments={appointments}
             onSave={saveProfile}
             isEditOpen={isEditOpen}
             onEditClose={() => setIsEditOpen(false)}
+            onCompleteProfile={() => setIsEditOpen(true)}
           />
         ) : !user?.isGoogle ? (
           <div className="rounded-[2rem] border border-white/75 bg-white/85 p-8 text-center shadow-2xl shadow-[#9B5C38]/10">
             <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-2xl bg-primary/10 text-primary-dark">
               <UserRound size={28} />
             </div>
-            <p className="text-sm font-bold text-primary-dark">אזור לקוחה</p>
+            <p className="text-sm font-bold text-primary-dark">אזור אישי</p>
             <h2 className="mt-2 font-serif text-4xl font-black text-[#3d2e1a]">
-              לא נמצא פרופיל לקוחה
+              עדיין לא הושלם פרופיל אישי
             </h2>
             <p className="mx-auto mt-4 max-w-xl text-sm leading-7 text-gray-600">
-              כדאי להירשם מחדש דרך כפתור הכניסה כדי ליצור פרופיל מלא עם פרטי קשר והעדפות טיפול.
+              אפשר להשלים פרטים אישיים כדי לראות העדפות טיפול ותורים במקום אחד.
             </p>
+            <button
+              type="button"
+              onClick={() => {
+                setProfile({
+                  username: user?.username || "",
+                  fullName: user?.fullName || "",
+                  email: user?.email || "",
+                  phone: user?.phone || "",
+                  age: "",
+                  gender: "",
+                  selectedTreatments: [],
+                });
+                setIsEditOpen(true);
+              }}
+              className="mt-5 rounded-full bg-primary px-6 py-3 font-bold text-white shadow-md transition hover:bg-primary-dark"
+            >
+              השלמת פרופיל
+            </button>
           </div>
         ) : null}
 

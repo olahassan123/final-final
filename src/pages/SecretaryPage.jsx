@@ -10,7 +10,7 @@ const HOURS = Array.from({ length: 15 }, (_, i) => i + 8); // 8..22
 const DAY_NAMES = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"];
 const MONTH_NAMES_HE = ["ינואר","פברואר","מרץ","אפריל","מאי","יוני","יולי","אוגוסט","ספטמבר","אוקטובר","נובמבר","דצמבר"];
 const MINI_DAY_HEADS = ["א׳","ב׳","ג׳","ד׳","ה׳","ו׳","ש׳"]; // Sun→Sat
-const ROW_HEIGHT = 64; // Smaller rows make more of the weekly table visible on first load.
+const ROW_HEIGHT = 34; // Compact hour rows let the secretary see most of 08:00-18:00 without heavy scrolling.
 const FIRST_HOUR = 8;
 const BUSINESS_TIME_ZONE = "Asia/Jerusalem";
 const MAX_ADVANCE_BOOKING_DAYS = 365;
@@ -887,7 +887,8 @@ export default function SecretaryPage() {
   const fieldRefs = useRef({});
 
   function isValidPhone(val) {
-    return /^05\d-?\d{7}$/.test(val.trim());
+    const normalized = val.replace(/\D/g, "");
+    return normalized.length === 10 && normalized.startsWith("05");
   }
 
   function triggerFlash(fields) {
@@ -1660,13 +1661,13 @@ export default function SecretaryPage() {
           </div>
         </div>
 
-        <main className="flex-1 overflow-y-auto px-4 pb-6 pt-5 sm:px-6">
-          <div className="mx-auto max-w-7xl space-y-5">
+        <main className="flex-1 overflow-hidden px-1 pb-2 pt-2 sm:px-3">
+          <div className="mx-auto flex h-full max-w-[1680px] flex-col space-y-2">
             <SecretaryMobileTabs activeTab={activeSecretaryTab} onTabChange={setActiveSecretaryTab} />
 
             {activeSecretaryTab === "appointments" ? (
-              <div className="overflow-hidden rounded-[2rem] border border-white/75 bg-white/50 shadow-2xl shadow-[#9B5C38]/10">
-    <div dir="rtl" className="h-[calc(100vh-170px)] min-h-[720px]" style={{
+              <div className="min-h-0 flex-1 overflow-hidden rounded-[1.5rem] border border-white/75 bg-white/50 shadow-2xl shadow-[#9B5C38]/10">
+    <div dir="rtl" className="flex h-full min-h-0 flex-col" style={{
       backgroundImage: "url('/salon-bg.png')",
       backgroundSize: "cover",
       backgroundPosition: "center",
@@ -1679,7 +1680,7 @@ export default function SecretaryPage() {
       />
 
       {/* Header */}
-      <div className="px-8 py-3 flex items-center justify-between relative overflow-hidden"
+      <div className="px-5 py-1.5 flex items-center justify-between relative overflow-hidden flex-shrink-0"
         style={{ background: "rgba(253,249,246,0.72)", backdropFilter: "blur(6px)", WebkitBackdropFilter: "blur(6px)", boxShadow: "0 2px 8px rgba(0,0,0,0.04)", borderBottom: "1px solid rgba(240,232,223,0.6)" }}>
 
         {/* Animated radiant glow from logo side */}
@@ -1694,7 +1695,7 @@ export default function SecretaryPage() {
         </div>
 
         {/* Logo — faded */}
-        <img src="/logo.png" alt="logo" className="h-14 w-auto opacity-60 relative z-10" />
+        <img src="/logo.png" alt="logo" className="h-10 w-auto opacity-60 relative z-10" />
 
         {/* Centered title */}
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
@@ -1712,7 +1713,7 @@ export default function SecretaryPage() {
             </p>
             <h1 style={{
               fontFamily: "'Cormorant Garamond', Georgia, serif",
-              fontSize: "34px",
+              fontSize: "28px",
               fontStyle: "italic",
               fontWeight: 600,
               letterSpacing: "0.06em",
@@ -1731,10 +1732,10 @@ export default function SecretaryPage() {
         </div>
       </div>
 
-      <div className="flex h-[calc(100vh-57px)] relative">
+      <div className="flex min-h-0 flex-1 relative">
 
         {/* ── Left panel ─────────────────────────────────────── */}
-        <div className="w-72 min-w-[272px] border-l border-gray-100 overflow-y-auto flex flex-col shadow-sm relative">
+        <div className="w-64 min-w-[248px] border-l border-gray-100 overflow-y-auto flex flex-col shadow-sm relative">
           {/* Faded white overlay */}
           <div className="absolute inset-0 pointer-events-none" style={{ background: "rgba(255,255,255,0.62)" }} />
 
@@ -2145,8 +2146,8 @@ export default function SecretaryPage() {
             }
           `}</style>
 
-          {/* Layout: smaller outer margins give the calendar grid more visible height. */}
-          <div className="flex-1 min-h-0 mx-8 mt-6 mb-3 flex flex-col"
+          {/* Weekly layout improvement: compact margins and rows keep the daily hours visible inside the grid. */}
+          <div className="flex-1 min-w-0 min-h-0 mx-2 mt-2 mb-2 flex flex-col lg:mx-3"
             style={{ perspective: "1200px" }}>
 
             <div
@@ -2164,7 +2165,7 @@ export default function SecretaryPage() {
               }}
             >
               {/* Calendar header */}
-              <div className="border-b px-6 py-2.5 flex items-center justify-between flex-shrink-0"
+              <div className="border-b px-4 py-1.5 flex items-center justify-between flex-shrink-0"
                 style={{ background: "#EDE0D0", borderBottomColor: "#DCCAB5" }}>
                 <div className="flex items-center gap-3">
                   <div className="flex gap-1">
@@ -2181,14 +2182,14 @@ export default function SecretaryPage() {
                     <>
                       <p style={{
                         fontFamily: "'Cormorant Garamond', Georgia, serif",
-                        fontSize: "20px",
+                        fontSize: "17px",
                         fontWeight: 700,
                         fontStyle: "italic",
                         letterSpacing: "0.04em",
                         color: "#3d2e1a",
                         lineHeight: 1,
                       }}>{weekLabel}</p>
-                      <p className="text-xs mt-1 text-center" style={{ color: "#8b6f52", direction: "ltr" }}>{weekAppts.length} appointments this week</p>
+                      <p className="text-[10px] mt-0.5 text-center" style={{ color: "#8b6f52", direction: "ltr" }}>{weekAppts.length} appointments this week</p>
                     </>
                   ) : (
                     <p style={{
@@ -2229,11 +2230,11 @@ export default function SecretaryPage() {
 
               {/* Category filter bar — hidden in year view */}
               {viewMode === "week" && (
-              <div className="flex items-center gap-2 px-4 py-1.5 flex-shrink-0 flex-wrap"
+              <div className="flex items-center gap-1.5 px-3 py-1 flex-shrink-0 flex-wrap"
                 style={{ background: "#f5ede3", borderBottom: "1px solid #e0cfbb" }}>
                 <button
                   onClick={() => switchCategory(null)}
-                  className="text-[11px] font-semibold px-3 py-1 rounded-full transition-all"
+                  className="text-[10px] font-semibold px-2.5 py-0.5 rounded-full transition-all"
                   style={
                     activeCategory === null
                       ? { background: "#C9A27E", color: "#fff", boxShadow: "0 2px 8px rgba(201,162,126,0.35)" }
@@ -2245,7 +2246,7 @@ export default function SecretaryPage() {
                   <button
                     key={cat}
                     onClick={() => switchCategory(cat === activeCategory ? null : cat)}
-                    className="text-[11px] font-semibold px-3 py-1 rounded-full transition-all"
+                    className="text-[10px] font-semibold px-2.5 py-0.5 rounded-full transition-all"
                     style={
                       activeCategory === cat
                         ? { background: "#C9A27E", color: "#fff", boxShadow: "0 2px 8px rgba(201,162,126,0.35)" }
@@ -2258,9 +2259,9 @@ export default function SecretaryPage() {
               )}
 
               {viewMode === "week" && activeCategory && activeCategoryAvailability && (
-                <div className="px-4 py-2 flex-shrink-0"
+                <div className="px-3 py-1.5 flex-shrink-0"
                   style={{ background: "#FFFDF9", borderBottom: "1px solid #eadfd5" }}>
-                  <div className="flex flex-wrap items-center gap-2 mb-2 text-[11px]" style={{ color: "#6b4f35" }}>
+                  <div className="flex flex-wrap items-center gap-1.5 mb-1 text-[10px]" style={{ color: "#6b4f35" }}>
                     <span className="font-bold">{activeCategory}</span>
                     <span>זמינות: {formatAvailability(activeCategory)}</span>
                     {activeCategoryEmployees.length > 1 && (
@@ -2293,13 +2294,13 @@ export default function SecretaryPage() {
                       </button>
                     ))}
                   </div>
-                  <div className="flex gap-2 overflow-x-auto pb-1">
+                  <div className="flex gap-1.5 overflow-x-auto pb-0.5">
                     {activeAvailableSlots.length > 0 ? activeAvailableSlots.slice(0, 18).map((slot) => (
                       <button
                         key={`${slot.date}-${slot.startTime}`}
                         type="button"
                         onClick={() => chooseAvailableSlot(slot)}
-                        className="shrink-0 rounded-xl px-3 py-2 text-[11px] font-semibold border transition-all hover:shadow-sm active:scale-95"
+                        className="shrink-0 rounded-lg px-2.5 py-1 text-[10px] font-semibold border transition-all hover:shadow-sm active:scale-95"
                         style={{
                           background: activeCategoryColor.background,
                           borderColor: activeCategoryColor.border,
@@ -2415,8 +2416,8 @@ export default function SecretaryPage() {
                 )}
 
                 {/* Scrollable body — headers are sticky inside so they always match column widths */}
-                <div ref={calendarScrollRef} className="overflow-y-auto flex-1" onMouseLeave={handleDragEnd}>
-                  <div className="grid" style={{ gridTemplateColumns: "52px repeat(7, 1fr)" }}>
+                <div ref={calendarScrollRef} className="overflow-auto flex-1" onMouseLeave={handleDragEnd}>
+                  <div className="grid min-w-[900px] xl:min-w-0" style={{ gridTemplateColumns: "42px repeat(7, minmax(108px, 1fr))" }}>
 
                     {/* Sticky day headers row */}
                     <div className="contents sticky top-0 z-30">
@@ -2427,14 +2428,14 @@ export default function SecretaryPage() {
                         const isPastDay = iso < today;
                         return (
                           <div key={i}
-                            className={`text-center py-2 ${isPastDay ? "blur-[1px]" : ""}`}
+                            className={`text-center py-1 ${isPastDay ? "blur-[1px]" : ""}`}
                             style={{ background: "#eddfc9", borderBottom: "2px solid #c8ad8e", borderRight: "1px solid #c8ad8e", position: "sticky", top: 0, zIndex: 30, opacity: isPastDay ? 0.55 : 1, animation: iso === highlightedDateCol ? "columnHeaderHighlight 1.8s ease forwards" : undefined }}>
-                            <p className="text-[11px] font-semibold uppercase tracking-wider"
+                            <p className="text-[10px] font-semibold uppercase tracking-wider"
                               style={{ color: isToday ? "#6BA292" : "#7A7A7A" }}>
                               {DAY_NAMES[day.getDay()]}
                             </p>
-                            <p className={`text-sm font-bold mt-0.5 ${isToday
-                              ? "text-white rounded-full w-7 h-7 flex items-center justify-center mx-auto shadow-sm"
+                            <p className={`text-xs font-bold mt-0.5 ${isToday
+                              ? "text-white rounded-full w-6 h-6 flex items-center justify-center mx-auto shadow-sm"
                               : ""}`}
                               style={isToday ? { background: "#6BA292" } : { color: "#2C2C2C" }}>
                               {day.getDate()}
@@ -2451,9 +2452,9 @@ export default function SecretaryPage() {
                     <div style={{ borderRight: "1px solid #e0d0bc" }}>
                       {HOURS.map((hour) => (
                         <div key={hour}
-                          className="flex items-start justify-center pt-1.5"
+                          className="flex items-start justify-center pt-1"
                           style={{ height: `${ROW_HEIGHT}px`, borderBottom: "1px solid #e0d0bc" }}>
-                          <span className="text-[10px] font-medium" style={{ color: "#b09070" }}>
+                          <span className="text-[9px] font-medium" style={{ color: "#b09070" }}>
                             {`${String(hour).padStart(2, "0")}:00`}
                           </span>
                         </div>

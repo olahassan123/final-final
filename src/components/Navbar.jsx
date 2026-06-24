@@ -32,9 +32,9 @@ const displayNavLinks = [
 ];
 
 const roleLabels = {
-  admin: "מנהל",
-  employee: "עובד",
-  client: "לקוח",
+  admin: "Manager",
+  secretary: "Secretary",
+  customer: "Customer",
 };
 
 const APPOINTMENT_WHATSAPP_URL =
@@ -42,8 +42,8 @@ const APPOINTMENT_WHATSAPP_URL =
 
 function dashboardPathForRole(role) {
   if (role === "admin") return "/admin";
-  if (role === "employee") return "/secretary";
-  if (role === "client") return "/client";
+  if (role === "secretary") return "/secretary";
+  if (role === "customer") return "/client";
   return "/";
 }
 
@@ -361,6 +361,9 @@ export default function Navbar({ onLoginClick }) {
                 <Link to={dashboardPathForRole(user.role)} className="font-semibold hover:text-primary">
                   <bdi dir="auto">{displayUserName}</bdi> · {roleLabels[user.role] ?? user.role}
                 </Link>
+                <Link to="/account-settings" className="rounded-full px-2 py-1 text-xs font-bold hover:bg-primary/10">
+                  Settings
+                </Link>
                 <button
                   type="button"
                   onClick={handleLogout}
@@ -481,6 +484,13 @@ export default function Navbar({ onLoginClick }) {
                   <bdi dir="auto">{displayUserName}</bdi> · {roleLabels[user.role] ?? user.role}
                 </span>
                 <UserRound size={18} />
+              </Link>
+              <Link
+                to="/account-settings"
+                className="mb-2 flex w-full items-center justify-center rounded-xl border border-primary/20 py-3 font-bold text-primary-dark"
+                onClick={handleCategoryNavigate}
+              >
+                Settings
               </Link>
               <button
                 type="button"

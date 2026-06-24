@@ -1,8 +1,8 @@
-import { getGoogleToken } from "./authApi";
+import { getAuthToken } from "./authApi";
 import { API_BASE_URL } from "./config";
 
 function authHeaders() {
-  const token = getGoogleToken();
+  const token = getAuthToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
@@ -29,7 +29,7 @@ export async function fetchTreatmentById(id) {
  * Updated to include the selectedTreatment context.
  */
 export async function fetchAppointments() {
-  const res = await fetch(`${API_BASE_URL}/appointments`);
+  const res = await fetch(`${API_BASE_URL}/appointments`, { headers: authHeaders() });
   if (!res.ok) throw new Error("Failed to fetch appointments");
   return res.json();
 }
@@ -37,7 +37,7 @@ export async function fetchAppointments() {
 export async function createAppointment(data) {
   const res = await fetch(`${API_BASE_URL}/appointments`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to create appointment");
@@ -45,7 +45,7 @@ export async function createAppointment(data) {
 }
 
 export async function deleteAppointment(id) {
-  const res = await fetch(`${API_BASE_URL}/appointments/${id}`, { method: "DELETE" });
+  const res = await fetch(`${API_BASE_URL}/appointments/${id}`, { method: "DELETE", headers: authHeaders() });
   if (!res.ok) throw new Error("Failed to delete appointment");
   return res.json();
 }
@@ -53,7 +53,7 @@ export async function deleteAppointment(id) {
 export async function updateAppointment(id, data) {
   const res = await fetch(`${API_BASE_URL}/appointments/${id}`, {
     method: "PATCH",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update appointment");
@@ -65,7 +65,7 @@ export async function fetchAnalytics({ fromDate, toDate } = {}) {
   if (fromDate) params.set("from_date", fromDate);
   if (toDate) params.set("to_date", toDate);
   const query = params.toString() ? `?${params.toString()}` : "";
-  const res = await fetch(`${API_BASE_URL}/appointments/analytics${query}`);
+  const res = await fetch(`${API_BASE_URL}/appointments/analytics${query}`, { headers: authHeaders() });
   if (!res.ok) throw new Error("Failed to fetch analytics");
   return res.json();
 }
@@ -148,13 +148,13 @@ export async function getChatSessions() {
 }
 
 export async function getExcelInfo() {
-  const res = await fetch(`${API_BASE_URL}/admin/excel/info`);
+  const res = await fetch(`${API_BASE_URL}/admin/excel/info`, { headers: authHeaders() });
   if (!res.ok) throw new Error("Failed to fetch excel info");
   return res.json();
 }
 
 export async function getExcelPreview(fileType) {
-  const res = await fetch(`${API_BASE_URL}/admin/excel/preview/${fileType}`);
+  const res = await fetch(`${API_BASE_URL}/admin/excel/preview/${fileType}`, { headers: authHeaders() });
   if (!res.ok) throw new Error("Failed to fetch preview");
   return res.json();
 }
@@ -165,6 +165,7 @@ export async function uploadExcel(fileType, file) {
   form.append("file", file);
   const res = await fetch(`${API_BASE_URL}/admin/excel/upload`, {
     method: "POST",
+    headers: authHeaders(),
     body: form,
   });
   if (!res.ok) {
@@ -174,17 +175,20 @@ export async function uploadExcel(fileType, file) {
   return res.json();
 }
 
-export const getExcelDownloadUrl = (fileType) =>
-  `${API_BASE_URL}/admin/excel/download/${fileType}`;
+export const getExcelDownloadUrl = (fileType) => {
+  const token = getAuthToken();
+  const query = token ? `?access_token=${encodeURIComponent(token)}` : "";
+  return `${API_BASE_URL}/admin/excel/download/${fileType}${query}`;
+};
 
 export async function getChatbotConfig() {
-  const res = await fetch(`${API_BASE_URL}/admin/chatbot/config`);
+  const res = await fetch(`${API_BASE_URL}/admin/chatbot/config`, { headers: authHeaders() });
   if (!res.ok) throw new Error("Failed to fetch chatbot config");
   return res.json();
 }
 
 export async function listTreatmentsDB() {
-  const res = await fetch(`${API_BASE_URL}/admin/treatments-db`);
+  const res = await fetch(`${API_BASE_URL}/admin/treatments-db`, { headers: authHeaders() });
   if (!res.ok) throw new Error("Failed to fetch treatments");
   return res.json();
 }
@@ -192,7 +196,7 @@ export async function listTreatmentsDB() {
 export async function createTreatmentDB(data) {
   const res = await fetch(`${API_BASE_URL}/admin/treatments-db`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to create treatment");
@@ -202,7 +206,7 @@ export async function createTreatmentDB(data) {
 export async function updateTreatmentDB(id, data) {
   const res = await fetch(`${API_BASE_URL}/admin/treatments-db/${encodeURIComponent(id)}`, {
     method: "PUT",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update treatment");
@@ -212,7 +216,130 @@ export async function updateTreatmentDB(id, data) {
 export async function deleteTreatmentDB(id) {
   const res = await fetch(`${API_BASE_URL}/admin/treatments-db/${encodeURIComponent(id)}`, {
     method: "DELETE",
+    headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to delete treatment");
   return res.json();
+}
+
+async function readApiError(res, fallback) {
+  const data = await res.json().catch(() => ({}));
+  throw new Error(data.detail || fallback);
+}
+
+export async function listSecretaries() {
+  const res = await fetch(`${API_BASE_URL}/staff/users`, { headers: authHeaders() });
+  if (res.status === 404) {
+    const fallback = await fetch(`${API_BASE_URL}/admin/secretaries`, { headers: authHeaders() });
+    if (!fallback.ok) return readApiError(fallback, "Failed to fetch secretaries");
+    return fallback.json();
+  }
+  if (!res.ok) return readApiError(res, "Failed to fetch secretaries");
+  const data = await res.json();
+  return data.users || data;
+}
+
+export async function createSecretary(data) {
+  const res = await fetch(`${API_BASE_URL}/staff/users`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ ...data, role: "secretary" }),
+  });
+  if (res.status === 404) {
+    const fallback = await fetch(`${API_BASE_URL}/admin/secretaries`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ ...data, role: "secretary" }),
+    });
+    if (!fallback.ok) return readApiError(fallback, "Failed to create secretary");
+    return fallback.json();
+  }
+  if (!res.ok) return readApiError(res, "Failed to create secretary");
+  const result = await res.json();
+  return result.user || result;
+}
+
+export async function updateSecretary(id, data) {
+  const res = await fetch(`${API_BASE_URL}/staff/users/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({ ...data, role: "secretary" }),
+  });
+  if (res.status === 404) {
+    const fallback = await fetch(`${API_BASE_URL}/admin/secretaries/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", ...authHeaders() },
+      body: JSON.stringify({ ...data, role: "secretary" }),
+    });
+    if (!fallback.ok) return readApiError(fallback, "Failed to update secretary");
+    return fallback.json();
+  }
+  if (!res.ok) return readApiError(res, "Failed to update secretary");
+  const result = await res.json();
+  return result.user || result;
+}
+
+export async function deleteSecretary(id) {
+  const res = await fetch(`${API_BASE_URL}/staff/users/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (res.status === 404) {
+    const fallback = await fetch(`${API_BASE_URL}/admin/secretaries/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      headers: authHeaders(),
+    });
+    if (!fallback.ok) return readApiError(fallback, "Failed to delete secretary");
+    return fallback.json();
+  }
+  if (!res.ok) return readApiError(res, "Failed to delete secretary");
+  return res.json();
+}
+
+export async function listCustomers(search = "") {
+  const params = search ? `?search=${encodeURIComponent(search)}` : "";
+  const res = await fetch(`${API_BASE_URL}/admin/customers${params}`, { headers: authHeaders() });
+  if (!res.ok) return readApiError(res, "Failed to fetch customers");
+  const data = await res.json();
+  return data.customers || [];
+}
+
+export async function createCustomer(data) {
+  const res = await fetch(`${API_BASE_URL}/admin/customers`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) return readApiError(res, "Failed to create customer");
+  const result = await res.json();
+  return result.customer || result;
+}
+
+export async function updateCustomer(id, data) {
+  const res = await fetch(`${API_BASE_URL}/admin/customers/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) return readApiError(res, "Failed to update customer");
+  const result = await res.json();
+  return result.customer || result;
+}
+
+export async function deleteCustomer(id) {
+  const res = await fetch(`${API_BASE_URL}/admin/customers/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+    headers: authHeaders(),
+  });
+  if (!res.ok) return readApiError(res, "Failed to delete customer");
+  return res.json();
+}
+
+export async function listAuditLog(limit = 100) {
+  const res = await fetch(`${API_BASE_URL}/admin/audit-log?limit=${encodeURIComponent(limit)}`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) return readApiError(res, "Failed to fetch audit log");
+  const data = await res.json();
+  return data.items || [];
 }

@@ -4,10 +4,16 @@ import {
   clearGoogleToken,
   getClientProfile as getStoredClientProfile,
   getCurrentUser,
+  fetchClientAppointments as fetchStoredClientAppointments,
+  fetchClientProfile as fetchStoredClientProfile,
+  loginStaffUser,
   loginUser,
   registerClientUser,
   setCurrentUser,
   setGoogleToken,
+  startCustomerPasswordReset,
+  confirmCustomerPasswordReset,
+  updateAccountSettings as updateStoredAccountSettings,
   updateClientProfile as updateStoredClientProfile,
 } from "../api/authApi";
 import { API_BASE_URL } from "../api/config";
@@ -16,16 +22,24 @@ import { AuthContext } from "./authContextValue";
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => getCurrentUser());
 
-  const login = (credentials) => {
-    const result = loginUser(credentials);
+  const login = async (credentials) => {
+    const result = await loginUser(credentials);
     if (result.ok) {
       setUser(result.user);
     }
     return result;
   };
 
-  const registerClient = (profile) => {
-    const result = registerClientUser(profile);
+  const loginStaff = async (credentials) => {
+    const result = await loginStaffUser(credentials);
+    if (result.ok) {
+      setUser(result.user);
+    }
+    return result;
+  };
+
+  const registerClient = async (profile) => {
+    const result = await registerClientUser(profile);
     if (result.ok) {
       setUser(result.user);
     }
@@ -33,19 +47,31 @@ export function AuthProvider({ children }) {
   };
 
   const getClientProfile = (username) => getStoredClientProfile(username);
+  const fetchClientProfile = () => fetchStoredClientProfile();
+  const fetchClientAppointments = () => fetchStoredClientAppointments();
 
-  const updateClientProfile = (username, updates) => {
-    const result = updateStoredClientProfile(username, updates);
+  const updateClientProfile = async (username, updates) => {
+    const result = await updateStoredClientProfile(username, updates);
 
     if (result.ok && user?.username === username) {
       const nextUser = {
         ...user,
         fullName: result.client.fullName || result.client.username,
+        email: result.client.email || user.email || "",
+        phone: result.client.phone || user.phone || "",
       };
       setUser(nextUser);
       setCurrentUser(nextUser);
     }
 
+    return result;
+  };
+
+  const updateAccountSettings = async (updates) => {
+    const result = await updateStoredAccountSettings(updates);
+    if (result.ok) {
+      setUser(result.user);
+    }
     return result;
   };
 
@@ -81,11 +107,17 @@ export function AuthProvider({ children }) {
     user,
     isAuthenticated: Boolean(user),
     login,
+    loginStaff,
     logout,
     googleLogin,
     registerClient,
     getClientProfile,
+    fetchClientProfile,
+    fetchClientAppointments,
     updateClientProfile,
+    updateAccountSettings,
+    startCustomerPasswordReset,
+    confirmCustomerPasswordReset,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
