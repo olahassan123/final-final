@@ -10,9 +10,8 @@ import {
   setGoogleToken,
   updateClientProfile as updateStoredClientProfile,
 } from "../api/authApi";
+import { API_BASE_URL } from "../api/config";
 import { AuthContext } from "./authContextValue";
-
-const API_BASE = "http://127.0.0.1:8000";
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(() => getCurrentUser());
@@ -51,7 +50,7 @@ export function AuthProvider({ children }) {
   };
 
   const googleLogin = async (credential) => {
-    const res = await fetch(`${API_BASE}/auth/google`, {
+    const res = await fetch(`${API_BASE_URL}/auth/google`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ credential }),

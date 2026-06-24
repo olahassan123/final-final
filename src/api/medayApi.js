@@ -1,26 +1,5 @@
 import { getGoogleToken } from "./authApi";
-
-const DEFAULT_API_BASE = "http://127.0.0.1:8000";
-const API_BASE = (import.meta.env.VITE_API_BASE_URL || DEFAULT_API_BASE).replace(/\/$/, "");
-const FALLBACK_API_BASES = ["http://127.0.0.1:8001"];
-
-async function apiFetch(path, options) {
-  const bases = [
-    API_BASE,
-    ...FALLBACK_API_BASES.filter((base) => base !== API_BASE),
-  ];
-
-  let lastNetworkError;
-  for (const base of bases) {
-    try {
-      return await fetch(`${base}${path}`, options);
-    } catch (error) {
-      lastNetworkError = error;
-    }
-  }
-
-  throw lastNetworkError;
-}
+import { API_BASE_URL } from "./config";
 
 function authHeaders() {
   const token = getGoogleToken();
@@ -31,7 +10,7 @@ function authHeaders() {
  * Fetches the full list of treatments from the database.
  */
 export async function fetchTreatments() {
-  const res = await apiFetch("/treatments");
+  const res = await fetch(`${API_BASE_URL}/treatments`);
   if (!res.ok) throw new Error("Failed to fetch treatments");
   return res.json();
 }
@@ -40,7 +19,7 @@ export async function fetchTreatments() {
  * Fetches detailed information for a specific treatment.
  */
 export async function fetchTreatmentById(id) {
-  const res = await apiFetch(`/treatments/${encodeURIComponent(id)}`);
+  const res = await fetch(`${API_BASE_URL}/treatments/${encodeURIComponent(id)}`);
   if (!res.ok) throw new Error("Failed to fetch treatment");
   return res.json();
 }
@@ -50,13 +29,13 @@ export async function fetchTreatmentById(id) {
  * Updated to include the selectedTreatment context.
  */
 export async function fetchAppointments() {
-  const res = await apiFetch("/appointments");
+  const res = await fetch(`${API_BASE_URL}/appointments`);
   if (!res.ok) throw new Error("Failed to fetch appointments");
   return res.json();
 }
 
 export async function createAppointment(data) {
-  const res = await apiFetch("/appointments", {
+  const res = await fetch(`${API_BASE_URL}/appointments`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -66,13 +45,13 @@ export async function createAppointment(data) {
 }
 
 export async function deleteAppointment(id) {
-  const res = await apiFetch(`/appointments/${id}`, { method: "DELETE" });
+  const res = await fetch(`${API_BASE_URL}/appointments/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error("Failed to delete appointment");
   return res.json();
 }
 
 export async function updateAppointment(id, data) {
-  const res = await apiFetch(`/appointments/${id}`, {
+  const res = await fetch(`${API_BASE_URL}/appointments/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -86,7 +65,7 @@ export async function fetchAnalytics({ fromDate, toDate } = {}) {
   if (fromDate) params.set("from_date", fromDate);
   if (toDate) params.set("to_date", toDate);
   const query = params.toString() ? `?${params.toString()}` : "";
-  const res = await apiFetch(`/appointments/analytics${query}`);
+  const res = await fetch(`${API_BASE_URL}/appointments/analytics${query}`);
   if (!res.ok) throw new Error("Failed to fetch analytics");
   return res.json();
 }
@@ -107,7 +86,7 @@ export async function sendChat(
   selectedTreatmentId = null,
   history = []
 ) {
-  const res = await apiFetch("/chat", {
+  const res = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -123,15 +102,12 @@ export async function sendChat(
     }),
   });
 
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || "Chat request failed");
-  }
+  if (!res.ok) throw new Error("Chat request failed");
   return res.json();
 }
 
 export async function analyzeSkin(base64, mimeType = "image/jpeg") {
-  const res = await apiFetch("/analyze-skin", {
+  const res = await fetch(`${API_BASE_URL}/analyze-skin`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ image_base64: base64, mime_type: mimeType }),
@@ -146,7 +122,7 @@ export async function analyzeSkin(base64, mimeType = "image/jpeg") {
 export async function fetchRecommendations(excludeId = null, limit = 4) {
   const params = new URLSearchParams({ limit });
   if (excludeId) params.set("exclude_id", excludeId);
-  const res = await apiFetch(`/recommendations?${params}`, {
+  const res = await fetch(`${API_BASE_URL}/recommendations?${params}`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch recommendations");
@@ -154,7 +130,7 @@ export async function fetchRecommendations(excludeId = null, limit = 4) {
 }
 
 export async function saveChatSession(messages, skinProfile = {}, category = null) {
-  const res = await apiFetch("/chat-sessions", {
+  const res = await fetch(`${API_BASE_URL}/chat-sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: JSON.stringify({ messages, skin_profile: skinProfile, category }),
@@ -164,7 +140,7 @@ export async function saveChatSession(messages, skinProfile = {}, category = nul
 }
 
 export async function getChatSessions() {
-  const res = await apiFetch("/chat-sessions", {
+  const res = await fetch(`${API_BASE_URL}/chat-sessions`, {
     headers: authHeaders(),
   });
   if (!res.ok) throw new Error("Failed to fetch chat sessions");
@@ -172,13 +148,13 @@ export async function getChatSessions() {
 }
 
 export async function getExcelInfo() {
-  const res = await apiFetch("/admin/excel/info");
+  const res = await fetch(`${API_BASE_URL}/admin/excel/info`);
   if (!res.ok) throw new Error("Failed to fetch excel info");
   return res.json();
 }
 
 export async function getExcelPreview(fileType) {
-  const res = await apiFetch(`/admin/excel/preview/${fileType}`);
+  const res = await fetch(`${API_BASE_URL}/admin/excel/preview/${fileType}`);
   if (!res.ok) throw new Error("Failed to fetch preview");
   return res.json();
 }
@@ -187,7 +163,7 @@ export async function uploadExcel(fileType, file) {
   const form = new FormData();
   form.append("file_type", fileType);
   form.append("file", file);
-  const res = await apiFetch("/admin/excel/upload", {
+  const res = await fetch(`${API_BASE_URL}/admin/excel/upload`, {
     method: "POST",
     body: form,
   });
@@ -199,22 +175,22 @@ export async function uploadExcel(fileType, file) {
 }
 
 export const getExcelDownloadUrl = (fileType) =>
-  `${API_BASE}/admin/excel/download/${fileType}`;
+  `${API_BASE_URL}/admin/excel/download/${fileType}`;
 
 export async function getChatbotConfig() {
-  const res = await apiFetch("/admin/chatbot/config");
+  const res = await fetch(`${API_BASE_URL}/admin/chatbot/config`);
   if (!res.ok) throw new Error("Failed to fetch chatbot config");
   return res.json();
 }
 
 export async function listTreatmentsDB() {
-  const res = await apiFetch("/admin/treatments-db");
+  const res = await fetch(`${API_BASE_URL}/admin/treatments-db`);
   if (!res.ok) throw new Error("Failed to fetch treatments");
   return res.json();
 }
 
 export async function createTreatmentDB(data) {
-  const res = await apiFetch("/admin/treatments-db", {
+  const res = await fetch(`${API_BASE_URL}/admin/treatments-db`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -224,7 +200,7 @@ export async function createTreatmentDB(data) {
 }
 
 export async function updateTreatmentDB(id, data) {
-  const res = await apiFetch(`/admin/treatments-db/${encodeURIComponent(id)}`, {
+  const res = await fetch(`${API_BASE_URL}/admin/treatments-db/${encodeURIComponent(id)}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(data),
@@ -234,7 +210,7 @@ export async function updateTreatmentDB(id, data) {
 }
 
 export async function deleteTreatmentDB(id) {
-  const res = await apiFetch(`/admin/treatments-db/${encodeURIComponent(id)}`, {
+  const res = await fetch(`${API_BASE_URL}/admin/treatments-db/${encodeURIComponent(id)}`, {
     method: "DELETE",
   });
   if (!res.ok) throw new Error("Failed to delete treatment");

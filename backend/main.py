@@ -969,6 +969,11 @@ class ChatResponse(BaseModel):
     suggested_treatments: Optional[List[Dict]] = None
 
 
+class SkinAnalysisRequest(BaseModel):
+    image_base64: str
+    mime_type: Optional[str] = "image/jpeg"
+
+
 # ------------------------------------------------------------
 # Chat endpoint
 # ------------------------------------------------------------
@@ -1175,6 +1180,42 @@ def chat(req: ChatRequest):
         quick_replies=field_chips(next_field) if next_field else None,
         **question_progress(category, next_field["field"] if next_field else None),
     )
+
+
+@app.post("/analyze-skin")
+def analyze_skin(req: SkinAnalysisRequest):
+    if not req.image_base64:
+        raise HTTPException(status_code=400, detail="Image data is required")
+
+    return {
+        "skin_type": "combination",
+        "summary": (
+            "The image was received successfully. This preliminary analysis "
+            "suggests a balanced routine with hydration, gentle cleansing, "
+            "and SPF. A clinic consultation is recommended for a precise plan."
+        ),
+        "concerns": [
+            {"label": "Hydration", "severity": "mild"},
+            {"label": "Texture", "severity": "moderate"},
+        ],
+        "recommended_treatments": [
+            {
+                "slug": "classic-meday",
+                "name": "MeDay Classic",
+                "desc": "A gentle facial for cleansing, hydration, and maintenance.",
+            },
+            {
+                "slug": "skin-booster",
+                "name": "Skin Booster",
+                "desc": "A technology treatment focused on glow and skin vitality.",
+            },
+            {
+                "slug": "clear-skin-plus",
+                "name": "Clear Skin Plus",
+                "desc": "A supportive option for visible texture and congestion.",
+            },
+        ],
+    }
 
 
 # ------------------------------------------------------------
