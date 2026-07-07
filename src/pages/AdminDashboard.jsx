@@ -6,6 +6,7 @@ import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, addContactInquiryFeedback, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
 import { JOB_APPLICATION_EVENT, JOB_APPLICATIONS_STORAGE_KEY, getJobApplications, updateJobApplicationStatus, addJobApplicationFeedback } from "../api/jobsApi";
 import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl, getChatbotConfig, listTreatmentsDB, createTreatmentDB, updateTreatmentDB, deleteTreatmentDB } from "../api/medayApi";
+import { getSettings, updateSettingsAccount, updateSettingsPassword, updateSystemSettings } from "../api/settingsApi";
 import {
   Activity,
   AlertCircle,
@@ -29,6 +30,7 @@ import {
   RefreshCw,
   Search,
   Settings,
+  ShieldCheck,
   Sparkles,
   TrendingUp,
   Upload,
@@ -68,6 +70,17 @@ const formatMonth = (s) => {
   const [, month] = (s || "").split("-");
   return MONTH_HE[parseInt(month, 10) - 1] ?? s;
 };
+const MONTH_HE_CLEAN = ["ינו׳", "פבר׳", "מרץ", "אפר׳", "מאי", "יוני", "יולי", "אוג׳", "ספט׳", "אוק׳", "נוב׳", "דצמ׳"];
+const formatMonthHe = (s) => {
+  const [, month] = (s || "").split("-");
+  return MONTH_HE_CLEAN[parseInt(month, 10) - 1] ?? s;
+};
+const formatCurrency = (value) =>
+  new Intl.NumberFormat("he-IL", {
+    style: "currency",
+    currency: "ILS",
+    maximumFractionDigits: 0,
+  }).format(value || 0);
 const daysAgo = (n) => {
   const d = new Date();
   d.setDate(d.getDate() - n);
@@ -322,6 +335,150 @@ function DonutChart({ segments, total }) {
       </Motion.text>
       <text x={cx} y={cy + 14} textAnchor="middle" fill="#9ca3af" fontSize="10" fontFamily="Heebo,sans-serif">סה״כ</text>
     </svg>
+  );
+}
+
+function AnalyticsMiniStat({ label, value, tone = "warm" }) {
+  const colors = tone === "cool"
+    ? { bg: "rgba(74,155,168,0.10)", text: "#2E7A87" }
+    : tone === "good"
+      ? { bg: "rgba(34,197,94,0.10)", text: "#15803D" }
+      : tone === "bad"
+        ? { bg: "rgba(220,38,38,0.10)", text: "#B91C1C" }
+        : { bg: "rgba(196,121,90,0.10)", text: "#9B5C38" };
+  return (
+    <div className="rounded-2xl px-4 py-3 text-right" style={{ background: colors.bg }}>
+      <p className="text-xs font-bold text-gray-500">{label}</p>
+      <p className="mt-1 text-lg font-black tabular-nums" style={{ color: colors.text }}>{value}</p>
+    </div>
+  );
+}
+
+function MonthlyTrendWidget({ trend = [], total = 0, totalRevenue = 0, hasRevenue = false, growthPct = 0 }) {
+  const hasData = trend.some((month) => month.count > 0 || month.revenue > 0);
+  const maxCount = Math.max(...trend.map((month) => month.count), 1);
+  const maxRevenue = Math.max(...trend.map((month) => month.revenue || 0), 1);
+  const trendTone = growthPct >= 0 ? "good" : "bad";
+  const trendText = `${growthPct >= 0 ? "+" : ""}${growthPct}%`;
+
+  if (!hasData) {
+    return (
+      <EmptyState
+        icon={TrendingUp}
+        title="No appointments have been created yet."
+        text="לאחר יצירת תורים ראשונים תופיע כאן מגמה חודשית אמיתית."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <AnalyticsMiniStat label="סה״כ תורים" value={total} />
+        <AnalyticsMiniStat label="סה״כ הכנסות" value={hasRevenue ? formatCurrency(totalRevenue) : "אין נתוני הכנסה"} tone="cool" />
+        <AnalyticsMiniStat label="שינוי מחודש קודם" value={trendText} tone={trendTone} />
+      </div>
+
+      <div className="flex items-end gap-3 rounded-3xl bg-[#FAF6F1] px-4 pb-4 pt-5">
+        {trend.map((month, index) => {
+          const countPct = Math.max(4, Math.round((month.count / maxCount) * 100));
+          const revenuePct = hasRevenue ? Math.max(0, Math.round(((month.revenue || 0) / maxRevenue) * 100)) : 0;
+          return (
+            <div key={month.month} className="flex min-w-0 flex-1 flex-col items-center gap-2">
+              <div className="text-center">
+                <p className="text-xs font-black text-[#9B5C38]">{month.count}</p>
+                {hasRevenue ? <p className="text-[10px] font-bold text-[#2E7A87]">{formatCurrency(month.revenue)}</p> : null}
+              </div>
+              <div className="relative flex h-32 w-full items-end overflow-hidden rounded-t-2xl bg-white">
+                {hasRevenue ? (
+                  <Motion.div
+                    className="absolute bottom-0 left-0 w-1/2 rounded-tl-xl"
+                    initial={{ height: 0 }}
+                    animate={{ height: `${revenuePct}%` }}
+                    transition={{ duration: 0.8, delay: index * 0.06 }}
+                    style={{ background: "linear-gradient(to top, #2E7A87, #4A9BA8)" }}
+                    title="הכנסה חודשית"
+                  />
+                ) : null}
+                <Motion.div
+                  className={hasRevenue ? "mr-auto w-1/2 rounded-tr-xl" : "w-full rounded-t-2xl"}
+                  initial={{ height: 0 }}
+                  animate={{ height: `${countPct}%` }}
+                  transition={{ duration: 0.85, delay: index * 0.07, ease: [0.34, 1.56, 0.64, 1] }}
+                  style={{
+                    minHeight: month.count > 0 ? 6 : 0,
+                    background: "linear-gradient(to top, #9B5C38, #C4795A, #E8C4A0)",
+                    boxShadow: month.count > 0 ? "0 -4px 16px rgba(196,121,90,0.35)" : "none",
+                  }}
+                  title="מספר תורים"
+                />
+              </div>
+              <span className="text-center text-xs font-bold text-gray-500">{formatMonthHe(month.month)}</span>
+            </div>
+          );
+        })}
+      </div>
+
+      {hasRevenue ? (
+        <div className="flex flex-wrap gap-3 text-xs font-bold text-gray-500">
+          <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#C4795A]" /> תורים</span>
+          <span className="inline-flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#4A9BA8]" /> הכנסות</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function CategoryAnalyticsWidget({ categories = [], total = 0, topCategory, leastCategory }) {
+  if (!categories.length) {
+    return (
+      <EmptyState
+        icon={BarChart2}
+        title="No appointments have been created yet."
+        text="לאחר יצירת תורים תופיע כאן חלוקה לפי קטגוריות טיפול."
+      />
+    );
+  }
+
+  const max = Math.max(...categories.map((category) => category.count), 1);
+  const segments = categories.slice(0, 6).map((category, index) => ({
+    label: category.category,
+    value: category.count,
+    color: CHART_COLORS[index % CHART_COLORS.length],
+  }));
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <AnalyticsMiniStat label="הקטגוריה הפופולרית ביותר" value={topCategory?.category || "-"} />
+        <AnalyticsMiniStat label="הקטגוריה הכי פחות פופולרית" value={leastCategory?.category || "-"} tone="cool" />
+      </div>
+
+      <div className="flex flex-col items-center gap-5 sm:flex-row">
+        <DonutChart segments={segments} total={total} />
+        <div className="w-full flex-1 space-y-3">
+          {categories.map((category, index) => (
+            <div key={category.category} className="space-y-1 rounded-2xl bg-[#FAF6F1] px-3 py-2">
+              <div className="flex items-center gap-2">
+                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: CHART_COLORS[index % CHART_COLORS.length] }} />
+                <span className="min-w-0 flex-1 truncate text-xs font-bold text-gray-700">{category.category}</span>
+                <span className="text-xs font-black text-[#9B5C38]">{category.count}</span>
+                <span className="text-xs font-bold text-gray-400">{category.percentage}%</span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-white">
+                <Motion.div
+                  className="h-full rounded-full"
+                  initial={{ width: 0 }}
+                  animate={{ width: `${Math.round((category.count / max) * 100)}%` }}
+                  transition={{ duration: 0.7, delay: index * 0.05 }}
+                  style={{ background: CHART_COLORS[index % CHART_COLORS.length] }}
+                />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -1461,6 +1618,261 @@ function JobApplicationsSection({ applications, onStatusChange, onFeedbackAdd, m
   );
 }
 
+const EMPTY_SYSTEM_SETTINGS = {
+  business_name: "",
+  phone: "",
+  whatsapp: "",
+  email: "",
+  address: "",
+  opening_hours: "",
+};
+
+function SettingsInput({ label, value, onChange, type = "text", required = false, placeholder = "" }) {
+  return (
+    <label className="block text-sm font-bold text-gray-700">
+      {label}
+      <input
+        type={type}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        placeholder={placeholder}
+        className="mt-1 w-full rounded-2xl border border-[#E8C4A0]/70 bg-white px-4 py-3 text-right text-sm outline-none transition focus:border-[#C4795A] focus:ring-4 focus:ring-[#C4795A]/10"
+      />
+    </label>
+  );
+}
+
+function SettingsTextarea({ label, value, onChange, required = false, placeholder = "" }) {
+  return (
+    <label className="block text-sm font-bold text-gray-700">
+      {label}
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        placeholder={placeholder}
+        rows={3}
+        className="mt-1 w-full resize-none rounded-2xl border border-[#E8C4A0]/70 bg-white px-4 py-3 text-right text-sm outline-none transition focus:border-[#C4795A] focus:ring-4 focus:ring-[#C4795A]/10"
+      />
+    </label>
+  );
+}
+
+function SettingsMessage({ type, children }) {
+  if (!children) return null;
+  const isError = type === "error";
+  return (
+    <div className={`rounded-2xl border px-4 py-3 text-sm font-bold ${
+      isError
+        ? "border-red-200 bg-red-50 text-red-700"
+        : "border-emerald-200 bg-emerald-50 text-emerald-700"
+    }`}>
+      {children}
+    </div>
+  );
+}
+
+function AdminSettingsPanel() {
+  const [loading, setLoading] = useState(true);
+  const [savingSystem, setSavingSystem] = useState(false);
+  const [savingAccount, setSavingAccount] = useState(false);
+  const [savingPassword, setSavingPassword] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [canUpdateSystem, setCanUpdateSystem] = useState(false);
+  const [account, setAccount] = useState({ username: "", email: "", role: "" });
+  const [systemForm, setSystemForm] = useState(EMPTY_SYSTEM_SETTINGS);
+  const [passwordForm, setPasswordForm] = useState({ old_password: "", password: "" });
+
+  const setSystemField = (field, value) => {
+    setSystemForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const setAccountField = (field, value) => {
+    setAccount((current) => ({ ...current, [field]: value }));
+  };
+
+  const loadSettings = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      const data = await getSettings();
+      setSystemForm({ ...EMPTY_SYSTEM_SETTINGS, ...(data.settings || {}) });
+      setAccount({
+        username: data.user?.username || "",
+        email: data.user?.email || "",
+        role: data.user?.role || "",
+      });
+      setCanUpdateSystem(Boolean(data.can_update_system));
+    } catch (err) {
+      setError(err.message || "שגיאה בטעינת הגדרות");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  const validateEmail = (value) => !value || /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value);
+  const validatePhone = (value) => !value || /^\+?[0-9*][0-9*\s-]{2,18}$/.test(value);
+
+  const saveAccount = async (event) => {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (!account.username.trim()) {
+      setError("שם משתמש הוא שדה חובה");
+      return;
+    }
+    if (!validateEmail(account.email)) {
+      setError("כתובת האימייל אינה תקינה");
+      return;
+    }
+    setSavingAccount(true);
+    try {
+      const result = await updateSettingsAccount({
+        username: account.username.trim(),
+        email: account.email.trim(),
+      });
+      setAccount({
+        username: result.user?.username || account.username,
+        email: result.user?.email || account.email,
+        role: result.user?.role || account.role,
+      });
+      setMessage("פרטי החשבון נשמרו בהצלחה");
+    } catch (err) {
+      setError(err.message || "שמירת פרטי החשבון נכשלה");
+    } finally {
+      setSavingAccount(false);
+    }
+  };
+
+  const savePassword = async (event) => {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (!passwordForm.old_password) {
+      setError("יש להזין סיסמה נוכחית");
+      return;
+    }
+    if (!passwordForm.password || passwordForm.password.length < 8) {
+      setError("הסיסמה החדשה חייבת להכיל לפחות 8 תווים");
+      return;
+    }
+    setSavingPassword(true);
+    try {
+      await updateSettingsPassword(passwordForm);
+      setPasswordForm({ old_password: "", password: "" });
+      setMessage("הסיסמה עודכנה בהצלחה");
+    } catch (err) {
+      setError(err.message || "עדכון הסיסמה נכשל");
+    } finally {
+      setSavingPassword(false);
+    }
+  };
+
+  const saveSystem = async (event) => {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (!systemForm.business_name.trim() || !systemForm.phone.trim() || !systemForm.email.trim() || !systemForm.address.trim() || !systemForm.opening_hours.trim()) {
+      setError("יש למלא את כל שדות החובה בהגדרות העסק");
+      return;
+    }
+    if (!validatePhone(systemForm.phone) || !validatePhone(systemForm.whatsapp)) {
+      setError("מספר הטלפון אינו תקין");
+      return;
+    }
+    if (!validateEmail(systemForm.email)) {
+      setError("כתובת האימייל אינה תקינה");
+      return;
+    }
+    setSavingSystem(true);
+    try {
+      const result = await updateSystemSettings(systemForm);
+      setSystemForm({ ...EMPTY_SYSTEM_SETTINGS, ...(result.settings || {}) });
+      setMessage("הגדרות העסק נשמרו בהצלחה");
+    } catch (err) {
+      setError(err.message || "שמירת הגדרות העסק נכשלה");
+    } finally {
+      setSavingSystem(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <SectionCard icon={Settings} title="הגדרות מערכת" subtitle="טוען הגדרות..." className="lg:col-span-3">
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="h-48 animate-pulse rounded-3xl bg-[#FAF6F1]" />
+          <div className="h-48 animate-pulse rounded-3xl bg-[#FAF6F1]" />
+        </div>
+      </SectionCard>
+    );
+  }
+
+  return (
+    <div className="grid grid-cols-1 gap-5 lg:col-span-3 lg:grid-cols-3">
+      <SectionCard icon={ShieldCheck} title="הגדרות חשבון" subtitle="פרטי המשתמש המחובר" className="lg:col-span-1">
+        <form onSubmit={saveAccount} className="space-y-4">
+          <div className="rounded-2xl bg-[#FAF6F1] px-4 py-3">
+            <p className="text-xs font-bold text-gray-500">תפקיד</p>
+            <p className="mt-1 text-sm font-black text-[#9B5C38]">{account.role || "-"}</p>
+          </div>
+          <SettingsInput label="שם משתמש" value={account.username} onChange={(value) => setAccountField("username", value)} required />
+          <SettingsInput label="אימייל" value={account.email} onChange={(value) => setAccountField("email", value)} type="email" />
+          <button type="submit" disabled={savingAccount} className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#C4795A] px-5 py-3 text-sm font-black text-white shadow-lg shadow-[#C4795A]/20 transition hover:bg-[#9B5C38] disabled:opacity-60">
+            <Save size={16} />
+            {savingAccount ? "שומר..." : "שמירת פרטי חשבון"}
+          </button>
+        </form>
+      </SectionCard>
+
+      <SectionCard icon={ShieldCheck} title="שינוי סיסמה" subtitle="נדרשת סיסמה נוכחית לאימות" className="lg:col-span-1">
+        <form onSubmit={savePassword} className="space-y-4">
+          <SettingsInput label="סיסמה נוכחית" value={passwordForm.old_password} onChange={(value) => setPasswordForm((current) => ({ ...current, old_password: value }))} type="password" required />
+          <SettingsInput label="סיסמה חדשה" value={passwordForm.password} onChange={(value) => setPasswordForm((current) => ({ ...current, password: value }))} type="password" required />
+          <button type="submit" disabled={savingPassword} className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-[#4A9BA8] px-5 py-3 text-sm font-black text-white shadow-lg shadow-[#4A9BA8]/20 transition hover:bg-[#2E7A87] disabled:opacity-60">
+            <Save size={16} />
+            {savingPassword ? "מעדכן..." : "עדכון סיסמה"}
+          </button>
+        </form>
+      </SectionCard>
+
+      <div className="space-y-4 lg:col-span-1">
+        <SettingsMessage type="error">{error}</SettingsMessage>
+        <SettingsMessage type="success">{message}</SettingsMessage>
+        <SectionCard icon={Settings} title="גישה והרשאות" subtitle="ניהול הגדרות עסק">
+          <p className="text-sm leading-7 text-gray-600">
+            {canUpdateSystem
+              ? "למשתמש זה יש הרשאת מנהל לעדכון פרטי העסק."
+              : "רק מנהל/ת יכול/ה לעדכן את פרטי העסק. ניתן לעדכן כאן רק את פרטי החשבון האישיים."}
+          </p>
+        </SectionCard>
+      </div>
+
+      <SectionCard icon={Settings} title="הגדרות עסק" subtitle="פרטי הקליניקה שמורים בשרת" className="lg:col-span-3">
+        <form onSubmit={saveSystem} className="space-y-5">
+          <div className="grid gap-4 md:grid-cols-2">
+            <SettingsInput label="שם העסק" value={systemForm.business_name} onChange={(value) => setSystemField("business_name", value)} required />
+            <SettingsInput label="טלפון" value={systemForm.phone} onChange={(value) => setSystemField("phone", value)} required placeholder="*3691" />
+            <SettingsInput label="WhatsApp" value={systemForm.whatsapp} onChange={(value) => setSystemField("whatsapp", value)} placeholder="0500000000" />
+            <SettingsInput label="אימייל עסקי" value={systemForm.email} onChange={(value) => setSystemField("email", value)} type="email" required />
+            <SettingsInput label="כתובת" value={systemForm.address} onChange={(value) => setSystemField("address", value)} required />
+            <SettingsTextarea label="שעות פתיחה" value={systemForm.opening_hours} onChange={(value) => setSystemField("opening_hours", value)} required placeholder="א׳-ה׳ 09:00-18:00" />
+          </div>
+          <button type="submit" disabled={!canUpdateSystem || savingSystem} className="inline-flex w-full items-center justify-center gap-2 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-5 py-3 text-sm font-black text-white shadow-lg shadow-[#C4795A]/20 transition hover:shadow-[#C4795A]/30 disabled:cursor-not-allowed disabled:opacity-50 md:w-auto">
+            <Save size={16} />
+            {savingSystem ? "שומר..." : "שמירת הגדרות עסק"}
+          </button>
+        </form>
+      </SectionCard>
+    </div>
+  );
+}
+
 function Sidebar({ collapsed, onToggle, activeTab, onTabChange }) {
   return (
     <Motion.aside
@@ -1747,9 +2159,14 @@ export default function AdminDashboard() {
   const analytics = useMemo(() => ({
     byTreatment: data?.by_treatment ?? [],
     byCategory: data?.by_category ?? [],
+    topCategory: data?.top_category ?? null,
+    leastCategory: data?.least_category ?? null,
     byDay: data?.by_day ?? [],
     byHour: data?.by_hour ?? [],
     monthlyTrend: data?.monthly_trend ?? [],
+    totalRevenue: data?.total_revenue ?? 0,
+    hasRevenue: Boolean(data?.has_revenue),
+    monthlyGrowthPct: data?.monthly_growth_pct ?? 0,
     recent: data?.recent ?? [],
   }), [data]);
 
@@ -1883,6 +2300,39 @@ export default function AdminDashboard() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => window.location.assign("/admin/staff-management")}
+                      className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold transition"
+                      style={{ background: "rgba(255,255,255,0.95)", color: "#8B5030", boxShadow: "0 4px 16px rgba(0,0,0,0.20)" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#FAF6F1"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
+                    >
+                      <Users size={16} />
+                      Secretary management
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.location.assign("/admin/customers")}
+                      className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold transition"
+                      style={{ background: "rgba(255,255,255,0.95)", color: "#8B5030", boxShadow: "0 4px 16px rgba(0,0,0,0.20)" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#FAF6F1"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
+                    >
+                      <Users size={16} />
+                      Customer management
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.location.assign("/admin/audit-log")}
+                      className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold transition"
+                      style={{ background: "rgba(255,255,255,0.95)", color: "#8B5030", boxShadow: "0 4px 16px rgba(0,0,0,0.20)" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#FAF6F1"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
+                    >
+                      <FileText size={16} />
+                      Audit log
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => window.location.assign("/secretary")}
                       className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold transition"
                       style={{ background: "rgba(255,255,255,0.95)", color: "#8B5030", boxShadow: "0 4px 16px rgba(0,0,0,0.20)" }}
@@ -1912,13 +2362,13 @@ export default function AdminDashboard() {
             {/* Monthly trend + AI insights */}
             <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
               <SectionCard icon={TrendingUp} title="מגמה חודשית" subtitle="6 חודשים אחרונים" className="lg:col-span-2">
-                {analytics.monthlyTrend.length > 0 ? (
-                  <div className="flex items-end gap-3 px-1">
-                    {analytics.monthlyTrend.map((month, index) => <MonthBar key={month.month} label={formatMonth(month.month)} count={month.count} max={maxMonthly} index={index} />)}
-                  </div>
-                ) : (
-                  <EmptyState icon={TrendingUp} />
-                )}
+                <MonthlyTrendWidget
+                  trend={analytics.monthlyTrend}
+                  total={data.total ?? 0}
+                  totalRevenue={analytics.totalRevenue}
+                  hasRevenue={analytics.hasRevenue}
+                  growthPct={analytics.monthlyGrowthPct}
+                />
               </SectionCard>
               <AiInsights data={data} mainRef={mainRef} />
             </Motion.div>
@@ -2063,22 +2513,12 @@ export default function AdminDashboard() {
                   </SectionCard>
 
                   <SectionCard icon={BarChart2} title="תורים לפי קטגוריה" subtitle="חלוקה בין תחומי הטיפול">
-                    {donutSegs.length === 0 ? (
-                      <EmptyState icon={BarChart2} />
-                    ) : (
-                      <div className="flex flex-col items-center gap-5 sm:flex-row">
-                        <DonutChart segments={donutSegs} total={data.total ?? 0} />
-                        <div className="w-full flex-1 space-y-2">
-                          {donutSegs.map((segment) => (
-                            <div key={segment.label} className="flex items-center gap-2 rounded-2xl bg-[#FAF6F1] px-3 py-2 transition hover:bg-[#F5EDE3]">
-                              <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: segment.color, boxShadow: `0 0 6px ${segment.color}80` }} />
-                              <span className="min-w-0 flex-1 truncate text-xs font-semibold text-gray-600">{segment.label}</span>
-                              <span className="text-xs font-black tabular-nums" style={{ color: segment.color }}>{segment.value}</span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
+                    <CategoryAnalyticsWidget
+                      categories={analytics.byCategory}
+                      total={data.total ?? 0}
+                      topCategory={analytics.topCategory}
+                      leastCategory={analytics.leastCategory}
+                    />
                   </SectionCard>
                 </Motion.div>
 
@@ -2109,11 +2549,12 @@ export default function AdminDashboard() {
 
             {activeTab === "settings" ? (
               <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-                <PlaceholderPanel
+                <AdminSettingsPanel />
+                {false ? <PlaceholderPanel
                   icon={Settings}
                   title="הגדרות מערכת"
                   text="כאן יתווספו בהמשך הגדרות ניהול, הרשאות, פרטי קליניקה והעדפות תצוגה. בסיס הידע והגדרות הצ׳אטבוט נמצאים בלשונית טיפולים."
-                />
+                /> : null}
               </Motion.div>
             ) : null}
           </div>

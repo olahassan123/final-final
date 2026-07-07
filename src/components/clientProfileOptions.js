@@ -3,14 +3,14 @@ import { getCategoryTreatments, serviceCatalog } from "../data/serviceCatalog";
 export const CLIENT_GENDER_OPTIONS = [
   "נקבה",
   "זכר",
-  "אחר / מעדיף לא לציין",
+  "אחר / מעדיף/ה לא לציין",
 ];
 
 const FALLBACK_TREATMENTS = [
-  { value: "fallback-facial", label: "טיפול פנים" },
-  { value: "fallback-manicure", label: "מניקור / פדיקור" },
-  { value: "fallback-body", label: "טיפול גוף" },
-  { value: "fallback-makeup", label: "איפור מקצועי" },
+  { value: "fallback-facial", label: "טיפול פנים", categoryName: "קוסמטיקה" },
+  { value: "fallback-manicure", label: "מניקור / פדיקור", categoryName: "ציפורניים" },
+  { value: "fallback-body", label: "טיפול גוף", categoryName: "גוף" },
+  { value: "fallback-makeup", label: "איפור מקצועי", categoryName: "איפור" },
 ];
 
 export function getClientTreatmentOptions() {
@@ -32,4 +32,14 @@ export function labelsForTreatments(values = []) {
   );
 
   return values.map((value) => optionsByValue.get(value) || value);
+}
+
+export function categoriesForTreatments(values = []) {
+  const optionsByValue = new Map(
+    getClientTreatmentOptions().map((option) => [option.value, option])
+  );
+  const categories = values
+    .map((value) => optionsByValue.get(value)?.categoryName)
+    .filter(Boolean);
+  return [...new Set(categories)];
 }

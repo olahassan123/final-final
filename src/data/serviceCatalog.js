@@ -57,8 +57,7 @@ function createTreatment({
 const cosmetologyCategory = {
   slug: "cosmetology",
   name: "טיפולי קוסמטיקה",
-  description:
-    "קטגוריית קוסמטיקה מלאה עם חלוקה פנימית לטיפולי פנים קלאסיים, מפנקים וטכנולוגיים.",
+  description: "",
   sections: cosmeticSections.map((section) => ({
     slug: section.id,
     title: section.title,
@@ -67,14 +66,14 @@ const cosmetologyCategory = {
       createTreatment({
         slug: treatment.id,
         name: treatment.name,
-        summary: treatment.lines[0] || "טיפול קוסמטי מותאם אישית.",
-        description: treatment.lines.join(" "),
+        summary: treatment.lines[0] || "",
+        description: treatment.lines.join("\n"),
         details: treatment.lines,
-        idealFor: "ההתאמה המדויקת תיקבע לפי מצב העור והמטרה הטיפולית.",
-        results: "תוצאות משתנות לפי סוג הטיפול, מצב העור וסדרת המפגשים.",
-        aftercare: "הנחיות מדויקות לאחר טיפול יותאמו לכל טיפול בנפרד.",
-        consultation: "מומלץ ייעוץ קצר לפני התחלת סדרה או טיפול מתקדם.",
-        frequency: "תדירות משתנה לפי הטיפול והמטרה.",
+        idealFor: "",
+        results: "",
+        aftercare: "",
+        consultation: "",
+        frequency: "",
       })
     ),
   })),
@@ -199,6 +198,94 @@ const manicurePedicureCategory = {
     },
   ],
 };
+
+const manicureContentUpdates = {
+  "manicure-basic": {
+    summary: "מניקור ידני",
+    description: "מניקור ידני\nמניקור מכשירי\nהסרת ציפוי ישן",
+    details: [
+      "מניקור ידני",
+      "מניקור מכשירי",
+      "הסרת ציפוי ישן",
+    ],
+    idealFor: "",
+    results: "",
+    aftercare: "",
+    consultation: "",
+  },
+  "gel-polish": {
+    summary: "הסרת ציפוי ישן",
+    description: "הסרת ציפוי ישן\nמניקור\nתיקון מבנה אנטומי\nציפוי בג'ל",
+    details: [
+      "הסרת ציפוי ישן",
+      "מניקור",
+      "תיקון מבנה אנטומי",
+      "ציפוי בג'ל",
+    ],
+    idealFor: "",
+    results: "",
+    aftercare: "",
+    consultation: "",
+  },
+  "nail-sculpting": {
+    summary: "הסרת ציפוי ישן",
+    description: "הסרת ציפוי ישן\nמניקור\nבניה, עיצוב ופיסול ציפורן\nציפוי בג'ל",
+    details: [
+      "הסרת ציפוי ישן",
+      "מניקור",
+      "בניה, עיצוב ופיסול ציפורן",
+      "ציפוי בג'ל",
+    ],
+    idealFor: "",
+    results: "",
+    aftercare: "",
+    consultation: "",
+  },
+};
+
+for (const treatment of manicurePedicureCategory.sections[0].treatments) {
+  Object.assign(treatment, manicureContentUpdates[treatment.slug] || {});
+}
+
+const pedicurePolishSummary =
+  "מהלך הטיפול מתבצע ניקוי של כפות הרגליים, הסרת עור יבש וחתכים, ועיצוב הציפורניים. הטיפול מסייע בהרפיה, משפר את זרימת הדם ומפחית מתח.";
+
+const pedicureSummary =
+  "במהלך הטיפול מתבצע ניקוי של כפות הרגליים, הסרת עור יבש וחתכים, ועיצוב הציפורניים. הטיפול מסייע בהרפיה, משפר את זרימת הדם ומפחית מתח.";
+
+const pedicureContentUpdates = {
+  "pedicure-polish": {
+    summary: pedicurePolishSummary,
+    description: pedicurePolishSummary,
+    details: [pedicurePolishSummary],
+    idealFor: "",
+    results: "",
+    aftercare: "",
+    consultation: "",
+  },
+  "pedicure-gel": {
+    summary: pedicureSummary,
+    description: pedicureSummary,
+    details: [pedicureSummary],
+    idealFor: "",
+    results: "",
+    aftercare: "",
+    consultation: "",
+  },
+  "pedicure-treatment": {
+    summary: pedicureSummary,
+    description: pedicureSummary,
+    details: [pedicureSummary],
+    idealFor: "",
+    results: "",
+    aftercare: "",
+    consultation: "",
+  },
+};
+
+for (const treatment of manicurePedicureCategory.sections[1].treatments) {
+  Object.assign(treatment, pedicureContentUpdates[treatment.slug] || {});
+}
 
 const bodyTreatmentsCategory = {
   slug: "body-treatments",
@@ -404,6 +491,120 @@ const bodyTreatmentsCategory = {
   ],
 };
 
+bodyTreatmentsCategory.description = "";
+bodyTreatmentsCategory.sections[0].title = "עיסוי גוף";
+bodyTreatmentsCategory.sections[0].subtitle = "";
+bodyTreatmentsCategory.sections[1].title = "עיסוי ממוקד";
+bodyTreatmentsCategory.sections[1].subtitle = "";
+bodyTreatmentsCategory.sections[2].title = "עיסויים מיוחדים";
+bodyTreatmentsCategory.sections[2].subtitle = "";
+
+const bodyTreatmentContentUpdates = {
+  "swedish-massage": {
+    name: "עיסוי שוודי",
+    details: [
+      "עיסוי עדין המתמקד באווירה ומשתמש בשמנים להרגעה ולהנאה.",
+      "העיסוי מתבצע בטכניקות של לחיצות וטפיחות כדי לשחרר מתחים ולשפר את זרימת הדם ומסייע לתחושת נוחות ורוגע.",
+    ],
+  },
+  "hot-stones-massage": {
+    name: "עיסוי באבנים חמות",
+    details: [
+      "עיסוי מפנק ומעצים את תחושת הרוגע.",
+      "הטיפול משלב אבני בזלת מחוממות יחד עם מגוון שמני מרפא, מפחית כאבים, משחרר שרירים תפוסים, מרגיע ומסייע עם מתח נפשי או עייפות כללית.",
+    ],
+  },
+  "thai-massage": {
+    name: "עיסוי תאילנדי",
+    details: [
+      "טיפול בטכניקת לחץ על נקודות בגוף, משפר את זרימת האנרגיה והגמישות ומפחית מתחים.",
+    ],
+  },
+  shiatsu: {
+    name: "שיאצו",
+    details: [
+      "טיפול יפני המבוסס על לחיצות ממוקדות על נקודות אנרגיה בגוף תוך הפעלת לחץ עם דגש על איזון ושיפור זרימת הדם.",
+    ],
+  },
+  "deep-tissue-massage": {
+    name: "עיסוי רקמות עמוק",
+    details: [
+      "מתמקד בשחרור מתחים כרוניים ובאזורים כואבים הנוטים לדלקות.",
+      "העיסוי אינטנסיבי ולכן מומלץ לשוחח עם המטפל על העוצמה והאזורים שדורשים תשומת לב מיוחדת.",
+    ],
+  },
+  "extremity-massage": {
+    name: "עיסוי קצוות",
+    details: [
+      "עיסוי ראש, צוואר, ידיים וכפות רגליים. טיפול מרגיע ומפנק שמתמקד בשחרור מתחים ושיפור התחושה הכללית.",
+    ],
+  },
+  "shoulders-back-neck": {
+    name: "עיסוי כתפיים, גב וצוואר",
+    details: [
+      "העיסוי מקל על מתחים, כאבים וחוסר נוחות באזורי גוף אלו בשל אורח חיים יושב או מתוח.",
+      "העיסוי מסייע לשחרר את המתח בשרירים, לשפר את זרימת הדם וליצור תחושת רוגע כללית.",
+    ],
+  },
+  "face-scalp-massage": {
+    name: "עיסוי פנים וקרקפת",
+    details: [
+      "טיפול מרגיע המתמקד בשחרור מתחים באזור הפנים, הצוואר והקרקפת. משפר את זרימת הדם ומפחית סימני עייפות.",
+    ],
+  },
+  "feet-massage": {
+    name: "עיסוי כפות רגליים",
+    details: [
+      "טיפול מרגיע ומפנק שמתמקד בשחרור מתחים ושיפור התחושה הכללית באזור כפות הרגליים.",
+    ],
+  },
+  "sports-massage": {
+    name: "עיסוי ספורטאים",
+    details: [
+      "טיפול ממוקד בשיפור ביצועים פיזיים, שיקום שרירים ומניעת פציעות. העיסוי משחרר מתחים בשרירים ומשפר את זרימת הדם.",
+    ],
+  },
+  "pregnancy-massage": {
+    name: "עיסוי לנשים בהריון",
+    details: [
+      "עיסוי עדין המסייע בשחרור מתחים, הפגת כאבים ושיפור תחושת הרווחה הכללית.",
+      "העיסוי מתבצע על ידי מטפל/ת מוסמך/ת ומנוסה בעבודה עם נשים בהריון, להבטיח את הבטיחות והנוחות של המטופלת.",
+    ],
+  },
+  "combined-massage": {
+    name: "עיסוי משולב",
+    details: [
+      "העיסוי מתבצע עם מספר טכניקות עיסוי שונות המתאימים לצרכים האישיים של המטופל ולספק חוויה כוללת ומקיפה.",
+    ],
+  },
+  reflexology: {
+    name: "רפלקסולוגיה",
+    details: [
+      "שיטה טיפולית המבוססת על לחיצות בנקודות בכפות הרגליים ובידיים. מתמקד באיזון ושיפור הבריאות הכללית.",
+      "טיפול מרגיע המסייע בשיפור זרימת הדם, הפחתת מתח, שיפור מערכת החיסון והפגת כאבים.",
+    ],
+  },
+};
+
+for (const section of bodyTreatmentsCategory.sections) {
+  for (const treatment of section.treatments) {
+    const update = bodyTreatmentContentUpdates[treatment.slug];
+    if (!update) continue;
+
+    Object.assign(treatment, {
+      name: update.name,
+      summary: update.details[0],
+      description: update.details.join("\n"),
+      details: update.details,
+      idealFor: "",
+      results: "",
+      aftercare: "",
+      consultation: "",
+      frequency: "",
+    });
+  }
+}
+
 const permanentMakeupCategory = {
   slug: "permanent-makeup-brows",
   name: "איפור קבוע ועיצוב גבות",
@@ -593,6 +794,123 @@ const permanentMakeupCategory = {
   ],
 };
 
+permanentMakeupCategory.description = "";
+permanentMakeupCategory.sections[0].title = "גבות";
+permanentMakeupCategory.sections[0].subtitle = "";
+permanentMakeupCategory.sections[1].title = "תיחום עיניים";
+permanentMakeupCategory.sections[1].subtitle = "";
+permanentMakeupCategory.sections[2].title = "שפתיים";
+permanentMakeupCategory.sections[2].subtitle = "";
+permanentMakeupCategory.sections[3].title = "ראש";
+permanentMakeupCategory.sections[3].subtitle = "";
+
+const permanentMakeupContentUpdates = {
+  "brows-hair-stroke": {
+    name: "גבות שיטת השערה",
+    details: [
+      "בשיטה זו עושים הדמיית שיער, כאשר בעזרת מחט עדינה מציירים שערות. שיטה זו מתאימה בעיקר לאנשים עם עור יבש.",
+      "עד 2 טיפולים",
+      "מומלץ לקבוע תור לפגישת ייעוץ ללא עלות.",
+    ],
+  },
+  "brows-powder": {
+    name: "גבות שיטת הפודרה",
+    details: [
+      "שיטת הפיקסלים. בעזרת מחט אחת עדינה מרחפים מעל העור ויוצרים שכבות עדינות של עבודה בנקודות (פיקסלים).",
+      "בשיטה זו עובדים באומברה, עבודה הנעה בגוונים מבהיר לכהה על מנת להקנות מראה טבעי ולא מלאכותי. שיטה זו מתאימה לכל סוגי העור ומחלימה בצורה מהירה.",
+      "עד 2 טיפולים",
+      "מומלץ לקבוע תור לפגישת ייעוץ ללא עלות.",
+    ],
+  },
+  "brows-combined": {
+    name: "גבות שיטה משולבת",
+    details: [
+      "שיטה המשלבת את שיטת ההצללה/פודרה ביחד עם שיטת השערה. שיטה זו מתאימה לכל סוגי העור.",
+      "עד 2 טיפולים",
+      "מומלץ לקבוע תור לפגישת ייעוץ ללא עלות.",
+    ],
+  },
+  "lash-line-lower": {
+    name: "הדגשת קו ריסים תחתון",
+    details: [
+      "תיחום קו הריסים בטכניקה מתקדמת ללא כאבים.",
+      "עד 2 טיפולים",
+      "מומלץ לקבוע תור לפגישת ייעוץ ללא עלות.",
+    ],
+  },
+  "lash-line-upper": {
+    name: "הדגשת קו ריסים עליון",
+    details: [
+      "תיחום קו הריסים בטכניקה מתקדמת ללא כאבים.",
+      "עד 2 טיפולים",
+      "מומלץ לקבוע תור לפגישת ייעוץ ללא עלות.",
+    ],
+  },
+  "eyeliner-upper": {
+    name: "אייליינר עליון",
+    details: [
+      "תיחום קו הריסים בטכניקה מתקדמת ללא כאבים.",
+      "עד 2 טיפולים",
+      "מומלץ לקבוע תור לפגישת ייעוץ ללא עלות.",
+    ],
+  },
+  "lips-natural-contour": {
+    name: "תיחום שפתיים בקו טבעי",
+    details: [
+      "עבודה בטכניקה מתקדמת למראה טבעי. .",
+      "עד 2 טיפולים",
+      "מומלץ לקבוע תור לפגישת ייעוץ ללא עלות",
+    ],
+  },
+  "lips-fill-contour": {
+    name: "מילוי שפתיים + תיחום",
+    details: [
+      "עבודה בטכניקה מתקדמת למראה טבעי.",
+      "עד 2 טיפולים",
+      "מומלץ לקבוע תור לפגישת ייעוץ ללא עלות",
+    ],
+  },
+  "scalp-fill-woman": {
+    name: "מילוי קרקפת אישה",
+    details: [
+      "טיפול של שעה.",
+      "מומלץ לקבוע תור לפגישת ייעוץ ללא עלות",
+    ],
+  },
+  "scalp-fill-man": {
+    name: "מילוי קרקפת גבר",
+    details: [
+      "טיפול של שעה.",
+      "מומלץ לקבוע תור לפגישת ייעוץ ללא עלות",
+    ],
+  },
+  "beauty-mark": {
+    name: "נקודת חן",
+    details: [
+      "מומלץ לקבוע תור לפגישת ייעוץ ללא עלות",
+    ],
+  },
+};
+
+for (const section of permanentMakeupCategory.sections) {
+  for (const treatment of section.treatments) {
+    const update = permanentMakeupContentUpdates[treatment.slug];
+    if (!update) continue;
+
+    Object.assign(treatment, {
+      name: update.name,
+      summary: update.details[0],
+      description: update.details.join("\n"),
+      details: update.details,
+      idealFor: "",
+      results: "",
+      aftercare: "",
+      consultation: "",
+      frequency: "",
+    });
+  }
+}
+
 const personalStylingCategory = {
   slug: "personal-styling",
   name: "סטיילינג אישי",
@@ -639,6 +957,44 @@ const personalStylingCategory = {
     },
   ],
 };
+
+personalStylingCategory.description = "";
+personalStylingCategory.sections[0].title = "סטיילינג";
+personalStylingCategory.sections[0].subtitle = "";
+
+const personalStylingContentUpdates = {
+  "styling-4h": {
+    name: "מפגש תדמית 4 שעות",
+    details: [
+      "מפגש סטיילינג במרכז קניות. מפגש אישי עם סטייליסטית שתדע להתאים לך את המלתחה שתחמיא לנתונייך הטבעיים, תעזור לך להרכיב מלתחה פרקטית ומגוונת.",
+    ],
+  },
+  "styling-2h": {
+    name: "מפגש תדמית 2.5 שעות",
+    details: [
+      "מפגש סטיילינג מקוצר. מפגש אישי עם סטייליסטית שתעניק לך את הכלים הנכונים לפיתוח סטייל אישי, להתלבש, להתאבזר ולהתמצא בגוונים ובגזרות שיחמיאו למבנה גופך.",
+    ],
+  },
+};
+
+for (const section of personalStylingCategory.sections) {
+  for (const treatment of section.treatments) {
+    const update = personalStylingContentUpdates[treatment.slug];
+    if (!update) continue;
+
+    Object.assign(treatment, {
+      name: update.name,
+      summary: update.details[0],
+      description: update.details.join("\n"),
+      details: update.details,
+      idealFor: "",
+      results: "",
+      aftercare: "",
+      consultation: "",
+      frequency: "",
+    });
+  }
+}
 
 export const serviceCatalog = [
   manicurePedicureCategory,
