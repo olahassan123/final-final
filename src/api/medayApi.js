@@ -28,6 +28,13 @@ export async function sendChat(sessionId, message = null, buttonValue = null, qu
   return res.json();
 }
 
+export async function getChatCategories() {
+  const res = await fetch(`${API_BASE_URL}/chat/categories`);
+  if (!res.ok) throw new Error("Failed to load categories");
+  const data = await res.json();
+  return data.categories || [];
+}
+
 // ── Appointments ──────────────────────────────────────────────────────────
 
 export async function fetchAppointments() {

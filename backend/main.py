@@ -332,6 +332,13 @@ def chat(req: ChatRequest):
     return result
 
 
+@app.get("/chat/categories")
+def chat_categories():
+    """Category names for the chat welcome chips (kept in sync with the Excel)."""
+    from chatbot_db import get_categories
+    return {"categories": [c["category_name"] for c in get_categories() if c.get("category_name")]}
+
+
 # ------------------------------------------------------------
 # Appointments DB
 # ------------------------------------------------------------

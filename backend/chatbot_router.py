@@ -19,7 +19,8 @@ from chatbot_config import (
 from chatbot_db import (
     get_session, save_session, append_context,
     get_faq_entries, get_faq_by_id, get_categories, get_category_by_id,
-    get_treatment_by_id, get_all_treatments_summary,
+    get_treatment_by_id, get_all_treatments_summary, get_treatments_in_category,
+    get_forward_topics,
 )
 from chatbot_flow import (
     build_question_response, apply_score, get_top_treatments,
@@ -106,6 +107,24 @@ def _is_price(msg: str) -> bool:
     return any(kw in ml for kw in _PRICE_KW)
 
 
+# Treatment duration/time questions → forwarded to the clinic (never answered).
+_DURATION_KW = [
+    "כמה זמן לוקח", "כמה זמן אורך", "כמה זמן נמשך", "כמה זמן הטיפול", "כמה זמן זה לוקח",
+    "כמה זמן ייקח", "כמה זמן ייקח הטיפול", "משך הטיפול", "משך זמן הטיפול", "כמה זמן אורך הטיפול",
+    "how long does it take", "how long is the treatment", "how long will it take",
+    "treatment duration", "duration of the treatment",
+    "كم يستغرق", "مدة العلاج", "كم مدة العلاج", "كم يأخذ العلاج",
+]
+_DURATION_EXCLUDE = ["מחזיק", "נשמר", "התוצאה", "results last", "how long do results", "تدوم"]
+
+
+def _is_duration_question(msg: str) -> bool:
+    ml = (msg or "").lower()
+    if any(k in ml for k in _DURATION_EXCLUDE):  # "how long do results last" is different
+        return False
+    return any(k in ml for k in _DURATION_KW)
+
+
 # ── Language detection (heuristic, no LLM) ───────────────────────────────────
 
 def _detect_language(text: str) -> str:
@@ -129,6 +148,15 @@ def _price_msg(lang: str = "he") -> str:
     return msgs.get(lang, msgs["he"])
 
 
+def _duration_msg(lang: str = "he") -> str:
+    msgs = {
+        "he": f"משך הטיפול משתנה לפי סוג הטיפול וההתאמה האישית 😊\nהצוות שלנו ב-{CLINIC_PHONE} או בוואטסאפ ישמח למסור לך את הפרטים המדויקים!",
+        "ar": f"مدة العلاج تختلف حسب نوعه والتناسب الشخصي 😊\nفريقنا على {CLINIC_PHONE} أو واتساب سيسعد بإعطائك التفاصيل الدقيقة!",
+        "en": f"Treatment length varies by type and personal fit 😊\nOur team at {CLINIC_PHONE} or WhatsApp will gladly give you the exact details!",
+    }
+    return msgs.get(lang, msgs["he"])
+
+
 def _forward_msg(lang: str = "he") -> str:
     msgs = {
         "he": f"זה משהו שהצוות שלנו יוכל לעזור לך בו הכי טוב 😊\nניתן ליצור קשר בטלפון {CLINIC_PHONE} או בוואטסאפ.",
@@ -136,6 +164,31 @@ def _forward_msg(lang: str = "he") -> str:
         "en": f"That's best answered by our team directly 😊\nReach them at {CLINIC_PHONE} or via WhatsApp.",
     }
     return msgs.get(lang, msgs["he"])
+
+
+def _out_of_scope_reply(lang: str = "he") -> dict:
+    """For questions unrelated to the clinic: a short in-frame decline. No chips,
+    and we do NOT forward random topics to the phone."""
+    msgs = {
+        "he": "אני כאן כדי לעזור עם כל מה שקשור ל-MeDay — טיפולים, שירותים ומידע על המכון 😊 במה אוכל לעזור לך?",
+        "ar": "أنا هنا للمساعدة في كل ما يتعلق بـ MeDay — العلاجات والخدمات ومعلومات المركز 😊 كيف يمكنني مساعدتك؟",
+        "en": "I'm here to help with anything about MeDay — treatments, services and clinic info 😊 How can I help you?",
+    }
+    return {"reply": msgs.get(lang, msgs["he"]), "buttons": None, "mode": "general", "no_suggest": True}
+
+
+def _match_forward_topic(message: str):
+    """True for clinic matters that need a human (medical suitability, complaints,
+    appointment availability). Price/duration are handled by their own guards."""
+    ml = (message or "").lower()
+    for tp in get_forward_topics():
+        if tp.get("topic_id") == "FWD-01":  # price → own guard
+            continue
+        for p in (tp.get("example_phrasings") or "").split(","):
+            p = p.strip()
+            if len(p) >= 4 and p.lower() in ml:
+                return tp
+    return None
 
 
 def _not_now_msg(lang: str = "he") -> str:
@@ -153,7 +206,6 @@ def _not_now_msg(lang: str = "he") -> str:
 _DETAIL_FIELDS = [
     ("מתאים ל", "good_for"),
     ("שיטה/מכשור", "technique_or_equipment"),
-    ("משך", "duration_min"),
     ("מה מרגישים", "pain_level"),
     ("החלמה", "downtime"),
     ("הכנה", "preparation"),
@@ -162,6 +214,13 @@ _DETAIL_FIELDS = [
     ("משך התוצאה", "results_longevity"),
     ("מה קורה בטיפול", "what_to_expect"),
 ]
+
+
+def _has_detail(t: dict) -> bool:
+    """True if the treatment carries real attributes the LLM can describe from.
+    A generic short_description alone does NOT count — the LLM never sees it, so
+    such treatments stay marked [name only] and the bot won't invent specifics."""
+    return any(t.get(col) for _, col in _DETAIL_FIELDS)
 
 
 def _build_detail_block(treatments: list) -> str:
@@ -173,8 +232,6 @@ def _build_detail_block(treatments: list) -> str:
             val = t.get(col)
             if not val:
                 continue
-            if col == "duration_min":
-                val = f"{val} דק'"
             parts.append(f"{label}: {val}")
         if not parts:
             continue
@@ -203,14 +260,140 @@ _SG_PREP  = {"he": "איך מתכוננים לטיפול?", "ar": "كيف أست
 _SG_AFTER = {"he": "מה עושים אחרי הטיפול?", "ar": "ماذا أفعل بعد العلاج؟", "en": "What should I do afterwards?"}
 
 
-def _general_suggestions(message: str, lang: str) -> list:
-    """Productive next-step hints — only paths that lead somewhere *inside* the bot.
-    Never suggests booking / contact / price: those are handoffs, not guidance."""
+# Distinctive subgroup names — when one is mentioned the topic is narrower than a
+# category, so we show no navigational guidance (per guidance policy).
+_SUBGROUP_KW = [
+    "בנייה ומילוי", "תוספות ועיצוב", "עיסוי גוף", "עיסוי ממוקד", "עיסויים מיוחדים",
+    "תיחום עיניים", "טיפוח גבות וריסים", "הזרקות בוטוקס", "פילרים", "ביוסטימולטורים",
+    "מניקור", "פדיקור", "קלאסיים", "מפנקים", "טכנולוגיים",
+]
+
+
+def _detect_subgroup(message: str) -> bool:
+    ml = message or ""
+    return any(k in ml for k in _SUBGROUP_KW)
+
+
+# Subgroup index (subgroup name → category), built once from the DB.
+_SUBGROUP_INDEX = None
+_GENERIC_SUB = {"נשים", "גברים", "ילדים", "ראש"}  # too generic to match on safely
+
+
+def _subgroup_index():
+    global _SUBGROUP_INDEX
+    if _SUBGROUP_INDEX is None:
+        idx, seen = [], set()
+        for c in get_categories():
+            for t in get_treatments_in_category(c["category_id"]):
+                sg = t.get("subgroup")
+                if sg and (sg, c["category_id"]) not in seen:
+                    seen.add((sg, c["category_id"]))
+                    idx.append((sg, c["category_id"]))
+        _SUBGROUP_INDEX = idx
+    return _SUBGROUP_INDEX
+
+
+def _find_subgroup(message: str):
+    """Match the message against a real subgroup name (longest key wins)."""
+    ml = message or ""
+    best = None
+    for sg, cid in _subgroup_index():
+        key = sg.split(" (")[0].strip()  # drop parentheticals like "(תור כל 6 שבועות)"
+        if key in _GENERIC_SUB or len(key) < 4:
+            continue
+        if key in ml and (best is None or len(key) > len(best[2])):
+            best = (sg, cid, key)
+    return best
+
+
+_CMP_KW = ["הבדל", "עדיף", " מול ", "difference", "versus", " vs ", "الفرق"]
+
+
+def _build_subgroup_reply(message: str, lang: str):
+    """List a specific subgroup's treatments. No guidance chips (per policy)."""
+    if any(k in (message or "").lower() for k in _CMP_KW):
+        return None  # comparisons are the LLM's job, not a plain listing
+    found = _find_subgroup(message)
+    if not found:
+        return None
+    sg, cid, key = found
+    names = [t["treatment_name"] for t in get_treatments_in_category(cid)
+             if t.get("subgroup") == sg and t.get("treatment_name")]
+    if not names:
+        return None
+    t_list = "\n".join(f"• {n}" for n in names)
+    intro = {
+        "he": f"הנה הטיפולים שלנו בקבוצת {key}:\n\n{t_list}",
+        "ar": f"هذه علاجاتنا في مجموعة {key}:\n\n{t_list}",
+        "en": f"Here are our treatments in {key}:\n\n{t_list}",
+    }
+    return {"reply": intro.get(lang, intro["he"]), "buttons": None,
+            "mode": "general", "no_suggest": True}
+
+
+# ── Comparison: "what's the difference between them / X and Y?" ───────────────
+_COMPARE_KW = [
+    "מה ההבדל", "מה הבדל", "ההבדל בין", "הבדל בין", "הבדל ביניהם", "במה שונ",
+    "מה עדיף", "איזה עדיף", "מה ההבדלים", "להשוות", "השוואה",
+    "difference between", "what's the difference", "compare", "which is better", "vs ",
+    "الفرق بين", "ما الفرق", "أيهما أفضل", "ايهما افضل", "المقارنة",
+]
+
+
+def _is_comparison(message: str) -> bool:
+    ml = (message or "").lower()
+    return any(k in ml for k in _COMPARE_KW)
+
+
+def _build_comparison(message: str, session: dict, lang: str):
+    """Compare the treatments in the category/subgroup just discussed (resolves
+    'them' via recent context), showing each one's purpose from existing data."""
+    ctx = " ".join(m.get("content", "") for m in session.get("recent_context", [])
+                   if m.get("role") == "assistant")
+    # Subgroup only from the explicit message — category descriptions mention
+    # subgroup words, which would wrongly narrow a category comparison.
+    sub = _find_subgroup(message)
+    if sub:
+        sg, cid, title = sub
+        treatments = [t for t in get_treatments_in_category(cid)
+                      if t.get("subgroup") == sg and t.get("treatment_name")]
+    else:
+        cat = _detect_category_in_message(message) or _detect_category_in_message(ctx)
+        if not cat:
+            return None
+        c = get_category_by_id(cat)
+        title = c["category_name"] if c else ""
+        treatments = [t for t in get_treatments_in_category(cat) if t.get("treatment_name")]
+    if len(treatments) < 2:
+        return None
+    lines = []
+    for t in treatments:
+        desc = t.get("good_for") or t.get("short_description") or t.get("what_to_expect") or ""
+        lines.append(f"• **{t['treatment_name']}** — {desc}" if desc else f"• **{t['treatment_name']}**")
+    body = "\n".join(lines)
+    intro = {
+        "he": f"הנה במה נבדלים הטיפולים ב{title}:\n\n{body}",
+        "ar": f"إليك كيف تختلف العلاجات في {title}:\n\n{body}",
+        "en": f"Here's how the treatments in {title} differ:\n\n{body}",
+    }
+    return {"reply": intro.get(lang, intro["he"]), "buttons": None,
+            "mode": "general", "no_suggest": True}
+
+
+def _general_suggestions(message: str, lang: str):
+    """Guidance policy:
+      • rec category  → offer to recommend
+      • non-rec category or a subgroup → no guidance
+      • no specific topic (general) → entry chips into the recommendation flows
+    Never suggests booking / contact / price (those are handoffs, not guidance)."""
+    if _detect_subgroup(message):
+        return None
     cat = _detect_category_in_message(message or "")
-    if cat == "CAT-03":
-        return [_L(_SG_CHOOSE["CAT-03"], lang), _L(_SG_TREATMENTS, lang)]
-    if cat == "CAT-04":
-        return [_L(_SG_CHOOSE["CAT-04"], lang), _L(_SG_TREATMENTS, lang)]
+    if cat:
+        c = get_category_by_id(cat)
+        if c and c.get("has_recommendation") and cat in _SG_CHOOSE:
+            return [_L(_SG_CHOOSE[cat], lang)]
+        return None  # non-rec category → no guidance
     return [_L(_SG_TREATMENTS, lang), _L(_SG_CHOOSE["CAT-03"], lang), _L(_SG_CHOOSE["CAT-04"], lang)]
 
 
@@ -226,7 +409,8 @@ def _is_handoff_reply(reply: str) -> bool:
         return False
     r = reply.strip()
     for lg in ("he", "ar", "en"):
-        if r in (_price_msg(lg).strip(), _forward_msg(lg).strip(), _not_now_msg(lg).strip()):
+        if r in (_price_msg(lg).strip(), _duration_msg(lg).strip(),
+                 _forward_msg(lg).strip(), _not_now_msg(lg).strip()):
             return True
     f15 = get_faq_by_id("FAQ-15")  # "how to book / contact" → *3691
     return bool(f15 and f15["answer"].strip() in r)
@@ -326,20 +510,31 @@ def _is_whats_offered(msg: str) -> bool:
 
 
 def _build_catalog_overview(lang: str) -> dict:
-    """List every category from the DB — a correct answer with zero LLM reliance."""
+    """List every category from the DB — a correct answer with zero LLM reliance.
+    Chips are the category names: clicking one shows that category's description."""
     names = [c["category_name"] for c in get_categories() if c.get("category_name")]
     lst = "\n".join(f"• {n}" for n in names)
     intro = {
-        "he": f"בשמחה! הנה התחומים שאנחנו מציעים ב-MeDay:\n\n{lst}\n\nרוצה שאספר לך עוד על אחד מהם, או שאעזור לך לבחור טיפול מתאים? 💛",
-        "ar": f"بكل سرور! هذه هي المجالات التي نقدمها في MeDay:\n\n{lst}\n\nتريدين أن أخبرك أكثر عن أحدها، أو أساعدك في اختيار العلاج المناسب؟ 💛",
-        "en": f"Happy to help! Here's what we offer at MeDay:\n\n{lst}\n\nWant me to tell you more about one, or help you choose the right treatment? 💛",
+        "he": f"בשמחה! הנה התחומים שאנחנו מציעים ב-MeDay:\n\n{lst}\n\nבחרי תחום כדי לשמוע עליו עוד 💛",
+        "ar": f"بكل سرور! هذه هي المجالات التي نقدمها في MeDay:\n\n{lst}\n\nاختاري مجالاً لمعرفة المزيد عنه 💛",
+        "en": f"Happy to help! Here's what we offer at MeDay:\n\n{lst}\n\nPick an area to hear more about it 💛",
     }
     return {
         "reply": intro.get(lang, intro["he"]),
         "buttons": None,
         "mode": "general",
-        "suggestions": [_L(_SG_CHOOSE["CAT-03"], lang), _L(_SG_CHOOSE["CAT-04"], lang)],
+        "suggestions": names,  # one chip per category → clicking shows its description
     }
+
+
+def _match_category_by_name(message: str):
+    """Return the category whose name the message EXACTLY is (i.e. a category chip
+    was clicked, or the user typed the category name)."""
+    m = (message or "").strip().rstrip("?.!,،؟ ")
+    for c in get_categories():
+        if m == (c.get("category_name") or "").strip():
+            return c
+    return None
 
 
 def _catalog_deflection(reply: str) -> bool:
@@ -432,7 +627,10 @@ def _match_faq(message: str):
 
 
 def _match_treatment(message: str):
-    """Return the treatment whose name/alias appears in the message (longest wins)."""
+    """Return the treatment whose name/alias appears in the message (longest wins).
+    Min length 5 avoids short body-part names (e.g. "פנים", "גבות") colliding with
+    category phrases like "טיפולי פנים". Also skips a name right after "טיפול/טיפולי",
+    which signals a category ("facial treatments"), not that specific treatment."""
     ml = (message or "").lower()
     best, best_len = None, 0
     for t in get_all_treatments_summary():
@@ -441,8 +639,11 @@ def _match_treatment(message: str):
             cands += t["aliases"].split(",")
         for c in cands:
             c = c.strip()
-            if len(c) >= 4 and c.lower() in ml and len(c) > best_len:
-                best, best_len = t, len(c)
+            if len(c) < 5 or c.lower() not in ml or len(c) <= best_len:
+                continue
+            if f"טיפולי {c}" in message or f"טיפול {c}" in message:
+                continue  # category phrase, not a specific treatment
+            best, best_len = t, len(c)
     return get_treatment_by_id(best["treatment_id"]) if best else None
 
 
@@ -457,13 +658,64 @@ def _treatment_card(t: dict, lang: str) -> Optional[dict]:
     if t.get("good_for"):
         lines.append(_L({"he": f"מתאים ל: {t['good_for']}", "ar": f"مناسب لـ: {t['good_for']}",
                          "en": f"Good for: {t['good_for']}"}, lang))
-    if t.get("duration_min"):
-        lines.append(_L({"he": f"משך: {t['duration_min']} דק'", "ar": f"المدة: {t['duration_min']} دقيقة",
-                         "en": f"Duration: {t['duration_min']} min"}, lang))
-    lines.append(_L({"he": "רוצה שאעזור לך לבחור טיפול מתאים, או לתאם תור? 💛",
-                     "ar": "تريدين أن أساعدك في اختيار العلاج المناسب أو حجز موعد؟ 💛",
-                     "en": "Want me to help you choose the right treatment, or book? 💛"}, lang))
-    return {"reply": "\n".join(lines), "buttons": None, "mode": "general"}
+    # Duration intentionally omitted — treatment time is forwarded, never shown.
+    return {
+        "reply": "\n".join(lines),
+        "buttons": None,
+        "mode": "general",
+        "suggestions": _treatment_followups(t, lang),
+        "last_treatment_id": t["treatment_id"],
+        "no_suggest": True,  # only treatment field chips here — no general nav chips
+    }
+
+
+# Per-field follow-up questions. Chips are offered ONLY for fields a treatment
+# actually has, and clicking one is answered straight from that field — so a
+# guidance option can never lead to an empty cell / hallucination.
+_FIELD_Q = {
+    "pain_level":        {"he": "האם זה כואב?", "ar": "هل هو مؤلم؟", "en": "Does it hurt?"},
+    "preparation":       {"he": "איך מתכוננים לטיפול?", "ar": "كيف أستعد؟", "en": "How do I prepare?"},
+    "aftercare":         {"he": "מה עושים אחרי הטיפול?", "ar": "ماذا بعد العلاج؟", "en": "Aftercare?"},
+    "downtime":          {"he": "יש זמן החלמה?", "ar": "هل هناك فترة نقاهة؟", "en": "Any downtime?"},
+    "results_longevity": {"he": "כמה זמן מחזיקה התוצאה?", "ar": "كم تدوم النتيجة؟", "en": "How long do results last?"},
+}
+
+_FIELD_KW = {
+    # Note: Hebrew final letters (ן/נ ם/מ) differ, so use stems without a final
+    # letter (e.g. "מתכונ") to match both singular and plural forms.
+    "pain_level":        ["כואב", "כאב", "מכאיב", "hurt", "pain", "مؤلم", "يوجع"],
+    "preparation":       ["מתכונ", "הכנה", "לפני הטיפול", "להתכונן", "prepare", "before the treatment", "تحضير", "قبل العلاج", "استعد"],
+    "aftercare":         ["אחרי הטיפול", "טיפוח אחרי", "מה עושים אחרי", "מה לעשות אחרי", "aftercare", "after the treatment", "بعد العلاج"],
+    "downtime":          ["זמן החלמה", "החלמה", "downtime", "recovery", "نقاهة", "تعافي"],
+    "results_longevity": ["כמה זמן מחזיק", "כמה זמן נשמר", "כמה מחזיק", "התוצאה נשמר", "results last", "how long do results", "تدوم", "كم تدوم"],
+}
+
+# Guarantee each chip's own text maps back to its field (belt-and-suspenders,
+# independent of the free-text keyword heuristics above).
+for _f, _q in _FIELD_Q.items():
+    for _lg in ("he", "ar", "en"):
+        _FIELD_KW[_f].append(_q[_lg].lower().rstrip("?").strip())
+
+
+def _detect_field(message: str) -> Optional[str]:
+    ml = (message or "").lower()
+    for field, kws in _FIELD_KW.items():
+        if any(k in ml for k in kws):
+            return field
+    return None
+
+
+def _treatment_followups(t: dict, lang: str, exclude=None) -> Optional[list]:
+    """Chips only for fields this treatment has and that haven't been answered yet.
+    `exclude` is a set/list of already-answered field names (stops the chip loop)."""
+    done = set(exclude or ())
+    order = ["pain_level", "preparation", "aftercare", "downtime", "results_longevity"]
+    chips = [_L(_FIELD_Q[f], lang) for f in order if f not in done and t.get(f)]
+    return chips[:3] or None
+
+
+def _format_field_answer(t: dict, field: str, lang: str) -> str:
+    return f"**{t['treatment_name']}** — {t.get(field)}"
 
 
 def _begin_flow(session: dict, session_id: str, category_id: str, lang: str) -> Optional[dict]:
@@ -506,6 +758,9 @@ def _deterministic_fallback(message: str, lang: str) -> Optional[dict]:
         card = _treatment_card(t, lang)
         if card:
             return card
+    sub = _build_subgroup_reply(message, lang)
+    if sub:
+        return sub
     cat_id = _detect_category_in_message(message)
     if cat_id:
         r = _build_category_db_reply(cat_id, lang)
@@ -514,13 +769,16 @@ def _deterministic_fallback(message: str, lang: str) -> Optional[dict]:
     ml = (message or "").lower()
     if _is_about_treatments(message) or "טיפול" in message or "treatment" in ml or "علاج" in message:
         return _build_catalog_overview(lang)
-    return None
+    # Clinic matter that needs a human (medical/complaint/availability) → forward.
+    if _match_forward_topic(message):
+        return {"reply": _forward_msg(lang), "buttons": None, "mode": "general"}
+    return None  # nothing matched → caller treats it as out of scope
 
 
 def _attach_suggestions(result: dict, message: str):
     """Add soft suggestion chips to a general reply, unless flow buttons or an
     explicit set already guide the user (avoid clutter / mixed signals)."""
-    if result.get("buttons") or result.get("suggestions"):
+    if result.get("no_suggest") or result.get("buttons") or result.get("suggestions"):
         return
     if result.get("mode") == "in_flow":
         return
@@ -553,8 +811,9 @@ def _llm_respond(message: str, context: list, lang: str) -> dict:
             rec_ids.append(c["category_id"])
         treatments = get_treatments_in_category(c["category_id"])
         t_names = [t["treatment_name"] for t in treatments if t.get("treatment_name")]
-        # Mark which treatments have detail vs. name-only
-        detailed = {t["treatment_id"] for t in treatments if t.get("good_for") or t.get("short_description")}
+        # Mark which treatments have real detail (that the LLM actually receives)
+        # vs. name-only. Based on rich fields, not the generic short_description.
+        detailed = {t["treatment_id"] for t in treatments if _has_detail(t)}
         t_parts = []
         for t in treatments:
             if t.get("treatment_name"):
@@ -590,8 +849,10 @@ def _llm_respond(message: str, context: list, lang: str) -> dict:
 4. אל תמציא מידע שלא מופיע כאן.
 5. אל תתחיל תשובה עם "ב-MeDay" או משפט פתיחה חוזר — ענה ישירות לשאלה.
 6. שירות שמסומן [שם בלבד] — קיים אבל אין לי פרטים עליו. אם שואלים עליו, אמרי בצורה חמה: "נשמח לספר לך יותר על [שם השירות]! הצוות שלנו ב-{CLINIC_PHONE} זמין לכל שאלה 💛" — אל תמציאי פרטים.
-7. להשוואות ("מה ההבדל בין X ל-Y", "מה עדיף"), למשך הטיפול, להכנה, לטיפוח לאחר הטיפול, לתחושה/כאב ולהחלמה — השתמשי אך ורק בפרטי הטיפולים למטה. אם שדה מסוים חסר לטיפול, אמרי שהצוות ישמח להשלים ב-{CLINIC_PHONE}. אל תשווי מחירים לעולם.
-8. אם אין לך נתונים לשאלה (למשל שמות/פרטי עובדים, מידע אישי, נהלים שלא מופיעים כאן, זמינות תורים) — אל תשלפי את רשימת הקטגוריות כמילוי מקום. הפני בחום ל-{CLINIC_PHONE} וקבעי forward=true.
+7. להשוואות ("מה ההבדל בין X ל-Y", "מה עדיף"), להכנה, לטיפוח לאחר הטיפול, לתחושה/כאב ולהחלמה — השתמשי אך ורק בפרטי הטיפולים למטה. אם שדה מסוים חסר לטיפול, אמרי שהצוות ישמח להשלים ב-{CLINIC_PHONE}.
+   לעולם אל תציני מחיר ואל תציני את משך/זמן הטיפול — לשאלות מחיר או משך זמן הפני ל-{CLINIC_PHONE}.
+8. אם השאלה קשורה למכון אך אין לך נתונים (שמות/פרטי עובדים, מידע אישי, נהלים, זמינות תורים, התאמה רפואית) — אל תשלפי את רשימת הקטגוריות כמילוי מקום. הפני בחום ל-{CLINIC_PHONE} וקבעי forward=true.
+   אם השאלה כלל אינה קשורה למכון או ליופי (למשל ספורט, חדשות, מזג אוויר, מתמטיקה, שאלות כלליות) — אל תעני עליה ואל תפני לטלפון. השיבי בחום שאת עוזרת רק בנושאי MeDay (טיפולים, שירותים ותורים) ושאלי במה תוכלי לעזור. אל תמציאי תשובה.
 9. אם את מציעה עזרה בבחירת טיפול — חובה לצרף action תואם: offer_recommendation:CATEGORY_ID אם התחום ידוע, אחרת offer_pick_category. לעולם אל תסיימי בהצעת בחירה בטקסט חופשי בלי action — אחרת המשתמש עונה "כן" ואין לאן להמשיך.
 
 קטגוריות ושירותים שלנו:
@@ -698,12 +959,17 @@ def _finish_flow(session: dict, session_id: str) -> dict:
     session["flow_question_index"] = 0
     session["flow_scores"] = {}
     session["flow_answers"] = []
+    # Remember the recommended treatment so "does it hurt? / how long?" resolves.
+    if top:
+        session["last_treatment_id"] = top[0]["treatment_id"]
+        session["answered_fields"] = []
     save_session(session_id, session)
 
-    # Only guide onward when we actually recommended something; a "couldn't
-    # narrow it down → call us" result is a handoff and gets no chips.
+    # Follow-up chips reflect only the fields the recommended treatment has, so
+    # every chip leads to a real answer. No recommendation → handoff → no chips.
+    suggestions = _treatment_followups(top[0], "he") if top else None
     return {"reply": reply, "buttons": None, "offer_continue": None, "mode": "general",
-            "suggestions": _after_reco_suggestions("he") if top else None}
+            "suggestions": suggestions}
 
 
 def _handle_flow_button(session: dict, session_id: str, button_value: str, question_id: str) -> dict:
@@ -723,10 +989,13 @@ def _handle_flow_button(session: dict, session_id: str, button_value: str, quest
         session["flow_question_index"] = 0
         session["flow_scores"] = {}
         session["flow_answers"] = []
+        if t:
+            session["last_treatment_id"] = t["treatment_id"]
+            session["answered_fields"] = []
         save_session(session_id, session)
         reply = format_terminal_text(t, "he") if t else _forward_msg("he")
         return {"reply": reply, "buttons": None, "offer_continue": None, "mode": "general",
-                "suggestions": _after_reco_suggestions("he")}
+                "suggestions": _treatment_followups(t, "he") if t else None}
 
     session["flow_scores"] = apply_score(
         session["flow_scores"], category_id, question_id, button_value
@@ -798,6 +1067,9 @@ def _build_category_db_reply(cat_id: str, lang: str) -> Optional[dict]:
         "en": f"Here are the treatments we offer in {cat_name}:\n\n{t_list}",
     }
     reply = intros.get(lang, intros["he"])
+    desc = cat.get("short_description")
+    if desc:
+        reply = f"{desc}\n\n{reply}"
     buttons = None
     if cat.get("has_recommendation"):
         offers = {
@@ -812,7 +1084,9 @@ def _build_category_db_reply(cat_id: str, lang: str) -> Optional[dict]:
             {"label": yes_lbl, "value": f"__start_flow__:{cat_id}", "question_id": None, "terminal_treatment_id": None},
             {"label": no_lbl,  "value": "__no_recommendation__",    "question_id": None, "terminal_treatment_id": None},
         ]
-    return {"reply": reply, "buttons": buttons, "mode": "general"}
+    # Rec category → yes/no recommend offer above. Non-rec category → no guidance.
+    return {"reply": reply, "buttons": buttons, "mode": "general",
+            "no_suggest": buttons is None}
 
 
 # ── General routing ───────────────────────────────────────────────────────────
@@ -824,6 +1098,13 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
     # Hard price guard — LLM never sees pricing questions
     if _is_price(message):
         reply = _price_msg(lang)
+        append_context(session, "assistant", reply, MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return {"reply": reply, "buttons": None, "mode": "general"}
+
+    # Hard duration guard — treatment time is forwarded, never stated.
+    if _is_duration_question(message):
+        reply = _duration_msg(lang)
         append_context(session, "assistant", reply, MAX_CONTEXT_MESSAGES)
         save_session(session_id, session)
         return {"reply": reply, "buttons": None, "mode": "general"}
@@ -864,6 +1145,56 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
         save_session(session_id, session)
         return {"reply": log, "buttons": None, "mode": "general"}
 
+    # 2b. Follow-up about a specific attribute ("does it hurt?", "how long?")
+    #     of a named or just-discussed treatment → answer from that field only.
+    #     Never invents: if the field is empty we fall through to safe handling.
+    field = _detect_field(message)
+    if field:
+        t = _match_treatment(message)
+        if not t and session.get("last_treatment_id"):
+            t = get_treatment_by_id(session["last_treatment_id"])
+        if t and t.get(field):
+            ans = _format_field_answer(t, field, lang)
+            # Track answered fields per treatment so chips deplete (no loop).
+            if session.get("last_treatment_id") != t["treatment_id"]:
+                session["answered_fields"] = []
+            session["last_treatment_id"] = t["treatment_id"]
+            answered = set(session.get("answered_fields") or [])
+            answered.add(field)
+            session["answered_fields"] = list(answered)
+            append_context(session, "assistant", ans, MAX_CONTEXT_MESSAGES)
+            save_session(session_id, session)
+            return {"reply": ans, "buttons": None, "mode": "general",
+                    "suggestions": _treatment_followups(t, lang, exclude=answered),
+                    "no_suggest": True}  # field chips only, no general nav chips
+
+    # 2b-cmp. "What's the difference between them?" → compare the treatments in
+    #         the category/subgroup just discussed, from their own descriptions.
+    if _is_comparison(message):
+        comp = _build_comparison(message, session, lang)
+        if comp:
+            append_context(session, "assistant", comp["reply"], MAX_CONTEXT_MESSAGES)
+            save_session(session_id, session)
+            return comp
+
+    # 2c. A category chip was clicked (message == category name exactly) → show
+    #     its description (+ recommend offer for rec categories). Exact match, so
+    #     it must take precedence over subgroup detection below.
+    named_cat = _match_category_by_name(message)
+    if named_cat:
+        resp = _build_category_db_reply(named_cat["category_id"], lang)
+        if resp:
+            append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+            save_session(session_id, session)
+            return resp
+
+    # 2d. A specific subgroup was named → list just that subgroup, no chips.
+    sub = _build_subgroup_reply(message, lang)
+    if sub:
+        append_context(session, "assistant", sub["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return sub
+
     # 3. "What do you offer" / "explain the treatments" — category-aware.
     if _is_whats_offered(message) or _is_about_treatments(message):
         cat_id = _detect_category_in_message(message)
@@ -883,7 +1214,10 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
 
     # Single LLM call (only reached for open-ended questions)
     if not _groq_ok():
-        resp = _deterministic_fallback(message, lang) or {"reply": _forward_msg(lang), "buttons": None, "mode": "general"}
+        resp = _deterministic_fallback(message, lang) or _out_of_scope_reply(lang)
+        if resp.get("last_treatment_id"):
+            session["last_treatment_id"] = resp["last_treatment_id"]
+            session["answered_fields"] = []  # fresh treatment → fresh chips
         append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
         save_session(session_id, session)
         return {**resp, "offer_continue": None}
@@ -894,12 +1228,12 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
 
     if not reply:
         # LLM failed (rate limit / error) — answer from data instead of forwarding.
-        resp = _deterministic_fallback(message, lang)
-        if resp:
-            append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
-            save_session(session_id, session)
-            return {**resp, "offer_continue": None}
-        reply = _forward_msg(lang)
+        resp = _deterministic_fallback(message, lang) or _out_of_scope_reply(lang)
+        if resp.get("last_treatment_id"):
+            session["last_treatment_id"] = resp["last_treatment_id"]
+        append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return {**resp, "offer_continue": None}
 
     # No-data guard: don't lead a "we don't have that" answer with the whole
     # service catalog — it reads like padding/hallucination. Replace with a
