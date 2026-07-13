@@ -10,10 +10,7 @@ Routing for in_flow (recommendation) mode is still button-based and LLM-free.
 import os
 import json
 from typing import Optional
-from groq import (
-    Groq, APIConnectionError, APITimeoutError, RateLimitError,
-    AuthenticationError, APIStatusError, GroqError,
-)
+from groq import Groq
 
 from chatbot_config import (
     CONFIDENCE_THRESHOLD, MAX_CONTEXT_MESSAGES,
@@ -21,15 +18,13 @@ from chatbot_config import (
 )
 from chatbot_db import (
     get_session, save_session, append_context,
-    get_faq_entries, get_categories, get_category_by_id,
+    get_faq_entries, get_faq_by_id, get_categories, get_category_by_id,
     get_treatment_by_id, get_all_treatments_summary,
 )
 from chatbot_flow import (
     build_question_response, apply_score, get_top_treatments,
     get_base_treatment, format_recommendation_text,
-    format_terminal_text, format_intro, format_recommendation_reason,
-    find_treatments_by_mention, is_followup_question, is_comparison_request,
-    FOLLOWUP_KEYWORDS,
+    format_terminal_text, format_intro,
 )
 
 _GROQ_KEY = os.getenv("GROQ_API_KEY", "")
@@ -152,62 +147,391 @@ def _not_now_msg(lang: str = "he") -> str:
     return msgs.get(lang, msgs["he"])
 
 
-# ── Focused treatment detail (feeds the LLM the real DB fields) ──────────────
+# ── Treatment detail block (data the LLM answers from) ───────────────────────
 
-_DETAIL_LABELS = [
-    ("short_description", "תיאור"),
-    ("good_for", "מתאים ל"),
-    ("technique_or_equipment", "טכניקה/מכשור"),
+# label shown in prompt → treatment column
+_DETAIL_FIELDS = [
+    ("מתאים ל", "good_for"),
+    ("שיטה/מכשור", "technique_or_equipment"),
+    ("משך", "duration_min"),
+    ("מה מרגישים", "pain_level"),
+    ("החלמה", "downtime"),
+    ("הכנה", "preparation"),
+    ("אחרי הטיפול", "aftercare"),
+    ("מספר טיפולים", "sessions_recommended"),
+    ("משך התוצאה", "results_longevity"),
+    ("מה קורה בטיפול", "what_to_expect"),
 ]
 
 
-def _format_treatment_detail_block(t: dict) -> str:
-    """Render one treatment's known DB fields, and name which fields are missing
-    so the LLM can say 'not documented' instead of guessing."""
-    lines = [f"טיפול: {t.get('treatment_name', '')} (id: {t.get('treatment_id', '')})"]
-    missing = []
-    for key, label in _DETAIL_LABELS:
-        val = t.get(key)
-        if val:
-            lines.append(f"{label}: {val}")
-        else:
-            missing.append(label)
-
-    if t.get("duration_min"):
-        dur = f"{t['duration_min']} דקות"
-        if t.get("duration_notes"):
-            dur += f" ({t['duration_notes']})"
-        lines.append(f"משך הטיפול: {dur}")
-    elif t.get("duration_notes"):
-        lines.append(f"משך הטיפול: {t['duration_notes']}")
-    else:
-        missing.append("משך הטיפול")
-
-    if missing:
-        lines.append("לא מתועד במערכת עבור טיפול זה: " + ", ".join(missing))
+def _build_detail_block(treatments: list) -> str:
+    """Compact per-treatment attribute block. Only non-empty fields are emitted."""
+    lines = []
+    for t in treatments:
+        parts = []
+        for label, col in _DETAIL_FIELDS:
+            val = t.get(col)
+            if not val:
+                continue
+            if col == "duration_min":
+                val = f"{val} דק'"
+            parts.append(f"{label}: {val}")
+        if not parts:
+            continue
+        lines.append(f"■ {t['treatment_name']} ({t['category_id']})\n  " + " | ".join(parts))
     return "\n".join(lines)
 
 
-def _build_focus_block(focus_treatments: list, compare_mode: bool) -> str:
-    if not focus_treatments:
-        return ""
-    details = "\n\n".join(_format_treatment_detail_block(t) for t in focus_treatments[:4])
-    instruction = (
-        "\n\nמידע מפורט על הטיפול/ים שהלקוחה מתעניינת בהם כרגע — זהו המידע היחיד שיש לך עליהם, "
-        "השתמשי בו כדי לענות במדויק. אם עובדה ספציפית שנשאלת עליה מסומנת 'לא מתועד', אמרי בבירור "
-        "שהיא לא מתועדת אצלכם — אל תמציאי אותה, ואל תפני לקליניקה רק בגלל שהפרט הזה חסר.\n\n" + details
-    )
-    if compare_mode and len(focus_treatments) >= 2:
-        instruction += (
-            "\n\nהלקוחה מבקשת להשוות בין הטיפולים הנ\"ל. השוו רק לפי השדות שסופקו למעלה; "
-            "אם שדה חסר לאחד הטיפולים, ציינו זאת במפורש במקום לנחש."
-        )
-    return instruction
+# ── Soft guidance: suggestion chips (send free text, non-binding) ────────────
+# These steer the user toward paths the bot answers well, WITHOUT forcing a
+# choice — clicking one just sends that text like the user typed it. Deterministic
+# (no LLM), so they add zero cost and no new failure mode.
+
+def _L(d: dict, lang: str) -> str:
+    return d.get(lang, d["he"])
+
+
+_SG_CHOOSE = {
+    "CAT-03": {"he": "עזרי לי לבחור טיפול פנים", "ar": "ساعديني في اختيار علاج للوجه", "en": "Help me choose a facial"},
+    "CAT-04": {"he": "עזרי לי לבחור עיסוי", "ar": "ساعديني في اختيار مساج", "en": "Help me choose a massage"},
+}
+_SG_COMPARE  = {"he": "מה ההבדל בין הטיפולים?", "ar": "ما الفرق بين العلاجات؟", "en": "What's the difference between them?"}
+_SG_TREATMENTS = {"he": "מה הטיפולים שלכם?", "ar": "ما هي علاجاتكم؟", "en": "What treatments do you offer?"}
+_SG_HOURS = {"he": "שעות פתיחה ומיקום", "ar": "ساعات العمل والموقع", "en": "Hours & location"}
+_SG_BOOK  = {"he": "איך מתאמים תור?", "ar": "كيف أحجز موعد؟", "en": "How do I book?"}
+_SG_PREP  = {"he": "איך מתכוננים לטיפול?", "ar": "كيف أستعد للعلاج؟", "en": "How do I prepare?"}
+_SG_AFTER = {"he": "מה עושים אחרי הטיפול?", "ar": "ماذا أفعل بعد العلاج؟", "en": "What should I do afterwards?"}
+
+
+def _general_suggestions(message: str, lang: str) -> list:
+    """Productive next-step hints — only paths that lead somewhere *inside* the bot.
+    Never suggests booking / contact / price: those are handoffs, not guidance."""
+    cat = _detect_category_in_message(message or "")
+    if cat == "CAT-03":
+        return [_L(_SG_CHOOSE["CAT-03"], lang), _L(_SG_TREATMENTS, lang)]
+    if cat == "CAT-04":
+        return [_L(_SG_CHOOSE["CAT-04"], lang), _L(_SG_TREATMENTS, lang)]
+    return [_L(_SG_TREATMENTS, lang), _L(_SG_CHOOSE["CAT-03"], lang), _L(_SG_CHOOSE["CAT-04"], lang)]
+
+
+def _after_reco_suggestions(lang: str) -> list:
+    # Prep / aftercare only — both answerable from data. No booking chip.
+    return [_L(_SG_PREP, lang), _L(_SG_AFTER, lang)]
+
+
+def _is_handoff_reply(reply: str) -> bool:
+    """A pure 'contact the team' reply (forward / price / booking / contact FAQ).
+    Guidance chips are never attached to these — the reply is itself the endpoint."""
+    if not reply:
+        return False
+    r = reply.strip()
+    for lg in ("he", "ar", "en"):
+        if r in (_price_msg(lg).strip(), _forward_msg(lg).strip(), _not_now_msg(lg).strip()):
+            return True
+    f15 = get_faq_by_id("FAQ-15")  # "how to book / contact" → *3691
+    return bool(f15 and f15["answer"].strip() in r)
+
+
+# ── Category picker: bridges a general "help me choose" → a specific flow ─────
+# The recommendation flow is per-category. When the user wants a recommendation
+# but hasn't said which area, we must NOT dead-end on free-text "yes" — we show
+# buttons for the flow-enabled categories and let the existing __start_flow__
+# handler take over. Data-driven: adding a category with has_recommendation=1
+# makes it appear here automatically.
+
+_PICKER_LABELS = {
+    "CAT-03": {"he": "טיפולי פנים ✨", "ar": "علاجات الوجه ✨", "en": "Facial treatments ✨"},
+    "CAT-04": {"he": "עיסוי / טיפולי גוף 💆", "ar": "مساج / علاجات الجسم 💆", "en": "Massage / body 💆"},
+}
+
+
+def _rec_category_buttons(lang: str) -> list:
+    buttons = []
+    for c in get_categories():
+        if not c.get("has_recommendation"):
+            continue
+        cid = c["category_id"]
+        label = _PICKER_LABELS.get(cid, {}).get(lang) or c["category_name"]
+        buttons.append({
+            "label": label,
+            "value": f"__start_flow__:{cid}",
+            "question_id": None,
+            "terminal_treatment_id": None,
+        })
+    return buttons
+
+
+def _category_picker_reply(lang: str, reply_text: str = "") -> dict:
+    prompts = {
+        "he": "בשמחה! באיזה תחום תרצי שאמליץ לך? 💛",
+        "ar": "بكل سرور! في أي مجال تريدين أن أنصحك؟ 💛",
+        "en": "Happy to help! Which area would you like a recommendation for? 💛",
+    }
+    return {
+        "reply": reply_text or prompts.get(lang, prompts["he"]),
+        "buttons": _rec_category_buttons(lang),
+        "mode": "general",
+    }
+
+
+# ── Affirmation safety net (catches "yes" after a recommendation offer) ───────
+
+_AFFIRM_WORDS = {
+    "כן", "כן בבקשה", "בבקשה", "בטח", "אשמח", "כן תעזרי", "כן תעזור לי", "כן תעזור",
+    "סבבה", "אוקיי כן", "כן בטח", "יאללה", "ברור",
+    "yes", "yes please", "sure", "ok yes", "okay yes", "please", "yeah", "yep", "ying",
+    "نعم", "أكيد", "نعم من فضلك", "من فضلك", "اي", "ايوة", "ايوه",
+}
+
+# Words that mark the previous bot turn as a "want a recommendation?" offer.
+_OFFER_KW = ["לבחור", "להמליץ", "המלצה", "אמליץ", "מתאים ביותר",
+             "choose", "recommend", "اختيار", "أنصح", "الأنسب"]
+
+
+def _is_affirmation(msg: str) -> bool:
+    low = (msg or "").strip().lower().rstrip("!.,?ـ")
+    return low in _AFFIRM_WORDS
+
+
+def _last_assistant_offered(session: dict) -> bool:
+    for m in reversed(session.get("recent_context", [])):
+        if m.get("role") == "assistant":
+            txt = m.get("content") or ""
+            return any(k in txt for k in _OFFER_KW)
+    return False
+
+
+# Markers that a reply is admitting it lacks the answer (vs. a real catalog answer).
+_NODATA_KW = [
+    "לא מופיע", "לא כאן", "אין לי", "אינני", "לא זמין", "לא מפורט",
+    "لا تظهر", "غير متوفر", "لا يوجد لدي", "لا تتوفر",
+    "don't appear", "do not appear", "not here", "not available", "i don't have",
+]
+
+
+# ── "What do you offer?" — deterministic catalog (never depends on the LLM) ──
+
+_OFFER_Q_KW = [
+    "מה אתם מציעים", "מה יש לכם", "מה אתם עושים", "אילו טיפולים", "איזה טיפולים",
+    "מה הטיפולים", "מה השירותים", "אילו שירותים", "איזה שירותים", "הטיפולים שלכם",
+    "what do you offer", "what do you have", "what treatments", "which treatments",
+    "your treatments", "services do you", "what services",
+    "ماذا تقدمون", "ما هي علاجاتكم", "شو عندكم", "ايش عندكم", "ما هي خدماتكم", "شو بتقدموا",
+]
+
+
+def _is_whats_offered(msg: str) -> bool:
+    ml = (msg or "").lower()
+    return any(k in ml for k in _OFFER_Q_KW)
+
+
+def _build_catalog_overview(lang: str) -> dict:
+    """List every category from the DB — a correct answer with zero LLM reliance."""
+    names = [c["category_name"] for c in get_categories() if c.get("category_name")]
+    lst = "\n".join(f"• {n}" for n in names)
+    intro = {
+        "he": f"בשמחה! הנה התחומים שאנחנו מציעים ב-MeDay:\n\n{lst}\n\nרוצה שאספר לך עוד על אחד מהם, או שאעזור לך לבחור טיפול מתאים? 💛",
+        "ar": f"بكل سرور! هذه هي المجالات التي نقدمها في MeDay:\n\n{lst}\n\nتريدين أن أخبرك أكثر عن أحدها، أو أساعدك في اختيار العلاج المناسب؟ 💛",
+        "en": f"Happy to help! Here's what we offer at MeDay:\n\n{lst}\n\nWant me to tell you more about one, or help you choose the right treatment? 💛",
+    }
+    return {
+        "reply": intro.get(lang, intro["he"]),
+        "buttons": None,
+        "mode": "general",
+        "suggestions": [_L(_SG_CHOOSE["CAT-03"], lang), _L(_SG_CHOOSE["CAT-04"], lang)],
+    }
+
+
+def _catalog_deflection(reply: str) -> bool:
+    """True when a reply pads a no-data answer with the full service catalog.
+    Requires BOTH: 4+ category names present AND a 'no info / go to team' marker.
+    A genuine 'what do you offer?' answer lists categories but has no such marker."""
+    if not reply:
+        return False
+    names = [c["category_name"] for c in get_categories()]
+    hits = sum(1 for n in names if n and n in reply)
+    if hits < 4:
+        return False
+    low = reply.lower()
+    if CLINIC_PHONE in reply:
+        return True
+    return any(k in reply or k in low for k in _NODATA_KW)
+
+
+# ── Deterministic intent layer (context-aware; works even if the LLM is down) ─
+
+def _rec_category_ids() -> list:
+    return [c["category_id"] for c in get_categories() if c.get("has_recommendation")]
+
+
+_RECOMMEND_KW = [
+    "תמליצי", "תמליץ", "המלצה", "המלצי", "עזרי לי לבחור", "עזור לי לבחור", "עזרו לי לבחור",
+    "לבחור טיפול", "מה מתאים לי", "איזה טיפול מתאים", "מה הכי מתאים", "לבחור לי", "תעזרי לי לבחור",
+    "recommend", "help me choose", "which treatment", "what suits me", "help me pick",
+    "أنصحيني", "انصحيني", "ساعديني في الاختيار", "ساعدني في الاختيار", "شو يناسبني", "ايش يناسبني",
+]
+
+
+def _is_recommend_intent(message: str) -> bool:
+    ml = (message or "").lower()
+    return any(k in ml for k in _RECOMMEND_KW)
+
+
+_ABOUT_VERBS = [
+    "תסביר", "תסבירי", "ספר לי", "ספרי לי", "הסבר", "הסברי", "רוצה לשמוע", "פרטי לי", "פרט לי",
+    "מה זה", "מה הם", "מה כולל", "רשימת",
+    "tell me about", "explain", "about your", "more about", "list of", "what are your",
+    "احكي", "خبريني", "احكيلي", "اشرحي", "ما هي",
+]
+
+
+def _is_about_treatments(message: str) -> bool:
+    """'explain/tell me about the treatments/services' — general or per-category."""
+    ml = (message or "").lower()
+    has_word = ("טיפול" in message or "שירות" in message or "treatment" in ml
+                or "service" in ml or "علاج" in message or "خدم" in message)
+    return has_word and any(v in ml for v in _ABOUT_VERBS)
+
+
+# Logistics FAQs answered straight from the DB — must never depend on the LLM.
+_LOGISTICS = [
+    ("FAQ-13", ["שעות", "מתי אתם פתוחים", "מתי פתוח", "פתוחים", "שעות פתיחה", "שעות פעילות",
+                "hours", "open", "opening", "ساعات", "متى تفتح", "الدوام", "دوام"]),
+    ("FAQ-14", ["כתובת", "מיקום", "איפה אתם", "איפה ממוקם", "היכן", "מיקום המכון",
+                "address", "location", "where are you", "where is", "العنوان", "الموقع", "وين", "اين"]),
+    ("FAQ-15", ["לתאם תור", "לקבוע תור", "ליצור קשר", "איך מתאמים", "איך קובעים", "מספר טלפון",
+                "book", "appointment", "contact", "phone", "احجز", "حجز", "موعد", "تواصل", "رقم"]),
+]
+
+
+def _match_logistics_faq(message: str):
+    ml = (message or "").lower()
+    answers = []
+    for fid, kws in _LOGISTICS:
+        if any(k.lower() in ml for k in kws):
+            f = get_faq_by_id(fid)
+            if f and f["answer"] not in answers:
+                answers.append(f["answer"])
+    return "\n".join(answers) if answers else None
+
+
+def _match_faq(message: str):
+    """Best-effort FAQ match by phrase substring (fallback use). Conservative."""
+    ml = (message or "").lower()
+    best, best_score = None, 0
+    for f in get_faq_entries():
+        phrases = []
+        if f.get("canonical_question"):
+            phrases.append(f["canonical_question"])
+        if f.get("example_phrasings"):
+            phrases += f["example_phrasings"].split(",")
+        score = sum(1 for p in phrases if len(p.strip()) >= 5 and p.strip().lower() in ml)
+        if score > best_score:
+            best_score, best = score, f
+    return best["answer"] if best and best_score >= 1 else None
+
+
+def _match_treatment(message: str):
+    """Return the treatment whose name/alias appears in the message (longest wins)."""
+    ml = (message or "").lower()
+    best, best_len = None, 0
+    for t in get_all_treatments_summary():
+        cands = [t.get("treatment_name") or ""]
+        if t.get("aliases"):
+            cands += t["aliases"].split(",")
+        for c in cands:
+            c = c.strip()
+            if len(c) >= 4 and c.lower() in ml and len(c) > best_len:
+                best, best_len = t, len(c)
+    return get_treatment_by_id(best["treatment_id"]) if best else None
+
+
+def _treatment_card(t: dict, lang: str) -> Optional[dict]:
+    """A concise, data-only description of one treatment."""
+    if not (t.get("short_description") or t.get("good_for") or t.get("what_to_expect")):
+        return None
+    lines = [f"**{t['treatment_name']}**"]
+    desc = t.get("short_description") or t.get("what_to_expect")
+    if desc:
+        lines.append(desc)
+    if t.get("good_for"):
+        lines.append(_L({"he": f"מתאים ל: {t['good_for']}", "ar": f"مناسب لـ: {t['good_for']}",
+                         "en": f"Good for: {t['good_for']}"}, lang))
+    if t.get("duration_min"):
+        lines.append(_L({"he": f"משך: {t['duration_min']} דק'", "ar": f"المدة: {t['duration_min']} دقيقة",
+                         "en": f"Duration: {t['duration_min']} min"}, lang))
+    lines.append(_L({"he": "רוצה שאעזור לך לבחור טיפול מתאים, או לתאם תור? 💛",
+                     "ar": "تريدين أن أساعدك في اختيار العلاج المناسب أو حجز موعد؟ 💛",
+                     "en": "Want me to help you choose the right treatment, or book? 💛"}, lang))
+    return {"reply": "\n".join(lines), "buttons": None, "mode": "general"}
+
+
+def _begin_flow(session: dict, session_id: str, category_id: str, lang: str) -> Optional[dict]:
+    """Start the recommendation flow for a category (shared by LLM + deterministic paths)."""
+    cat = get_category_by_id(category_id)
+    if not (cat and cat.get("has_recommendation")):
+        return None
+    session["mode"] = "in_flow"
+    session["flow_category_id"] = category_id
+    session["flow_question_index"] = 0
+    session["flow_scores"] = {}
+    session["flow_answers"] = []
+    first_q = build_question_response(category_id, 0)
+    if not first_q:
+        return None
+    flow_reply = format_intro(cat, lang) + "\n\n" + first_q["question_text"]
+    append_context(session, "assistant", flow_reply, MAX_CONTEXT_MESSAGES)
+    save_session(session_id, session)
+    return {
+        "reply": flow_reply,
+        "buttons": first_q["buttons"],
+        "offer_continue": None,
+        "mode": "in_flow",
+        "question_progress": {"current": 1, "total": first_q["total_questions"]},
+    }
+
+
+def _deterministic_fallback(message: str, lang: str) -> Optional[dict]:
+    """Best real answer we can give from data when the LLM is unavailable/empty.
+    Only forwards as a last resort — never as the default."""
+    log = _match_logistics_faq(message)
+    if log:
+        return {"reply": log, "buttons": None, "mode": "general"}
+    ans = _match_faq(message)
+    if ans:
+        return {"reply": ans, "buttons": None, "mode": "general"}
+    # A specific treatment named in the message beats its whole-category list.
+    t = _match_treatment(message)
+    if t:
+        card = _treatment_card(t, lang)
+        if card:
+            return card
+    cat_id = _detect_category_in_message(message)
+    if cat_id:
+        r = _build_category_db_reply(cat_id, lang)
+        if r:
+            return r
+    ml = (message or "").lower()
+    if _is_about_treatments(message) or "טיפול" in message or "treatment" in ml or "علاج" in message:
+        return _build_catalog_overview(lang)
+    return None
+
+
+def _attach_suggestions(result: dict, message: str):
+    """Add soft suggestion chips to a general reply, unless flow buttons or an
+    explicit set already guide the user (avoid clutter / mixed signals)."""
+    if result.get("buttons") or result.get("suggestions"):
+        return
+    if result.get("mode") == "in_flow":
+        return
+    if _is_handoff_reply(result.get("reply", "")):
+        return  # don't guide people back into a dead-end handoff
+    result["suggestions"] = _general_suggestions(message, _detect_language(message or ""))
 
 
 # ── Single LLM call: understand + respond ────────────────────────────────────
 
-def _llm_respond(message: str, context: list, lang: str, focus_treatments: list = None, compare_mode: bool = False) -> dict:
+def _llm_respond(message: str, context: list, lang: str) -> dict:
     """
     One LLM call with full clinic context.
     Returns {reply, action, forward}
@@ -221,6 +545,7 @@ def _llm_respond(message: str, context: list, lang: str, focus_treatments: list 
     # Build category block + treatment names per category
     cat_lines = []
     rec_ids = []
+    detail_treatments = []  # treatments carrying attributes → detail block below
     for c in categories:
         suffix = ""
         if c.get("has_recommendation"):
@@ -235,9 +560,15 @@ def _llm_respond(message: str, context: list, lang: str, focus_treatments: list 
             if t.get("treatment_name"):
                 marker = "" if t["treatment_id"] in detailed else " [שם בלבד]"
                 t_parts.append(t["treatment_name"] + marker)
+            if t["treatment_id"] in detailed:
+                detail_treatments.append(t)
         t_block = ", ".join(t_parts) if t_parts else "—"
         cat_lines.append(f"• [{c['category_id']}] {c['category_name']}{suffix}\n  שירותים: {t_block}")
     cat_block = "\n".join(cat_lines)
+
+    # Detailed attributes — lets the bot answer comparisons, duration, prep,
+    # aftercare, pain, downtime etc. strictly from data (no hallucination).
+    detail_block = _build_detail_block(detail_treatments)
 
     faq_block = "\n\n".join(
         f"שאלה: {f['canonical_question']}\nתשובה: {f['answer']}"
@@ -250,28 +581,24 @@ def _llm_respond(message: str, context: list, lang: str, focus_treatments: list 
             f"{m['role']}: {m['content']}" for m in context[-MAX_CONTEXT_MESSAGES:]
         )
 
-    focus_block = _build_focus_block(focus_treatments or [], compare_mode)
-
-    prompt = f"""אתה יועצת יופי חכמה של קליניקת MeDay. תפקידך לעזור ללקוחות באמת, לא רק להפנות אותן הלאה.
+    prompt = f"""אתה צ'אטבוט של קליניקת יופי ועיצוב MeDay. תפקידך לעזור ללקוחות.
 
 כללים נוקשים — אסור לעבור עליהם:
 1. אל תציין מחירים, עלויות או תעריפים — הפנה תמיד ל-{CLINIC_PHONE}.
-2. ענה תמיד באותה שפה שהמשתמש כותב (עברית / ערבית / אנגלית).
-3. אל תמציא מידע שלא מופיע כאן. אם עובדה ספציפית לא מתועדת, אמרי זאת בבירור במקום לנחש — וזה לא סיבה
-   להפנות לקליניקה, אלא אם מדובר באחד מנושאי ההפניה שמפורטים למטה.
-4. אל תתחיל תשובה עם "ב-MeDay" או משפט פתיחה חוזר — ענה ישירות לשאלה.
-5. שירות שמסומן [שם בלבד] — אין לך שום פרט עליו מלבד השם. אמרי בחום שהפרטים לא מתועדים אצלך כרגע,
-   ואם רלוונטי הציעי שהצוות ב-{CLINIC_PHONE} ישמח להרחיב — אך אל תמציאי תיאור.
-6. אם השאלה עמומה (לא ברור על איזה טיפול/אזור בגוף מדובר) — שאלי שאלה מבהירה קצרה אחת, במקום לנחש
-   או להפנות.
-7. כשאת ממליצה או מתארת טיפול ספציפי, הסבירי בקצרה למה הוא מתאים, על בסיס הנתונים שלו.
-8. אם סופק לך למטה "מידע מפורט" על טיפול ספציפי — סימן שהלקוחה שואלת עליו (או ממשיכה לשאול עליו).
-   עני עליו ישירות תוך שימוש בנתונים שסופקו. אל תחזירי action=offer_recommendation ואל תיתני סקירה
-   כללית של הקטגוריה במקרה כזה — רק אם היא שואלת במפורש מה יש בכל הקטגוריה.
-{focus_block}
+2. אל תבטיח תוצאות רפואיות או טיפוליות.
+3. ענה תמיד באותה שפה שהמשתמש כותב (עברית / ערבית / אנגלית).
+4. אל תמציא מידע שלא מופיע כאן.
+5. אל תתחיל תשובה עם "ב-MeDay" או משפט פתיחה חוזר — ענה ישירות לשאלה.
+6. שירות שמסומן [שם בלבד] — קיים אבל אין לי פרטים עליו. אם שואלים עליו, אמרי בצורה חמה: "נשמח לספר לך יותר על [שם השירות]! הצוות שלנו ב-{CLINIC_PHONE} זמין לכל שאלה 💛" — אל תמציאי פרטים.
+7. להשוואות ("מה ההבדל בין X ל-Y", "מה עדיף"), למשך הטיפול, להכנה, לטיפוח לאחר הטיפול, לתחושה/כאב ולהחלמה — השתמשי אך ורק בפרטי הטיפולים למטה. אם שדה מסוים חסר לטיפול, אמרי שהצוות ישמח להשלים ב-{CLINIC_PHONE}. אל תשווי מחירים לעולם.
+8. אם אין לך נתונים לשאלה (למשל שמות/פרטי עובדים, מידע אישי, נהלים שלא מופיעים כאן, זמינות תורים) — אל תשלפי את רשימת הקטגוריות כמילוי מקום. הפני בחום ל-{CLINIC_PHONE} וקבעי forward=true.
+9. אם את מציעה עזרה בבחירת טיפול — חובה לצרף action תואם: offer_recommendation:CATEGORY_ID אם התחום ידוע, אחרת offer_pick_category. לעולם אל תסיימי בהצעת בחירה בטקסט חופשי בלי action — אחרת המשתמש עונה "כן" ואין לאן להמשיך.
 
 קטגוריות ושירותים שלנו:
 {cat_block}
+
+פרטי טיפולים (למענה על השוואות, משך, הכנה, טיפוח, תחושה והחלמה — מהמידע הזה בלבד):
+{detail_block}
 
 שאלות נפוצות ותשובותיהן:
 {faq_block}
@@ -280,14 +607,13 @@ def _llm_respond(message: str, context: list, lang: str, focus_treatments: list 
 הודעת המשתמש: "{message}"
 
 החזר JSON בלבד:
-- "reply": התשובה — חמה, בטוחה בעצמה, ישירה לנושא. אם שואלים מה אנחנו מציעים — פרט את כל הקטגוריות.
+- "reply": התשובה — חמה, תמציתית, ישירה לנושא. אם שואלים מה אנחנו מציעים — פרט את כל הקטגוריות. סיימי בעדינות בהצעת צעד הבא רלוונטי אחד (למשל להסביר על טיפול, להשוות, או לעזור לבחור) — כהזמנה ולא כלחץ, והלקוח חופשי להתעלם ולשאול כל דבר.
 - "action": אחת מהאפשרויות הבאות —
   • null — ברירת מחדל, לא נדרש פעולה
   • "offer_recommendation:CATEGORY_ID" — כאשר המשתמש שואל מה יש בקטגוריה מסוימת שיש לה שאלון (רק: {', '.join(rec_ids) or 'אין'}). פרטי את השירותים בתשובה, וסיימי בשאלה כמו "האם תרצי שאעזור לך לבחור את הטיפול המתאים ביותר?" — אז המערכת תציג כפתורי כן/לא.
-  • "start_flow:CATEGORY_ID" — רק כאשר המשתמש מבקש בפירוש המלצה או עזרה בבחירה ("תמליצי לי", "עזרי לי לבחור", "מה מתאים לי") — לא כאשר הוא רק שואל מה יש.
-- "forward": true אך ורק עבור אחד מהנושאים הבאים — (א) מחיר/עלות, (ב) קביעת תור, (ג) התאמה רפואית
-  אישית (הריון, תרופות, אלרגיות, "האם זה מתאים/בטוח לי"), (ד) תגובה חריגה או דחופה אחרי טיפול,
-  (ה) זמינות תורים בזמן אמת. אל תסמני forward=true רק כי פרט תיאורי חסר — אמרי שהוא לא מתועד."""
+  • "offer_pick_category" — כאשר המשתמש רוצה המלצה/עזרה בבחירה אך לא ציין תחום (פנים מול גוף/עיסוי). אל תשאלי בטקסט חופשי איזה תחום — החזירי offer_pick_category והמערכת תציג כפתורי בחירת תחום.
+  • "start_flow:CATEGORY_ID" — רק כאשר המשתמש מבקש בפירוש המלצה או עזרה בבחירה והתחום ברור (פנים או גוף/עיסוי). אם הבקשה כללית ("תמליצי לי על טיפול", "עזרי לי לבחור") בלי תחום — השתמשי ב-offer_pick_category, לא ב-start_flow.
+- "forward": true רק אם נדרשת התערבות אנושית (שאלה רפואית ספציפית, תלונה, תיאום תור)"""
 
     try:
         resp = _groq.chat.completions.create(
@@ -313,19 +639,9 @@ def _llm_respond(message: str, context: list, lang: str, focus_treatments: list 
             "action": data.get("action") or None,
             "forward": bool(data.get("forward", False)),
         }
-    except RateLimitError as e:
-        print(f"[chatbot llm error] Groq rate limit hit: {e}")
-    except AuthenticationError as e:
-        print(f"[chatbot llm error] Groq API key invalid/rejected: {e}")
-    except (APIConnectionError, APITimeoutError) as e:
-        print(f"[chatbot llm error] Groq unreachable/timed out: {e}")
-    except APIStatusError as e:
-        print(f"[chatbot llm error] Groq returned HTTP {e.status_code}: {e}")
-    except json.JSONDecodeError as e:
-        print(f"[chatbot llm error] Groq returned non-JSON content: {e}")
-    except GroqError as e:
+    except Exception as e:
         print(f"[chatbot llm error] {e}")
-    return {"reply": "", "action": None, "forward": False}
+        return {"reply": "", "action": None, "forward": False}
 
 
 # ── Continue offer ────────────────────────────────────────────────────────────
@@ -372,7 +688,6 @@ def _build_flow_reply(session: dict, session_id: str) -> dict:
 def _finish_flow(session: dict, session_id: str) -> dict:
     category_id = session["flow_category_id"]
     scores = session["flow_scores"]
-    flow_answers = session.get("flow_answers", [])
     top = get_top_treatments(category_id, scores)
 
     if not top:
@@ -383,12 +698,6 @@ def _finish_flow(session: dict, session_id: str) -> dict:
     cat_name = cat["category_name"] if cat else ""
     reply = format_recommendation_text(top, "he", cat_name)
 
-    if top:
-        reason = format_recommendation_reason(category_id, flow_answers, top[0])
-        if reason:
-            reply += "\n\n" + reason
-        session["last_treatment_id"] = top[0]["treatment_id"]
-
     session["mode"] = "general"
     session["flow_category_id"] = None
     session["flow_question_index"] = 0
@@ -396,7 +705,10 @@ def _finish_flow(session: dict, session_id: str) -> dict:
     session["flow_answers"] = []
     save_session(session_id, session)
 
-    return {"reply": reply, "buttons": None, "offer_continue": None, "mode": "general"}
+    # Only guide onward when we actually recommended something; a "couldn't
+    # narrow it down → call us" result is a handoff and gets no chips.
+    return {"reply": reply, "buttons": None, "offer_continue": None, "mode": "general",
+            "suggestions": _after_reco_suggestions("he") if top else None}
 
 
 def _handle_flow_button(session: dict, session_id: str, button_value: str, question_id: str) -> dict:
@@ -411,8 +723,6 @@ def _handle_flow_button(session: dict, session_id: str, button_value: str, quest
 
     if terminal_id:
         t = get_treatment_by_id(terminal_id)
-        if t:
-            session["last_treatment_id"] = terminal_id
         session["mode"] = "general"
         session["flow_category_id"] = None
         session["flow_question_index"] = 0
@@ -420,7 +730,8 @@ def _handle_flow_button(session: dict, session_id: str, button_value: str, quest
         session["flow_answers"] = []
         save_session(session_id, session)
         reply = format_terminal_text(t, "he") if t else _forward_msg("he")
-        return {"reply": reply, "buttons": None, "offer_continue": None, "mode": "general"}
+        return {"reply": reply, "buttons": None, "offer_continue": None, "mode": "general",
+                "suggestions": _after_reco_suggestions("he")}
 
     session["flow_scores"] = apply_score(
         session["flow_scores"], category_id, question_id, button_value
@@ -509,61 +820,6 @@ def _build_category_db_reply(cat_id: str, lang: str) -> Optional[dict]:
     return {"reply": reply, "buttons": buttons, "mode": "general"}
 
 
-_UNTRACKED_FOLLOWUP_NOTE = {
-    "he": "לתשומת ליבך: פרטים כמו רמת כאב, זמן החלמה מדויק ומספר הטיפולים הנדרש עדיין לא מתועדים במערכת שלנו — הצוות ישמח לפרט על כך.",
-    "ar": "ملاحظة: تفاصيل مثل مستوى الألم ووقت التعافي الدقيق وعدد الجلسات المطلوبة غير موثقة بعد في نظامنا — يسعد فريقنا بتوضيح ذلك.",
-    "en": "Note: details like pain level, exact recovery time, and number of sessions needed aren't documented in our system yet — the team can fill you in.",
-}
-
-_UNTRACKED_FOLLOWUP_GROUPS = {"pain", "recovery", "sessions"}
-
-
-def _build_treatment_db_reply(treatments: list, lang: str, message: str = "") -> Optional[dict]:
-    """Deterministic (no-LLM) treatment answer straight from the DB fields —
-    used when Groq isn't configured or the LLM call failed."""
-    if not treatments:
-        return None
-    field_labels = {
-        "he": {"good_for": "מתאים ל", "technique_or_equipment": "טכניקה/מכשור", "duration": "משך"},
-        "ar": {"good_for": "مناسب لـ", "technique_or_equipment": "التقنية/الجهاز", "duration": "المدة"},
-        "en": {"good_for": "Good for", "technique_or_equipment": "Technique/equipment", "duration": "Duration"},
-    }
-    labels = field_labels.get(lang, field_labels["he"])
-    none_documented = {
-        "he": "אין לי כרגע פרטים נוספים על הטיפול הזה במערכת.",
-        "ar": "ليس لدي حالياً تفاصيل إضافية عن هذا العلاج في النظام.",
-        "en": "I don't have further details on this treatment in the system yet.",
-    }.get(lang, "אין לי כרגע פרטים נוספים על הטיפול הזה במערכת.")
-
-    parts = []
-    for t in treatments[:3]:
-        bits = []
-        if t.get("short_description"):
-            bits.append(t["short_description"])
-        if t.get("good_for"):
-            bits.append(f"{labels['good_for']}: {t['good_for']}")
-        if t.get("technique_or_equipment"):
-            bits.append(f"{labels['technique_or_equipment']}: {t['technique_or_equipment']}")
-        if t.get("duration_min"):
-            dur = f"{t['duration_min']} min" if lang == "en" else f"{t['duration_min']} דקות"
-            if t.get("duration_notes"):
-                dur += f" ({t['duration_notes']})"
-            bits.append(f"{labels['duration']}: {dur}")
-        if not bits:
-            bits.append(none_documented)
-        parts.append(f"**{t.get('treatment_name', '')}**\n" + "\n".join(bits))
-
-    reply = "\n\n".join(parts)
-    low = (message or "").lower()
-    asked_untracked = any(
-        kw in low for group in _UNTRACKED_FOLLOWUP_GROUPS for kw in FOLLOWUP_KEYWORDS.get(group, [])
-    )
-    if asked_untracked:
-        reply += "\n\n" + _UNTRACKED_FOLLOWUP_NOTE.get(lang, _UNTRACKED_FOLLOWUP_NOTE["he"])
-
-    return {"reply": reply, "buttons": None, "mode": "general"}
-
-
 # ── General routing ───────────────────────────────────────────────────────────
 
 def _route_general(session: dict, session_id: str, message: str) -> dict:
@@ -591,63 +847,77 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
         save_session(session_id, session)
         return {"reply": reply, "buttons": None, "mode": "general"}
 
-    # Resolve which treatment(s) this message concerns, so we can hand the LLM
-    # (or the no-LLM fallback) the real DB fields instead of just names.
-    # A follow-up like "is it painful?" with no treatment named resolves to the
-    # last treatment discussed in this session.
-    all_treatments = get_all_treatments_summary()
-    mentioned = find_treatments_by_mention(message, all_treatments)
-    compare_mode = is_comparison_request(message) or len(mentioned) >= 2
+    # ── Deterministic intent layer — answers the common intents from data, so
+    #    they never depend on the LLM being up. The LLM handles only the rest. ──
 
-    focus_ids = [t["treatment_id"] for t in mentioned]
-    if not focus_ids and is_followup_question(message) and session.get("last_treatment_id"):
-        focus_ids = [session["last_treatment_id"]]
-
-    focus_treatments = [t for t in (get_treatment_by_id(tid) for tid in focus_ids) if t]
-    if focus_treatments:
-        session["last_treatment_id"] = focus_treatments[-1]["treatment_id"]
-
-    # Single LLM call
-    if not _groq_ok():
-        if focus_treatments:
-            det_reply = _build_treatment_db_reply(focus_treatments, lang, message)
-            if det_reply:
-                append_context(session, "assistant", det_reply["reply"], MAX_CONTEXT_MESSAGES)
-                save_session(session_id, session)
-                return {**det_reply, "offer_continue": None}
-        # Try DB category fallback before giving up
+    # 1. Explicit recommendation intent → start the right flow, or pick a category.
+    if _is_recommend_intent(message):
         cat_id = _detect_category_in_message(message)
-        if cat_id:
-            cat_resp = _build_category_db_reply(cat_id, lang)
-            if cat_resp:
-                append_context(session, "assistant", cat_resp["reply"], MAX_CONTEXT_MESSAGES)
-                save_session(session_id, session)
-                return {**cat_resp, "offer_continue": None}
-        reply = _forward_msg(lang)
-        append_context(session, "assistant", reply, MAX_CONTEXT_MESSAGES)
+        if cat_id in _rec_category_ids():
+            flow = _begin_flow(session, session_id, cat_id, lang)
+            if flow:
+                return flow
+        picker = _category_picker_reply(lang)
+        append_context(session, "assistant", picker["reply"], MAX_CONTEXT_MESSAGES)
         save_session(session_id, session)
-        return {"reply": reply, "buttons": None, "mode": "general"}
+        return picker
 
-    result = _llm_respond(message, session.get("recent_context", []), lang, focus_treatments, compare_mode)
+    # 2. Logistics (hours / location / contact) — pure data, common, unambiguous.
+    log = _match_logistics_faq(message)
+    if log:
+        append_context(session, "assistant", log, MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return {"reply": log, "buttons": None, "mode": "general"}
+
+    # 3. "What do you offer" / "explain the treatments" — category-aware.
+    if _is_whats_offered(message) or _is_about_treatments(message):
+        cat_id = _detect_category_in_message(message)
+        resp = _build_category_db_reply(cat_id, lang) if cat_id else None
+        if not resp:
+            resp = _build_catalog_overview(lang)
+        append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return resp
+
+    # 4. Bare "yes" right after we offered to help choose → category picker.
+    if _is_affirmation(message) and _last_assistant_offered(session):
+        picker = _category_picker_reply(lang)
+        append_context(session, "assistant", picker["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return picker
+
+    # Single LLM call (only reached for open-ended questions)
+    if not _groq_ok():
+        resp = _deterministic_fallback(message, lang) or {"reply": _forward_msg(lang), "buttons": None, "mode": "general"}
+        append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return {**resp, "offer_continue": None}
+
+    result = _llm_respond(message, session.get("recent_context", []), lang)
     reply = (result.get("reply") or "").strip()
     action = result.get("action") or ""
 
     if not reply:
-        # LLM failed (rate limit / error) — try DB fallback
-        if focus_treatments:
-            det_reply = _build_treatment_db_reply(focus_treatments, lang, message)
-            if det_reply:
-                append_context(session, "assistant", det_reply["reply"], MAX_CONTEXT_MESSAGES)
-                save_session(session_id, session)
-                return {**det_reply, "offer_continue": None}
-        cat_id = _detect_category_in_message(message)
-        if cat_id:
-            cat_resp = _build_category_db_reply(cat_id, lang)
-            if cat_resp:
-                append_context(session, "assistant", cat_resp["reply"], MAX_CONTEXT_MESSAGES)
-                save_session(session_id, session)
-                return {**cat_resp, "offer_continue": None}
+        # LLM failed (rate limit / error) — answer from data instead of forwarding.
+        resp = _deterministic_fallback(message, lang)
+        if resp:
+            append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+            save_session(session_id, session)
+            return {**resp, "offer_continue": None}
         reply = _forward_msg(lang)
+
+    # No-data guard: don't lead a "we don't have that" answer with the whole
+    # service catalog — it reads like padding/hallucination. Replace with a
+    # clean warm forward. (Genuine "what do you offer?" answers are untouched.)
+    if _catalog_deflection(reply):
+        reply = _forward_msg(lang)
+
+    # General "help me choose" with no specific area → show category picker
+    if action == "offer_pick_category":
+        picker = _category_picker_reply(lang, reply_text=reply)
+        append_context(session, "assistant", picker["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return picker
 
     # Offer yes/no before starting flow (user browsed a category)
     if action.startswith("offer_recommendation:"):
@@ -667,26 +937,9 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
     # Start flow immediately (user explicitly asked for recommendation)
     if action.startswith("start_flow:"):
         category_id = action.split(":", 1)[1].strip()
-        cat = get_category_by_id(category_id)
-        if cat and cat.get("has_recommendation"):
-            session["mode"] = "in_flow"
-            session["flow_category_id"] = category_id
-            session["flow_question_index"] = 0
-            session["flow_scores"] = {}
-            session["flow_answers"] = []
-            first_q = build_question_response(category_id, 0)
-            if first_q:
-                intro = format_intro(cat, lang)
-                flow_reply = intro + "\n\n" + first_q["question_text"]
-                append_context(session, "assistant", flow_reply, MAX_CONTEXT_MESSAGES)
-                save_session(session_id, session)
-                return {
-                    "reply": flow_reply,
-                    "buttons": first_q["buttons"],
-                    "offer_continue": None,
-                    "mode": "in_flow",
-                    "question_progress": {"current": 1, "total": first_q["total_questions"]},
-                }
+        flow = _begin_flow(session, session_id, category_id, lang)
+        if flow:
+            return flow
 
     append_context(session, "assistant", reply, MAX_CONTEXT_MESSAGES)
     save_session(session_id, session)
@@ -763,12 +1016,14 @@ def handle_message(
         save_session(session_id, session)
         result = _route_general(session, session_id, message)
         result["offer_continue"] = _make_continue_offer(session)
+        _attach_suggestions(result, message)
         return result
 
     # General mode
     if message:
         result = _route_general(session, session_id, message)
         result["offer_continue"] = _make_continue_offer(session)
+        _attach_suggestions(result, message)
         return result
 
     return {"reply": _forward_msg("he"), "buttons": None, "offer_continue": None, "mode": "general"}

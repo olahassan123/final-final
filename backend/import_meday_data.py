@@ -72,8 +72,10 @@ def import_all():
             INSERT OR REPLACE INTO cb_treatments
             (treatment_id, category_id, subgroup, treatment_name, short_description,
              good_for, technique_or_equipment, duration_min, duration_notes,
-             aliases, canonical_id, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             aliases, canonical_id, source,
+             preparation, aftercare, downtime, pain_level,
+             sessions_recommended, results_longevity, what_to_expect)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             tid,
             _v(d.get("category_id")),
@@ -87,6 +89,13 @@ def import_all():
             _v(d.get("aliases")),
             _v(d.get("canonical_id")),
             _v(d.get("source")),
+            _v(d.get("preparation")),
+            _v(d.get("aftercare")),
+            _v(d.get("downtime")),
+            _v(d.get("pain_level")),
+            _v(d.get("sessions_recommended")),
+            _v(d.get("results_longevity")),
+            _v(d.get("what_to_expect")),
         ))
         count += 1
     print(f"  Treatments: {count}")
