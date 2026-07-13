@@ -28,6 +28,13 @@ dist-ssr
 # =========================
 backend/.venv/
 backend/venv/
+.venv/
+
+# Local development server output
+backend-dev.out
+backend-dev.err
+vite-dev.out
+vite-dev.err
 
 
 __pycache__/

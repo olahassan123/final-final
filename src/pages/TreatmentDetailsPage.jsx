@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { fetchTreatmentById } from "../api/medayApi";
 import { ArrowRight, Clock, ShieldCheck, Sparkles, AlertCircle, MessageCircle } from "lucide-react";
 
 function DetailRow({ label, value, icon: Icon }) {
@@ -28,7 +27,9 @@ export default function TreatmentDetailsPage() {
     const loadData = async () => {
       try {
         setLoading(true);
-        const data = await fetchTreatmentById(id);
+        const res = await fetch(`/api/treatments/${encodeURIComponent(id)}`);
+        if (!res.ok) throw new Error("treatment not found");
+        const data = await res.json();
         if (alive) {
           setTreatment(data);
           

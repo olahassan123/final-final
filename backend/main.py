@@ -10,6 +10,8 @@ import shutil
 import sqlite3
 import json
 import re
+import time
+import requests as http_requests
 from pathlib import Path
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
@@ -20,7 +22,8 @@ import secrets
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 
-load_dotenv()
+BASE_DIR = Path(__file__).resolve().parent
+load_dotenv(BASE_DIR / ".env")
 
 # ------------------------------------------------------------
 # Auth config
@@ -37,10 +40,10 @@ CUSTOMER_ROLE = "customer"
 DEFAULT_SYSTEM_SETTINGS = {
     "business_name": "MeDay Beauty Center",
     "phone": "*3691",
-    "whatsapp": "",
-    "email": "admin@meday.local",
-    "address": "",
-    "opening_hours": "",
+    "whatsapp": "04-8306544",
+    "email": "Ranin.meday@gmail.com",
+    "address": "שד׳ הנשיא 99, חיפה",
+    "opening_hours": "ראשון-חמישי 08:30-20:00, שישי 08:30-15:00, שבת סגור",
 }
 DEFAULT_BOOTSTRAP_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
 DEFAULT_BOOTSTRAP_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Admin123!")
@@ -302,15 +305,280 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------
-# Groq setup
+# LLM provider setup
 # ------------------------------------------------------------
+OLLAMA_ENABLED = os.getenv("OLLAMA_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:4b-instruct").strip() or "qwen3:4b-instruct"
+OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
+_ollama_disabled_until = 0.0
+_ollama_last_error = ""
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-terra").strip() or "gpt-5.6-terra"
+OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "low").strip() or "low"
+OPENAI_INCLUDE_TEMPERATURE = os.getenv("OPENAI_INCLUDE_TEMPERATURE", "false").strip().lower() == "true"
+OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "8"))
+_openai_disabled_until = 0.0
+_openai_last_error = ""
+
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-groq_client = Groq(api_key=GROQ_API_KEY)
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b").strip() or "openai/gpt-oss-20b"
+GROQ_TIMEOUT_SECONDS = float(os.getenv("GROQ_TIMEOUT_SECONDS", "6"))
+groq_client = Groq(api_key=GROQ_API_KEY, timeout=GROQ_TIMEOUT_SECONDS, max_retries=0)
+_groq_disabled_until = 0.0
+_groq_last_error = ""
+
+
+def ollama_is_available() -> bool:
+    return OLLAMA_ENABLED and time.time() >= _ollama_disabled_until
+
+
+def mark_ollama_failure(error: Exception) -> None:
+    global _ollama_disabled_until, _ollama_last_error
+    _ollama_last_error = str(error)[:300]
+    _ollama_disabled_until = time.time() + 15
+
+
+def mark_ollama_success() -> None:
+    global _ollama_disabled_until, _ollama_last_error
+    _ollama_disabled_until = 0.0
+    _ollama_last_error = ""
+
+
+def _ollama_chat_completion(
+    messages: List[Dict],
+    temperature: float = 0.4,
+    max_tokens: Optional[int] = None,
+    response_format: Optional[Dict] = None,
+) -> str:
+    payload = {
+        "model": OLLAMA_MODEL,
+        "messages": messages,
+        "stream": False,
+        "options": {"temperature": temperature},
+    }
+    if max_tokens:
+        payload["options"]["num_predict"] = max_tokens
+    if response_format and response_format.get("type") == "json_object":
+        payload["format"] = "json"
+
+    response = http_requests.post(
+        f"{OLLAMA_BASE_URL}/api/chat",
+        json=payload,
+        timeout=OLLAMA_TIMEOUT_SECONDS,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"Ollama API error {response.status_code}: {response.text[:500]}")
+
+    content = response.json().get("message", {}).get("content", "").strip()
+    if not content:
+        raise RuntimeError("Ollama response did not include text output")
+    return content
+
+
+def openai_is_configured() -> bool:
+    key = (OPENAI_API_KEY or "").strip()
+    return bool(key and key.startswith(("sk-", "sk-proj-")) and key != "your_api_key_here")
+
+
+def openai_is_available() -> bool:
+    return openai_is_configured() and time.time() >= _openai_disabled_until
+
+
+def mark_openai_failure(error: Exception) -> None:
+    global _openai_disabled_until, _openai_last_error
+    message = str(error)
+    _openai_last_error = message[:300]
+    cooldown_seconds = 300 if any(token in message.lower() for token in ("401", "invalid api key", "unauthorized")) else 45
+    _openai_disabled_until = time.time() + cooldown_seconds
+
+
+def mark_openai_success() -> None:
+    global _openai_disabled_until, _openai_last_error
+    _openai_disabled_until = 0.0
+    _openai_last_error = ""
 
 
 def groq_is_configured() -> bool:
     key = (GROQ_API_KEY or "").strip()
-    return bool(key and key.startswith("gsk_") and "." not in key)
+    return bool(key and key.startswith("gsk_") and key != "your_api_key_here")
+
+
+def groq_is_available() -> bool:
+    return groq_is_configured() and time.time() >= _groq_disabled_until
+
+
+def mark_groq_failure(error: Exception) -> None:
+    global _groq_disabled_until, _groq_last_error
+    message = str(error)
+    _groq_last_error = message[:300]
+    cooldown_seconds = 300 if any(token in message.lower() for token in ("401", "invalid api key", "unauthorized")) else 45
+    _groq_disabled_until = time.time() + cooldown_seconds
+
+
+def mark_groq_success() -> None:
+    global _groq_disabled_until, _groq_last_error
+    _groq_disabled_until = 0.0
+    _groq_last_error = ""
+
+
+def llm_is_available() -> bool:
+    return ollama_is_available() or openai_is_available() or groq_is_available()
+
+
+def _openai_input_from_messages(messages: List[Dict]) -> tuple[str, List[Dict]]:
+    instructions_parts: List[str] = []
+    input_items: List[Dict] = []
+
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = (msg.get("content") or "").strip()
+        if not content:
+            continue
+
+        if role in ("system", "developer"):
+            instructions_parts.append(content)
+            continue
+
+        input_items.append({
+            "role": "assistant" if role == "assistant" else "user",
+            "content": content,
+        })
+
+    return "\n\n".join(instructions_parts), input_items
+
+
+def _extract_openai_response_text(data: Dict) -> str:
+    output_text = data.get("output_text")
+    if isinstance(output_text, str) and output_text.strip():
+        return output_text.strip()
+
+    parts: List[str] = []
+    for item in data.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        for content in item.get("content", []):
+            if isinstance(content, str):
+                parts.append(content)
+                continue
+            if not isinstance(content, dict):
+                continue
+            text = content.get("text") or content.get("content") or content.get("refusal")
+            if isinstance(text, str) and text.strip():
+                parts.append(text.strip())
+
+    if parts:
+        return "\n".join(parts).strip()
+
+    choices = data.get("choices") or []
+    if choices:
+        message = choices[0].get("message", {})
+        content = message.get("content", "")
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+
+    raise RuntimeError("OpenAI response did not include text output")
+
+
+def _openai_response_completion(
+    messages: List[Dict],
+    temperature: float = 0.4,
+    max_tokens: Optional[int] = None,
+    response_format: Optional[Dict] = None,
+) -> str:
+    instructions, input_items = _openai_input_from_messages(messages)
+    payload = {
+        "model": OPENAI_MODEL,
+        "input": input_items,
+        "store": False,
+    }
+    if OPENAI_INCLUDE_TEMPERATURE:
+        payload["temperature"] = temperature
+    if instructions:
+        payload["instructions"] = instructions
+    if max_tokens:
+        payload["max_output_tokens"] = max_tokens
+    if response_format:
+        payload["text"] = {"format": response_format}
+    if OPENAI_REASONING_EFFORT.lower() != "none" and OPENAI_MODEL.startswith(("gpt-5", "o")):
+        payload["reasoning"] = {"effort": OPENAI_REASONING_EFFORT}
+
+    response = http_requests.post(
+        "https://api.openai.com/v1/responses",
+        headers={
+            "Authorization": f"Bearer {OPENAI_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json=payload,
+        timeout=OPENAI_TIMEOUT_SECONDS,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"OpenAI API error {response.status_code}: {response.text[:500]}")
+
+    data = response.json()
+    return _extract_openai_response_text(data)
+
+
+def run_llm_chat(
+    messages: List[Dict],
+    temperature: float = 0.4,
+    max_tokens: Optional[int] = None,
+    response_format: Optional[Dict] = None,
+) -> str:
+    last_error: Optional[Exception] = None
+
+    if ollama_is_available():
+        try:
+            reply = _ollama_chat_completion(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format,
+            )
+            mark_ollama_success()
+            return reply
+        except Exception as e:
+            print(f"[Ollama chat error] {e}")
+            mark_ollama_failure(e)
+            last_error = e
+
+    if openai_is_available():
+        try:
+            reply = _openai_response_completion(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format,
+            )
+            mark_openai_success()
+            return reply
+        except Exception as e:
+            print(f"[OpenAI chat error] {e}")
+            mark_openai_failure(e)
+            last_error = e
+
+    if groq_is_available():
+        try:
+            kwargs = {
+                "model": GROQ_MODEL,
+                "messages": messages,
+                "temperature": temperature,
+            }
+            if max_tokens:
+                kwargs["max_tokens"] = max_tokens
+            if response_format:
+                kwargs["response_format"] = response_format
+
+            resp = groq_client.chat.completions.create(**kwargs)
+            mark_groq_success()
+            return resp.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"[Groq chat error] {e}")
+            mark_groq_failure(e)
+            last_error = e
+
+    raise last_error or RuntimeError("No LLM provider is configured")
 
 # ------------------------------------------------------------
 # Load Excel data once on startup
@@ -490,6 +758,41 @@ _EXTRA_TREATMENTS = [
     {"id": "manicure_3", "name": "עיצוב ופיסול ציפורן",                  "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
     {"id": "manicure_4", "name": "פדיקור אסתטי+ לק גל",                 "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
     {"id": "manicure_5", "name": "פדיקור טיפולי+ לק\\לק גל",            "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_1", "name": "עיסוי שוודי", "class_name": "טיפולי גוף", "category": "עיסוי גוף", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_2", "name": "עיסוי באבנים חמות", "class_name": "טיפולי גוף", "category": "עיסוי גוף", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_3", "name": "שיאצו", "class_name": "טיפולי גוף", "category": "עיסוי גוף", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_4", "name": "עיסוי תאילנדי", "class_name": "טיפולי גוף", "category": "עיסוי גוף", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_5", "name": "עיסוי רקמות עמוק", "class_name": "טיפולי גוף", "category": "עיסוי גוף", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_6", "name": "עיסוי קצוות", "class_name": "טיפולי גוף", "category": "עיסוי גוף", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_7", "name": "עיסוי כתפיים, גב וצוואר", "class_name": "טיפולי גוף", "category": "עיסוי ממוקד", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_8", "name": "עיסוי פנים וקרקפת", "class_name": "טיפולי גוף", "category": "עיסוי ממוקד", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_9", "name": "עיסוי כפות רגליים", "class_name": "טיפולי גוף", "category": "עיסוי ממוקד", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_10", "name": "עיסוי ספורטאים", "class_name": "טיפולי גוף", "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_11", "name": "עיסוי לנשים בהריון", "class_name": "טיפולי גוף", "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_12", "name": "עיסוי משולב", "class_name": "טיפולי גוף", "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "body_13", "name": "רפלקסולוגיה", "class_name": "טיפולי גוף", "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_1", "name": "גבות שיטת השערה", "class_name": "איפור קבוע ועיצוב גבות", "category": "גבות", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_2", "name": "גבות שיטת הפודרה", "class_name": "איפור קבוע ועיצוב גבות", "category": "גבות", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_3", "name": "גבות שיטה משולבת", "class_name": "איפור קבוע ועיצוב גבות", "category": "גבות", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_4", "name": "הדגשת קו ריסים תחתון", "class_name": "איפור קבוע ועיצוב גבות", "category": "תיחום עיניים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_5", "name": "הדגשת קו ריסים עליון", "class_name": "איפור קבוע ועיצוב גבות", "category": "תיחום עיניים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_6", "name": "אייליינר עליון", "class_name": "איפור קבוע ועיצוב גבות", "category": "תיחום עיניים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_7", "name": "תיחום שפתיים בקו טבעי", "class_name": "איפור קבוע ועיצוב גבות", "category": "שפתיים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_8", "name": "מילוי שפתיים + תיחום", "class_name": "איפור קבוע ועיצוב גבות", "category": "שפתיים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_9", "name": "מילוי קרקפת אישה", "class_name": "איפור קבוע ועיצוב גבות", "category": "ראש", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_10", "name": "מילוי קרקפת גבר", "class_name": "איפור קבוע ועיצוב גבות", "category": "ראש", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "pmu_11", "name": "נקודת חן", "class_name": "איפור קבוע ועיצוב גבות", "category": "ראש", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "styling_1", "name": "מפגש תדמית 2.5 שעות", "class_name": "סטיילינג אישי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "styling_2", "name": "מפגש תדמית 4 שעות", "class_name": "סטיילינג אישי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "hair_1", "name": "טיפול צבע ללא אמוניה", "class_name": "עיצוב שיער", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "hair_2", "name": "בלייאש", "class_name": "עיצוב שיער", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "hair_3", "name": "עיצוב שיער לאירועים", "class_name": "עיצוב שיער", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "hair_4", "name": "תספורות נשים", "class_name": "עיצוב שיער", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "hair_5", "name": "תספורות גברים ועיצוב זקנים", "class_name": "עיצוב שיער", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "makeup_1", "name": "איפור כלות", "class_name": "איפור מקצועי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "makeup_2", "name": "איפור לאירועים", "class_name": "איפור מקצועי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "makeup_3", "name": "איפור בת מצווה", "class_name": "איפור מקצועי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
+    {"id": "makeup_4", "name": "שיעור איפור אישי", "class_name": "איפור מקצועי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
 ]
 
 # Only add if not already present (safe to restart server repeatedly)
@@ -499,6 +802,42 @@ for _t in _EXTRA_TREATMENTS:
         TREATMENTS.append(_t)
 
 TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
+
+SERVICE_CATEGORY_ORDER = [
+    "מניקור ופדיקור",
+    "עיצוב שיער",
+    "טיפולי קוסמטיקה",
+    "טיפולי גוף",
+    "הסרת שיער",
+    "איפור מקצועי",
+    "איפור קבוע ועיצוב גבות",
+    "סטיילינג אישי",
+    "טיפולי אסתטיקה",
+]
+
+SERVICE_CATEGORY_DESCRIPTIONS = {
+    "מניקור ופדיקור": "טיפולי ידיים וכפות רגליים: מניקור, לק ג'ל, עיצוב ופיסול ציפורן, פדיקור אסתטי ופדיקור טיפולי.",
+    "עיצוב שיער": "שירותי שיער כמו צבע ללא אמוניה, בלייאש, עיצוב שיער לאירועים, תספורות נשים ותספורות גברים ועיצוב זקנים.",
+    "טיפולי קוסמטיקה": "טיפולי פנים וקוסמטיקה כמו ניקוי, אקנה, אנטי אייג'ינג, הבהרה, פילינג וטיפולים טכנולוגיים.",
+    "טיפולי גוף": "עיסויים וטיפולי גוף: עיסוי שוודי, אבנים חמות, שיאצו, תאילנדי, רקמות עמוק, עיסויים ממוקדים ועוד.",
+    "הסרת שיער": "הסרת שיער מקצועית בשיטות מתקדמות. לפרטים מדויקים לפי אזור ושיטה מומלץ ליצור קשר עם הצוות.",
+    "איפור מקצועי": "איפור כלות, איפור לאירועים, איפור בת מצווה ושיעורי איפור אישיים.",
+    "איפור קבוע ועיצוב גבות": "איפור קבוע ועיצוב גבות: שיטת השערה, פודרה, שיטה משולבת, אייליינר, תיחום שפתיים ועוד.",
+    "סטיילינג אישי": "מפגשי תדמית וסטיילינג אישי, כולל מפגש 2.5 שעות ומפגש 4 שעות.",
+    "טיפולי אסתטיקה": "טיפולי אסתטיקה מקצועיים לפנים ולגוף. לפרטי טיפול ספציפיים כדאי לשאול את הצוות או לבחור קטגוריה באתר.",
+}
+
+SERVICE_CATEGORY_ALIASES = {
+    "טיפולי קוסמטיקה": ("קוסמטיקה", "קוסמטי", "טיפולי פנים", "פנים"),
+    "מניקור ופדיקור": ("מניקור", "פדיקור", "לק", "ציפורניים", "ציפורן"),
+    "עיצוב שיער": ("שיער", "תספורת", "תספורות", "בלייאש", "צבע"),
+    "טיפולי גוף": ("גוף", "עיסוי", "עיסויים", "מסאז", "מסאג"),
+    "הסרת שיער": ("הסרת שיער", "לייזר", "שעווה", "אפילציה"),
+    "איפור מקצועי": ("איפור מקצועי", "איפור כלות", "איפור לאירועים", "איפור בת מצווה", "איפור"),
+    "איפור קבוע ועיצוב גבות": ("איפור קבוע", "עיצוב גבות", "גבות", "ריסים", "אייליינר", "שפתיים"),
+    "סטיילינג אישי": ("סטיילינג", "תדמית", "מלתחה", "לבוש"),
+    "טיפולי אסתטיקה": ("אסתטיקה", "אסתטי", "מילוי", "בוטוקס", "סקולפטרה", "פיסול פנים"),
+}
 
 # ------------------------------------------------------------
 # Basic routes
@@ -795,29 +1134,908 @@ def question_progress(category: str, field: Optional[str]) -> Dict:
 # ------------------------------------------------------------
 def detect_category_locally(message: str) -> Optional[str]:
     text = (message or "").lower()
-    categories = [c for c in sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"])) if c]
+    categories = list(SERVICE_CATEGORY_ORDER)
+    for category in sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"])):
+        if category and category not in categories:
+            categories.append(category)
 
     for category in categories:
         if category.lower() in text:
             return category
 
+    def resolve_category(candidate: str) -> Optional[str]:
+        if candidate in categories:
+            return candidate
+        for category in categories:
+            if candidate in category or category in candidate:
+                return category
+        return None
+
     keyword_groups = [
-        (("אקנה", "פצע", "פצעונים", "עור", "קמטים", "פיגמנט", "כתמים", "יובש", "קוסמטיקה"), "קוסמטיקה"),
+        (("אקנה", "פצע", "פצעונים", "עור", "פנים", "טיפול פנים", "קמטים", "פיגמנט", "כתמים", "יובש", "קוסמטיקה"), "טיפולי קוסמטיקה"),
         (("ציפורן", "ציפורניים", "מניקור", "פדיקור", "לק"), "מניקור ופדיקור"),
         (("שיער", "פן", "תסרוקת", "החלקה", "צבע"), "עיצוב שיער"),
         (("איפור", "גבות", "ריסים"), "איפור מקצועי"),
         (("סטיילינג", "לבוש", "מלתחה", "תדמית"), "סטיילינג אישי"),
-        (("גוף", "עיסוי", "מסאז", "חיטוב"), "טיפולי גוף"),
+        (("גוף", "עיסוי", "מסאז", "מסאג", "חיטוב"), "טיפולי גוף"),
         (("לייזר", "הסרת שיער", "שעווה"), "הסרת שיער"),
+        (("אסתטיקה", "אסתטי", "מילוי", "בוטוקס", "סקולפטרה", "פיסול פנים"), "טיפולי אסתטיקה"),
     ]
     for keywords, category in keyword_groups:
-        if any(keyword in text for keyword in keywords) and category in categories:
+        resolved = resolve_category(category)
+        if any(keyword in text for keyword in keywords) and resolved:
+            return resolved
+
+    return None
+
+
+def is_recommendation_request(message: str) -> bool:
+    text = _normalize_query_text(message)
+    if not text:
+        return False
+
+    direct_phrases = (
+        "מה מומלץ",
+        "מה את ממליצה",
+        "מה אתה ממליץ",
+        "איזה טיפול מתאים",
+        "איזה טיפול כדאי",
+        "מה מתאים לי",
+        "תתאימי לי",
+        "תתאים לי",
+        "להתאים לי",
+        "המלצה לטיפול",
+        "המלצות לטיפול",
+        "רוצה המלצה",
+        "צריך טיפול",
+        "צריכה טיפול",
+        "מה לעשות עם",
+        "איך לטפל ב",
+        "איך לטפל ב־",
+        "לטפל ב",
+    )
+    if any(phrase in text for phrase in direct_phrases):
+        return True
+
+    problem_terms = (
+        "יש לי",
+        "סובלת",
+        "סובל",
+        "מפריע לי",
+        "בעיה",
+        "פצע",
+        "פצעונים",
+        "אקנה",
+        "כתמים",
+        "פיגמנט",
+        "קמטים",
+        "יובש",
+        "שומניות",
+        "שיער דליל",
+        "כאבים",
+        "כואב",
+        "עור רגיש",
+        "צלקות",
+        "ציפורן שבורה",
+    )
+    action_terms = (
+        "לטפל",
+        "טיפול",
+        "פתרון",
+        "להעלים",
+        "להפחית",
+        "לשפר",
+        "מתאים",
+        "כדאי",
+        "מומלץ",
+    )
+    return any(term in text for term in problem_terms) and any(term in text for term in action_terms)
+
+
+def is_unanswered_followup(message: str) -> bool:
+    text = re.sub(r"\s+", " ", (message or "").strip().lower())
+    return any(
+        phrase in text
+        for phrase in (
+            "לא ענית",
+            "לא ענית לי",
+            "לא קיבלתי תשובה",
+            "לא הבנתי",
+            "מה התשובה",
+            "אז כמה",
+            "כמה זה",
+        )
+    )
+
+
+def _matches_chatbot_setting(message: str, setting: Dict) -> bool:
+    text = (message or "").lower()
+    return any(keyword and keyword.lower() in text for keyword in setting.get("keywords", []))
+
+
+def _find_guardrail_setting(message: str, history: Optional[List[Dict]]) -> tuple[Optional[Dict], str, bool]:
+    active_settings = [s for s in CHATBOT_SETTINGS if s.get("active")]
+    for setting in active_settings:
+        if _matches_chatbot_setting(message, setting):
+            return setting, message, False
+
+    if not is_unanswered_followup(message):
+        return None, message, False
+
+    for msg in reversed(history or []):
+        if msg.get("from") != "user":
+            continue
+        previous_text = msg.get("text", "")
+        for setting in active_settings:
+            if _matches_chatbot_setting(previous_text, setting):
+                return setting, previous_text, True
+    return None, message, False
+
+
+def _public_contact_line() -> str:
+    settings = dict(DEFAULT_SYSTEM_SETTINGS)
+    try:
+        conn = get_db()
+        settings = _read_system_settings(conn)
+        conn.close()
+    except Exception:
+        pass
+
+    contacts = []
+    if settings.get("phone"):
+        contacts.append(f"טלפון {settings['phone']}")
+    if settings.get("whatsapp"):
+        contacts.append(f"וואטסאפ {settings['whatsapp']}")
+    if contacts:
+        return "אפשר ליצור קשר דרך " + " או ".join(contacts) + "."
+    return "אפשר ליצור קשר עם הצוות דרך פרטי הקשר שמופיעים באתר."
+
+
+def _public_business_settings() -> Dict:
+    settings = dict(DEFAULT_SYSTEM_SETTINGS)
+    try:
+        conn = get_db()
+        settings = _read_system_settings(conn)
+        conn.close()
+    except Exception:
+        pass
+    return settings
+
+
+def _extract_price_subject(message: str) -> str:
+    text = re.sub(r"\s+", " ", (message or "").strip())
+    patterns = [
+        r"כמה\s+עולה\s+(.+)",
+        r"מה\s+המחיר\s+של\s+(.+)",
+        r"מחיר\s+של\s+(.+)",
+        r"עלות\s+של\s+(.+)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1).strip(" ?!.،,")
+    return ""
+
+
+def is_review_question(message: str) -> bool:
+    text = re.sub(r"\s+", " ", (message or "").strip().lower())
+    direct_terms = (
+        "חוות דעת",
+        "חוות הדעת",
+        "ביקורות",
+        "ביקורת",
+        "דירוג",
+        "דירוגים",
+        "לקוחות ממליצים",
+        "לקוחות מרוצות",
+        "תגובות של לקוחות",
+        "פידבק",
+        "מה אנשים אומרים",
+        "מה לקוחות אומר",
+    )
+    if any(term in text for term in direct_terms):
+        return True
+    return ("לקוחות" in text or "אנשים" in text) and any(
+        term in text for term in ("המליצ", "ממליצ", "מרוצ", "ניסו", "עשו")
+    )
+
+
+def is_business_info_question(message: str) -> bool:
+    text = re.sub(r"\s+", " ", (message or "").strip().lower())
+    business_terms = (
+        "איפה",
+        "היכן",
+        "מיקום",
+        "נמצאת",
+        "נמצא",
+        "כתובת",
+        "להגיע",
+        "מפה",
+        "שעות",
+        "פתיחה",
+        "מתי פתוח",
+        "טלפון",
+        "וואטסאפ",
+        "ווטסאפ",
+        "צור קשר",
+        "יצירת קשר",
+        "אימייל",
+        "מייל",
+        "חניה",
+        "חנייה",
+    )
+    clinic_terms = ("קליניקה", "מרכז", "סניף", "מקום", "אתם", "העסק", "meday", "מידיי")
+    if any(term in text for term in ("כתובת", "מיקום", "שעות", "טלפון", "וואטסאפ", "ווטסאפ", "קשר", "אימייל", "מייל", "חניה", "חנייה")):
+        return True
+    return any(term in text for term in business_terms) and any(term in text for term in clinic_terms)
+
+
+def local_business_info_answer(message: str) -> str:
+    text = re.sub(r"\s+", " ", (message or "").strip().lower())
+    settings = _public_business_settings()
+    address = settings.get("address") or DEFAULT_SYSTEM_SETTINGS["address"]
+    hours = settings.get("opening_hours") or DEFAULT_SYSTEM_SETTINGS["opening_hours"]
+    phone = settings.get("phone") or DEFAULT_SYSTEM_SETTINGS["phone"]
+    whatsapp = settings.get("whatsapp") or DEFAULT_SYSTEM_SETTINGS["whatsapp"]
+    email = settings.get("email") or "Ranin.meday@gmail.com"
+
+    if "חניה" in text or "חנייה" in text:
+        return (
+            f"הקליניקה נמצאת ב{address}. "
+            "אין לי מידע שמור לגבי חניה, לכן כדאי לוודא זאת מול הצוות לפני ההגעה. "
+            f"אפשר ליצור קשר בטלפון {phone} או בוואטסאפ {whatsapp}."
+        )
+
+    asks_hours = any(term in text for term in ("שעות", "פתיחה", "מתי פתוח"))
+    asks_contact = any(term in text for term in ("טלפון", "וואטסאפ", "ווטסאפ", "קשר", "ליצור קשר", "צור קשר", "יצירת קשר", "אימייל", "מייל"))
+    asks_address = any(term in text for term in ("איפה", "היכן", "מיקום", "נמצאת", "נמצא", "כתובת", "להגיע", "מפה"))
+
+    parts = []
+    if asks_address or not (asks_hours or asks_contact):
+        parts.append(f"הקליניקה נמצאת ב{address}.")
+    if asks_hours:
+        parts.append(f"שעות הפתיחה: {hours}.")
+    if asks_contact:
+        parts.append(f"טלפון: {phone}. וואטסאפ: {whatsapp}. מייל: {email}.")
+    if not asks_contact:
+        parts.append(f"לתיאום או בירור נוסף אפשר ליצור קשר בטלפון {phone}.")
+    return " ".join(parts)
+
+
+def local_review_answer() -> str:
+    contact = _public_contact_line()
+    return (
+        "כרגע אין לי מאגר חוות דעת או ביקורות של לקוחות שמחובר לצ'אט, "
+        "ולכן אני לא יכולה להציג או לצטט חוות דעת אמיתיות על הטיפולים. "
+        "אפשר לבדוק בעמודי הטיפולים אם מופיעות המלצות באתר, או לדבר עם הצוות כדי לשמוע מה מתאים ומבוקש בפועל. "
+        f"{contact}"
+    )
+
+
+def _contains_catalog_value(text: str, value: str) -> bool:
+    value = (value or "").strip().lower()
+    if len(value) >= 3 and value in text:
+        return True
+    for part in re.split(r"[,;/|()\n]+", value):
+        part = part.strip()
+        if len(part) >= 3 and part in text:
+            return True
+    return False
+
+
+def _normalize_query_text(value: str) -> str:
+    value = (value or "").strip().lower()
+    value = re.sub(r"[\u200f\u200e]", "", value)
+    value = re.sub(r"\s+", " ", value)
+    return value
+
+
+def _compact_query_text(value: str) -> str:
+    return re.sub(r"[^0-9a-zA-Zא-ת]+", "", _normalize_query_text(value))
+
+
+def _dedupe_keep_order(values: List[str]) -> List[str]:
+    seen = set()
+    result = []
+    for value in values:
+        clean = _normalize_query_text(value).strip(" -–—:;,.!?()[]{}")
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        result.append(clean)
+    return result
+
+
+def _treatment_aliases(treatment: Dict) -> List[str]:
+    name = _normalize_query_text(treatment.get("name", ""))
+    aliases = [name]
+
+    # Split names such as "מידיי CLEAR SKIN + ניקוי העור פלוס" into natural search phrases.
+    aliases.extend(re.split(r"[+\\/|()]+", name))
+
+    hebrew_only = re.sub(r"[a-zA-Z0-9]+", " ", name)
+    english_only = " ".join(re.findall(r"[a-zA-Z][a-zA-Z0-9]*(?:\s+[a-zA-Z0-9]+)*", name))
+    aliases.extend([hebrew_only, english_only])
+
+    if name.startswith("מידיי "):
+        aliases.append(name.replace("מידיי ", "", 1))
+
+    blacklist = {"מידיי", "טיפול", "טיפולים", "פלוס", "plus", "pro", "new", "skin", "לק"}
+    return [
+        alias
+        for alias in _dedupe_keep_order(aliases)
+        if len(_compact_query_text(alias)) >= 4 and alias not in blacklist
+    ]
+
+
+def find_matching_treatments(message: str) -> List[Dict]:
+    text = _normalize_query_text(message)
+    compact_text = _compact_query_text(text)
+    matches = []
+
+    for treatment in TREATMENTS:
+        aliases = _treatment_aliases(treatment)
+        if any(alias in text or _compact_query_text(alias) in compact_text for alias in aliases):
+            matches.append(treatment)
+
+    if matches:
+        return matches
+
+    concern_terms = {
+        "אקנה": ("אקנה", "פצע", "פצעונים", "צלק"),
+        "אנטי אייג": ("אנטי", "אייג", "קמט", "קולגן", "הצער", "ליפט", "מזו"),
+        "ניקוי והבהרה": ("ניקוי", "הבהרה", "כתם", "פיגמנט", "פילינג", "שחור"),
+        "טיפולי פנים": ("פנים", "זוהר", "רענון", "קלאסי", "מסיבה"),
+        "טיפולים מעצבים": ("עיסוי", "פיסול", "חיטוב", "עיצוב פנים"),
+        "מניקור ופדיקור": ("מניקור", "פדיקור", "ציפורן", "ציפורניים", "לק"),
+    }
+    active_groups = [
+        group
+        for group, terms in concern_terms.items()
+        if any(term in text for term in terms)
+    ]
+    if not active_groups:
+        return []
+
+    for treatment in TREATMENTS:
+        haystack = _normalize_query_text(
+            " ".join(
+                str(treatment.get(key, ""))
+                for key in ("name", "class_name", "category", "keywords", "aftercare", "results_timing", "suitable_for_all_skins")
+            )
+        )
+        if any(group in haystack for group in active_groups) or any(term in haystack for group in active_groups for term in concern_terms[group]):
+            matches.append(treatment)
+
+    return matches[:6]
+
+
+def _format_treatment_list_item(treatment: Dict) -> str:
+    name = treatment.get("name", "")
+    subcategory = treatment.get("category", "")
+    return f"{name} ({subcategory})" if subcategory else name
+
+
+def _public_treatment_text(value: str) -> str:
+    return str(value or "").replace("צללקות", "צלקות").strip()
+
+
+def _full_treatment_catalog_lines() -> List[str]:
+    grouped: Dict[str, List[Dict]] = {}
+    for treatment in TREATMENTS:
+        category = (treatment.get("class_name") or "טיפולים").strip()
+        grouped.setdefault(category, []).append(treatment)
+
+    lines = []
+    for category, treatments in grouped.items():
+        lines.append(f"**{category}**")
+        for treatment in treatments:
+            lines.append(f"- {_format_treatment_list_item(treatment)}")
+    return lines
+
+
+def _treatments_for_service_category(category: str) -> List[Dict]:
+    direct = [t for t in TREATMENTS if (t.get("class_name") or "").strip() == category]
+    if direct:
+        return direct
+
+    # The Excel sometimes calls this category simply "קוסמטיקה".
+    if category == "טיפולי קוסמטיקה":
+        return [t for t in TREATMENTS if (t.get("class_name") or "").strip() in {"קוסמטיקה", "טיפולי קוסמטיקה"}]
+    return []
+
+
+def _service_category_catalog_lines(category: str) -> List[str]:
+    treatments = _treatments_for_service_category(category)
+    if not treatments:
+        return []
+
+    grouped: Dict[str, List[str]] = {}
+    for treatment in treatments:
+        subcategory = (treatment.get("category") or "טיפולים").strip() or "טיפולים"
+        name = (treatment.get("name") or "").strip()
+        if not name:
+            continue
+        grouped.setdefault(subcategory, [])
+        if name not in grouped[subcategory]:
+            grouped[subcategory].append(name)
+
+    if not grouped:
+        return []
+
+    lines = []
+    for subcategory, names in grouped.items():
+        if subcategory == "טיפולים":
+            lines.extend(f"- {name}" for name in names)
+        else:
+            lines.append(f"**{subcategory}**")
+            lines.extend(f"- {name}" for name in names)
+    return lines
+
+
+def find_service_category(message: str) -> Optional[str]:
+    text = _normalize_query_text(message)
+    if not text:
+        return None
+
+    for category in SERVICE_CATEGORY_ORDER:
+        if category in text:
+            return category
+
+    for category, aliases in SERVICE_CATEGORY_ALIASES.items():
+        if any(alias in text for alias in aliases):
             return category
 
     return None
 
 
-def local_general_answer(message: str, selected: Optional[Dict] = None) -> str:
+def is_service_category_detail_question(message: str) -> bool:
+    text = _normalize_query_text(message)
+    if not text:
+        return False
+    detail_terms = ("מה", "איזה", "אילו", "יש", "כולל", "פירוט", "רשימה", "סוגי", "סוגים", "שירותים")
+    return any(term in text for term in detail_terms)
+
+
+def service_category_answer(category: str) -> str:
+    lines = [f"בטח. **{category}** היא קטגוריית טיפולים באתר MeDay."]
+    description = SERVICE_CATEGORY_DESCRIPTIONS.get(category)
+    if description:
+        lines.append(description)
+
+    detail_lines = _service_category_catalog_lines(category)
+    if detail_lines:
+        lines.append("")
+        lines.append("הטיפולים שמופיעים תחת הקטגוריה:")
+        lines.extend(detail_lines)
+
+    lines.append("אם תרצי התאמה אישית, כתבי לי מה המטרה שלך או מה מפריע לך.")
+    return "\n".join(lines)
+
+
+def treatment_detail_answer(treatment: Dict) -> str:
+    lines = [f"בטח. **{treatment.get('name', 'הטיפול')}** הוא טיפול בקטגוריית {treatment.get('class_name') or 'MeDay'}."]
+
+    if treatment.get("category"):
+        lines.append(f"- תחום: {_public_treatment_text(treatment['category'])}")
+    if treatment.get("aftercare"):
+        lines.append(f"- מה זה: {_public_treatment_text(treatment['aftercare'])}")
+    if treatment.get("suitable_for_all_skins"):
+        lines.append(f"- למי מתאים: {_public_treatment_text(treatment['suitable_for_all_skins'])}")
+    if treatment.get("results_timing"):
+        lines.append(f"- תוצאות צפויות: {_public_treatment_text(treatment['results_timing'])}")
+    if treatment.get("recommended_frequency"):
+        lines.append(f"- מספר טיפולים מומלץ: {_public_treatment_text(treatment['recommended_frequency'])}")
+    if treatment.get("pregnancy_breastfeeding"):
+        lines.append(f"- הריון והנקה: {_public_treatment_text(treatment['pregnancy_breastfeeding'])}")
+    if treatment.get("medical_limitations"):
+        lines.append(f"- לא מתאים במקרים של: {_public_treatment_text(treatment['medical_limitations'])}")
+
+    lines.append("אם תרצי התאמה אישית, כתבי לי מה המטרה שלך ומה מצב העור או הציפורניים.")
+    return "\n".join(lines)
+
+
+def local_treatment_info_answer(message: str) -> Optional[str]:
+    if is_treatment_catalog_question(message):
+        return None
+
+    matches = find_matching_treatments(message)
+    if not matches:
+        return None
+
+    if len(matches) == 1:
+        return treatment_detail_answer(matches[0])
+
+    lines = ["מצאתי כמה טיפולים שיכולים להיות קשורים למה ששאלת:"]
+    for treatment in matches:
+        lines.append(f"- {_format_treatment_list_item(treatment)}")
+    lines.append("אם תרצי, כתבי שם של טיפול אחד או תארי לי את המטרה שלך ואדייק לך את התשובה.")
+    return "\n".join(lines)
+
+
+def is_clinic_related_question(message: str, selected: Optional[Dict] = None) -> bool:
+    text = re.sub(r"\s+", " ", (message or "").strip().lower())
+    if not text:
+        return True
+
+    if is_business_info_question(message) or is_review_question(message) or is_treatment_catalog_question(message):
+        return True
+
+    setting, _, _ = _find_guardrail_setting(message, [])
+    if setting:
+        return True
+
+    if find_matching_treatments(message):
+        return True
+
+    if detect_category_locally(message):
+        return True
+
+    selected_followup_terms = (
+        "הטיפול",
+        "הזה",
+        "אותו",
+        "אותה",
+        "כואב",
+        "כאב",
+        "כמה זמן",
+        "משך",
+        "תוצאות",
+        "תוצאה",
+        "החלמה",
+        "לפני",
+        "אחרי",
+        "תופעות",
+        "סיכון",
+        "סיכונים",
+        "מתאים",
+        "מתאימה",
+        "מותר",
+        "אסור",
+        "הריון",
+        "הנקה",
+        "תדירות",
+        "עובד",
+        "עובדת",
+    )
+    if selected and any(term in text for term in selected_followup_terms):
+        return True
+
+    clinic_terms = (
+        "meday",
+        "me day",
+        "מידיי",
+        "מי דיי",
+        "קליניקה",
+        "קלינקה",
+        "מרכז יופי",
+        "טיפול",
+        "טיפולים",
+        "קוסמט",
+        "אסתט",
+        "עור",
+        "פנים",
+        "אקנה",
+        "פיגמנט",
+        "כתמים",
+        "קמטים",
+        "נקבוביות",
+        "שחורים",
+        "שומני",
+        "יבש",
+        "יובש",
+        "ipl",
+        "לייזר",
+        "מיקרונידלינג",
+        "פילינג",
+        "חומצה",
+        "שיער",
+        "הסרת שיער",
+        "ציפורניים",
+        "מניקור",
+        "פדיקור",
+        "גבות",
+        "ריסים",
+        "שעווה",
+        "עיסוי",
+        "מילוי",
+        "בוטוקס",
+        "היאלורונית",
+    )
+    if any(term in text for term in clinic_terms):
+        return True
+
+    for treatment in TREATMENTS:
+        for key in ("name", "class_name", "category", "keywords"):
+            if _contains_catalog_value(text, treatment.get(key, "")):
+                return True
+
+    return False
+
+
+def is_assistant_help_question(message: str) -> bool:
+    text = re.sub(r"\s+", " ", (message or "").strip().lower())
+    if not text:
+        return False
+
+    direct_phrases = (
+        "את יכולה לענות",
+        "אתה יכול לענות",
+        "אפשר שתעני",
+        "אפשר שתענה",
+        "יש אפשרות שתעני",
+        "יש אפשרות שתענה",
+        "תעני לי על השאלות",
+        "תענה לי על השאלות",
+        "תעני על השאלות",
+        "תענה על השאלות",
+        "איזה שאלות אפשר",
+        "אילו שאלות אפשר",
+        "מה אפשר לשאול",
+        "על מה אפשר לשאול",
+        "איך להשתמש בצאט",
+        "איך להשתמש בצ'אט",
+        "מה את יודעת",
+        "מה אתה יודע",
+        "במה את יכולה לעזור",
+        "במה אתה יכול לעזור",
+    )
+    if any(phrase in text for phrase in direct_phrases):
+        return True
+
+    return ("שאלות" in text or "שאלה" in text) and any(
+        term in text for term in ("לענות", "תעני", "תענה", "אפשר", "יכולה", "יכול", "עוזר", "עזרה")
+    )
+
+
+def local_assistant_help_answer(message: str = "") -> Optional[str]:
+    if not is_assistant_help_question(message):
+        return None
+
+    return (
+        "כן, בטח. אפשר לשאול אותי שאלות על MeDay ואני אענה לפי המידע שיש באתר ובמערכת.\n"
+        "אפשר לשאול למשל:\n"
+        "- מה סוגי הטיפולים?\n"
+        "- איזה טיפולי גוף יש?\n"
+        "- מה יש במניקור ופדיקור?\n"
+        "- איפה הקליניקה ומה שעות הפתיחה?\n"
+        "- איזה טיפול יכול להתאים לאקנה / כתמים / ציפורניים / עיסוי?\n"
+        "אם השאלה לא קשורה לקליניקה, אוכל לענות בצורה חכמה יותר כשמחובר מודל AI חיצוני כמו OpenAI."
+    )
+
+
+def local_unrelated_answer(message: str = "") -> str:
+    text = re.sub(r"\s+", " ", (message or "").strip().lower())
+    clean = text.strip(" ?!.،,")
+
+    greeting_terms = {
+        "היי",
+        "הי",
+        "שלום",
+        "אהלן",
+        "הלן",
+        "בוקר טוב",
+        "צהריים טובים",
+        "ערב טוב",
+        "לילה טוב",
+    }
+    if clean in greeting_terms or clean.startswith(("היי ", "הי ", "שלום ", "אהלן ")):
+        return (
+            "היי, שמחה שאת כאן. איך אפשר לעזור? "
+            "אפשר לשאול אותי על טיפולי MeDay, התאמה אישית, כתובת, שעות פתיחה או יצירת קשר."
+        )
+
+    if any(term in text for term in ("מה נשמע", "מה קורה", "איך את", "הכל טוב")):
+        return (
+            "הכל טוב, תודה. אני כאן כדי לעזור לך עם מידע על MeDay או לכוון אותך לטיפול מתאים. "
+            "מה תרצי לבדוק?"
+        )
+
+    if any(term in text for term in ("תודה", "תודה רבה", "מעולה", "סבבה")):
+        return "בשמחה. אם תרצי לבדוק טיפול, שעות פתיחה, כתובת או יצירת קשר - אני כאן."
+
+    capability_reply = local_assistant_help_answer(message)
+    if capability_reply:
+        return capability_reply
+
+    if any(term in text for term in ("לא שאלה", "לא ענית", "לא עונה", "לא הגיוני", "לא קשור", "סתם כתבתי")):
+        return (
+            "צודקת, סליחה. הודעה כמו זו לא צריכה לקבל תשובה כאילו שאלת על טיפול. "
+            "אני אמורה לענות טבעי לשיחה רגילה, ועל שאלות של הקליניקה לענות לפי המידע של MeDay בלבד."
+        )
+
+    return (
+        "אני יכולה לעזור בעיקר עם מידע על MeDay: סוגי טיפולים, פירוט טיפולים, התאמה אישית, כתובת, שעות פתיחה ויצירת קשר. "
+        "אם זו שאלה כללית שלא קשורה לקליניקה, אענה בצורה חכמה יותר כשמחובר מודל AI חיצוני כמו OpenAI."
+    )
+
+
+def external_general_answer(message: str, history: List[Dict]) -> str:
+    if not llm_is_available():
+        return local_unrelated_answer(message)
+
+    system = (
+        "את עוזרת כללית בתוך אתר של MeDay. עני בעברית קצרה, ברורה ונעימה.\n"
+        "לשאלות כלליות שאינן קשורות לקליניקה, עני כמו צ'אט חכם רגיל.\n"
+        "אם המשתמשת שואלת על MeDay, טיפולים, מחירים, תורים, אבחון רפואי, צוות, כתובת או שעות - "
+        "אל תמציאי פרטים. כתבי שהמידע הרשמי של הקליניקה נענה רק מתוך מערכת MeDay.\n"
+        "אין לך חיפוש אינטרנט חי מתוך האתר, לכן אל תציגי מידע עדכני כאילו בדקת אותו עכשיו."
+    )
+    messages = [{"role": "system", "content": system}]
+    for msg in history[-4:]:
+        role = "user" if msg.get("from") == "user" else "assistant"
+        messages.append({"role": role, "content": msg.get("text", "")})
+    messages.append({"role": "user", "content": message})
+
+    try:
+        return run_llm_chat(
+            messages=messages,
+            temperature=0.5,
+            max_tokens=300,
+        )
+    except Exception as e:
+        print(f"[External general answer error] {e}")
+        return local_unrelated_answer(message)
+
+
+def _clinic_ai_context(selected: Optional[Dict] = None) -> str:
+    settings = _public_business_settings()
+    lines = [
+        "מידע רשמי על MeDay:",
+        f"- שם העסק: {settings.get('business_name') or DEFAULT_SYSTEM_SETTINGS['business_name']}",
+        f"- כתובת: {settings.get('address') or DEFAULT_SYSTEM_SETTINGS['address']}",
+        f"- שעות פתיחה: {settings.get('opening_hours') or DEFAULT_SYSTEM_SETTINGS['opening_hours']}",
+        f"- טלפון: {settings.get('phone') or DEFAULT_SYSTEM_SETTINGS['phone']}",
+        f"- וואטסאפ: {settings.get('whatsapp') or DEFAULT_SYSTEM_SETTINGS['whatsapp']}",
+        f"- מייל: {settings.get('email') or DEFAULT_SYSTEM_SETTINGS['email']}",
+        "",
+        "קטגוריות השירות באתר:",
+    ]
+    for category in SERVICE_CATEGORY_ORDER:
+        description = SERVICE_CATEGORY_DESCRIPTIONS.get(category, "")
+        lines.append(f"- {category}: {description}")
+
+    if selected:
+        faq_text = "\n".join(
+            [f"ש: {q}\nת: {a}" for q, a in selected.get("faq", {}).items()]
+        )
+        lines.extend([
+            "",
+            "המשתמשת נמצאת בעמוד טיפול ספציפי:",
+            f"- שם: {selected.get('name', '')}",
+            f"- קטגוריה: {selected.get('class_name', '')} / {selected.get('category', '')}",
+            f"- תיאור/הנחיות: {selected.get('aftercare', '')}",
+            f"- למי מתאים: {selected.get('suitable_for_all_skins', '')}",
+            f"- תוצאות: {selected.get('results_timing', '')}",
+            f"- תדירות מומלצת: {selected.get('recommended_frequency', '')}",
+            f"- מגבלות רפואיות: {selected.get('medical_limitations', '')}",
+            f"- הריון והנקה: {selected.get('pregnancy_breastfeeding', '')}",
+            f"- שאלות נפוצות: {faq_text or 'אין מידע נוסף.'}",
+        ])
+    else:
+        lines.extend([
+            "",
+            "קטלוג טיפולים ושירותים שמופיעים במערכת:",
+            *(_full_treatment_catalog_lines()[:220]),
+        ])
+
+    return "\n".join(str(line) for line in lines if line is not None)
+
+
+def smart_ai_answer(message: str, history: List[Dict], selected: Optional[Dict] = None) -> str:
+    if not llm_is_available():
+        if is_clinic_related_question(message, selected):
+            return local_general_answer(message, selected, history)
+        return local_unrelated_answer(message)
+
+    system = (
+        "את צ'אטבוט חכם ונעים באתר MeDay. עני בעברית טבעית, קצרה וברורה.\n"
+        "התפקיד שלך הוא לענות טוב, לא לדחוף שאלון התאמה בכל שאלה.\n\n"
+        "כללים חשובים:\n"
+        "1. אם השאלה קשורה ל-MeDay, לטיפולים, כתובת, שעות, קשר, מחירים, תורים או צוות - "
+        "עני רק לפי ההקשר הרשמי שמופיע למטה. אל תמציאי פרטים.\n"
+        "2. אם חסר מידע רשמי, אמרי שאין לך מידע מדויק במערכת והפני לטלפון/וואטסאפ.\n"
+        "3. אם השאלה כללית ולא קשורה לקליניקה, אפשר לענות כמו צ'אט כללי רגיל, בקצרה ובצורה הגיונית.\n"
+        "4. אם המשתמשת רק שואלת מה אפשר לשאול או האם את יכולה לענות - עני בהסבר פשוט, לא כ'שאלה לא רלוונטית'.\n"
+        "5. אל תאבחני מצב רפואי ואל תבטיחי תוצאה רפואית. אפשר להציע ייעוץ עם הצוות או רופא במקרה רפואי.\n"
+        "6. כששואלים על סוגי טיפולים, רשמי את הקטגוריות והשירותים מההקשר, לא ניסוח כללי.\n\n"
+        + _build_blocked_topics_prompt(CHATBOT_SETTINGS)
+        + "\n\n"
+        + _clinic_ai_context(selected)
+    )
+
+    messages = [{"role": "system", "content": system}]
+    for msg in history[-6:]:
+        role = "user" if msg.get("from") == "user" else "assistant"
+        text = (msg.get("text") or "").strip()
+        if text:
+            messages.append({"role": role, "content": text})
+    messages.append({"role": "user", "content": message})
+
+    try:
+        return run_llm_chat(
+            messages=messages,
+            temperature=0.35,
+            max_tokens=520,
+        )
+    except Exception as e:
+        print(f"[Smart AI answer error] {e}")
+        if is_clinic_related_question(message, selected):
+            return local_general_answer(message, selected, history)
+        return local_unrelated_answer(message)
+
+
+def local_guardrail_answer(
+    message: str,
+    history: Optional[List[Dict]] = None,
+    selected: Optional[Dict] = None,
+) -> Optional[str]:
+    setting, matched_message, from_followup = _find_guardrail_setting(message, history)
+    if not setting:
+        return None
+
+    apology = "נכון, סליחה - " if from_followup else ""
+    if setting.get("redirect_message"):
+        return apology + setting["redirect_message"]
+
+    topic = setting.get("topic", "")
+    contact = _public_contact_line()
+
+    if topic == "מחירים ועלויות":
+        subject = _extract_price_subject(matched_message) or (selected.get("name") if selected else "הטיפול")
+        return (
+            f"{apology}אין לי מחיר מדויק במערכת עבור {subject}. "
+            "המחיר יכול להשתנות לפי סוג הטיפול וההתאמה האישית, ולכן עדיף לוודא מול הצוות לפני קביעת תור. "
+            f"{contact}"
+        )
+
+    if topic == "זמינות תורים":
+        return (
+            f"{apology}אין לי גישה ליומן התורים בזמן אמת, ולכן אני לא יכולה לאשר זמינות מכאן. "
+            f"{contact}"
+        )
+
+    if topic == "פרטי עובדות":
+        return (
+            f"{apology}אין לי מידע עדכני על שיוך מטפלות לטיפולים ספציפיים. "
+            f"{contact}"
+        )
+
+    if topic == "מדיניות ביטולים":
+        return (
+            f"{apology}לשינוי או ביטול תור כדאי לדבר ישירות עם הצוות כדי לוודא את המדיניות והאפשרויות שלך. "
+            f"{contact}"
+        )
+
+    if topic == "אבחון רפואי":
+        return (
+            f"{apology}אני יכולה לתת מידע כללי על טיפולי היופי שלנו, אבל לא לאבחן מצב רפואי. "
+            "במקרה של כאב, תגובה חריגה או חשש רפואי חשוב לפנות לרופא/ה. "
+            f"{contact}"
+        )
+
+    if topic == "מתחרים":
+        return (
+            f"{apology}אני יכולה לעזור עם מידע על השירותים של MeDay, אבל לא להשוות למקומות אחרים בלי מידע בדוק. "
+            f"{contact}"
+        )
+
+    return f"{apology}לגבי {topic}, הכי נכון לדבר ישירות עם הצוות. {contact}"
+
+
+def local_general_answer(
+    message: str,
+    selected: Optional[Dict] = None,
+    history: Optional[List[Dict]] = None,
+) -> str:
+    catalog_reply = local_treatment_catalog_answer(message)
+    if catalog_reply:
+        return catalog_reply
+
+    treatment_reply = local_treatment_info_answer(message)
+    if treatment_reply:
+        return treatment_reply
+
     if selected:
         return (
             f"בטח. לגבי {selected['name']}: "
@@ -825,12 +2043,64 @@ def local_general_answer(message: str, selected: Optional[Dict] = None) -> str:
             "אם תרצי, כתבי לי מה חשוב לך לדעת ואכוון אותך."
         )
 
-    categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
     return (
         "אני כאן כדי לעזור לבחור טיפול מתאים או לענות על שאלה כללית. "
-        "אפשר לבחור קטגוריה כמו " + ", ".join(categories[:5]) + ", "
+        "אפשר לבחור קטגוריה כמו " + ", ".join(SERVICE_CATEGORY_ORDER[:5]) + ", "
         "או לכתוב לי מה מפריע לך ומה המטרה שלך."
     )
+
+
+def is_treatment_catalog_question(message: str) -> bool:
+    text = re.sub(r"\s+", " ", (message or "").strip().lower())
+    if not text:
+        return False
+
+    catalog_phrases = (
+        "סוגי הטיפולים",
+        "סוגי טיפולים",
+        "סוגי טיפול",
+        "איזה טיפולים",
+        "אילו טיפולים",
+        "מה הטיפולים",
+        "מה סוגי הטיפולים",
+        "מה השירותים",
+        "איזה שירותים",
+        "אילו שירותים",
+        "מה יש לכם",
+        "מה יש בקליניקה",
+        "מה אתם מציעים",
+        "מה אפשר לעשות אצלכם",
+        "כל הטיפולים",
+        "כל השירותים",
+        "רשימת הטיפולים",
+        "רשימת שירותים",
+        "תפריט טיפולים",
+        "טיפולים יש",
+        "השירותים שלכם",
+    )
+    if any(phrase in text for phrase in catalog_phrases):
+        return True
+
+    return ("טיפולים" in text or "שירותים" in text) and any(
+        term in text for term in ("מה", "איזה", "אילו", "סוג", "סוגים", "רשימה")
+    )
+
+
+def treatment_catalog_answer() -> str:
+    lines = ["בטח. אלו **סוגי הטיפולים** שמופיעים באתר MeDay:"]
+    lines.extend(f"- {category}" for category in SERVICE_CATEGORY_ORDER)
+    lines.append("אם תרצי פירוט, כתבי למשל: \"איזה טיפולי גוף יש?\" או \"מה יש במניקור ופדיקור?\".")
+    return "\n".join(lines)
+
+
+def local_treatment_catalog_answer(message: str) -> Optional[str]:
+    category = find_service_category(message)
+    if category and is_service_category_detail_question(message):
+        return service_category_answer(category)
+
+    if is_treatment_catalog_question(message):
+        return treatment_catalog_answer()
+    return None
 
 
 def local_guided_conversation(profile: Dict, next_field_info: Optional[Dict]) -> Dict:
@@ -865,6 +2135,47 @@ def local_recommendation(profile: Dict, category: str) -> Dict:
     return {"reply": reply, "suggested_treatments": suggested}
 
 
+def quick_local_chat_answer(
+    message: str,
+    history: Optional[List[Dict]] = None,
+    selected: Optional[Dict] = None,
+) -> Optional[str]:
+    text = re.sub(r"\s+", " ", (message or "").strip().lower())
+    clean = text.strip(" ?!.،,")
+    if not clean:
+        return None
+
+    if clean == "שאלה כללית":
+        return "בשמחה. כתבי לי את השאלה שלך, ואענה לפי המידע של MeDay כשזה קשור לקליניקה."
+
+    if clean in {"היי", "הי", "שלום", "אהלן", "הלן"}:
+        return "היי, שמחה שאת כאן. איך אפשר לעזור?"
+
+    help_reply = local_assistant_help_answer(message)
+    if help_reply:
+        return help_reply
+
+    if any(term in text for term in ("תודה", "תודה רבה", "מעולה", "סבבה")):
+        return "בשמחה. אני כאן אם תרצי לבדוק טיפול, כתובת, שעות פתיחה או יצירת קשר."
+
+    catalog_reply = local_treatment_catalog_answer(message)
+    if catalog_reply:
+        return catalog_reply
+
+    if is_review_question(message):
+        return local_review_answer()
+
+    guardrail_reply = local_guardrail_answer(message, history, selected)
+    if guardrail_reply:
+        return guardrail_reply
+
+    treatment_reply = local_treatment_info_answer(message)
+    if treatment_reply:
+        return treatment_reply
+
+    return None
+
+
 # ------------------------------------------------------------
 # LLM helpers
 # ------------------------------------------------------------
@@ -874,11 +2185,17 @@ def classify_intent(message: str, history: List[Dict]) -> Dict:
     Call 1 — Intent Router.
     Returns {"intent": "general"|"recommendation", "category": str|None}
     """
-    if not groq_is_configured():
-        category = detect_category_locally(message)
+    local_category = detect_category_locally(message)
+    if local_category:
         return {
-            "intent": "recommendation" if category else "general",
-            "category": category,
+            "intent": "recommendation" if is_recommendation_request(message) else "general",
+            "category": local_category,
+        }
+
+    if not llm_is_available():
+        return {
+            "intent": "general",
+            "category": None,
         }
 
     categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
@@ -894,6 +2211,9 @@ Classify the user's latest message as:
 - "general": general question, logistics (hours/prices/location), small talk, question about a specific treatment they already know about
 - "recommendation": user has a beauty/skin/hair problem to solve, wants treatment advice, mentions a concern or symptom, asks "מה מומלץ"
 
+Do NOT classify a message as recommendation just because it mentions a category.
+Questions like "מה יש בטיפולי גוף", "מה סוגי הטיפולים", "מה זה מניקור", or "איזה שירותים יש" are general.
+
 Available treatment categories: {', '.join(categories)}
 
 If intent is "recommendation", also pick the single most relevant category from the list above. If unclear, set category to null.
@@ -902,8 +2222,7 @@ Respond ONLY with valid JSON on one line, no explanation:
 {{"intent": "general", "category": null}}"""
 
     try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        content = run_llm_chat(
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": f"Conversation:\n{history_text}Latest message: {message}"},
@@ -912,7 +2231,7 @@ Respond ONLY with valid JSON on one line, no explanation:
             response_format={"type": "json_object"},
             max_tokens=60,
         )
-        result = json.loads(resp.choices[0].message.content)
+        result = json.loads(content)
         return {
             "intent": result.get("intent", "general"),
             "category": result.get("category"),
@@ -927,7 +2246,11 @@ def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) 
     Call 2A — Pure conversation, no flow logic.
     Handles general questions and treatment-specific questions.
     """
-    if not groq_is_configured():
+    local_reply = local_treatment_catalog_answer(message) or local_treatment_info_answer(message)
+    if local_reply:
+        return local_reply
+
+    if not llm_is_available():
         return local_general_answer(message, selected)
 
     if selected:
@@ -948,11 +2271,10 @@ def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) 
             f"שאלות ותשובות נפוצות:\n{faq_text or 'אין.'}"
         )
     else:
-        categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
-        context = f"קטגוריות טיפולים בקליניקה: {', '.join(categories)}"
+        context = "רשימת הטיפולים והשירותים בקליניקה:\n" + "\n".join(_full_treatment_catalog_lines())
 
     system = (
-        "אתה עוזרת AI של MeDay - קליניקת יופי וטיפולים קוסמטיים.\n"
+        "את עוזרת AI של MeDay - קליניקת יופי וטיפולים קוסמטיים.\n"
         "ענה תמיד בעברית בצורה חמה, מקצועית ומזמינה.\n"
         "בסס את תשובותיך אך ורק על המידע שנמסר לך להלן. אל תמציאי מידע שאינו בהקשר.\n\n"
         + _build_blocked_topics_prompt(CHATBOT_SETTINGS)
@@ -966,12 +2288,10 @@ def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) 
     messages.append({"role": "user", "content": message})
 
     try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        return run_llm_chat(
             messages=messages,
             temperature=0.7,
         )
-        return resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"[General answer error] {e}")
         return local_general_answer(message, selected)
@@ -995,7 +2315,7 @@ def guided_conversation(
     ready_to_recommend: True when user explicitly asks for recommendations early,
       or when the LLM determines enough data has been collected.
     """
-    if not groq_is_configured():
+    if not llm_is_available():
         return local_guided_conversation(profile, next_field_info)
 
     known = "\n".join([f"- {k}: {v}" for k, v in profile.items()]) or "עדיין לא נאסף מידע"
@@ -1040,14 +2360,13 @@ def guided_conversation(
     messages.append({"role": "user", "content": message})
 
     try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        content = run_llm_chat(
             messages=messages,
             temperature=0.7,
             response_format={"type": "json_object"},
             max_tokens=400,
         )
-        result = json.loads(resp.choices[0].message.content)
+        result = json.loads(content)
         return {
             "reply": result.get("reply", ""),
             "profile_update": result.get("profile_update", {}),
@@ -1070,7 +2389,7 @@ def sub_discovery(
     Sub-discovery call — helps the client figure out an answer they don't know.
     When resolved, the reply contains [RESOLVED: value] which the backend strips.
     """
-    if not groq_is_configured():
+    if not llm_is_available():
         return "אין בעיה. נסי לתאר לי במילים שלך מה את מרגישה או מה המטרה שלך, ואני אמשיך לכוון אותך."
 
     fields = get_fields_for_category(category)
@@ -1095,12 +2414,10 @@ def sub_discovery(
     messages.append({"role": "user", "content": message})
 
     try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        return run_llm_chat(
             messages=messages,
             temperature=0.7,
         )
-        return resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"[Sub-discovery error] {e}")
         return f"מצטערת, יש לי תקלה. נסי לתאר את ה-{field} שלך בכמה מילים."
@@ -1111,7 +2428,7 @@ def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> D
     Final recommendation call — filters treatments to category, picks best matches.
     Returns {"reply": str, "suggested_treatments": list}
     """
-    if not groq_is_configured():
+    if not llm_is_available():
         return local_recommendation(profile, category)
 
     category_treatments = [t for t in TREATMENTS if t.get("class_name") == category]
@@ -1144,12 +2461,10 @@ def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> D
     messages.append({"role": "user", "content": "על סמך כל מה שסיפרתי, מה הטיפולים המומלצים לי?"})
 
     try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+        reply = run_llm_chat(
             messages=messages,
             temperature=0.7,
         )
-        reply = resp.choices[0].message.content.strip()
     except Exception as e:
         print(f"[Recommendation error] {e}")
         return local_recommendation(profile, category)
@@ -1212,8 +2527,33 @@ def chat(req: ChatRequest):
 
     # ── 0. Treatment-page context (existing behavior, unchanged) ──
     selected = TREATMENT_MAP.get(req.selected_treatment_id) if req.selected_treatment_id else None
+    if is_business_info_question(req.message):
+        return ChatResponse(
+            reply=local_business_info_answer(req.message),
+            mode="idle",
+            profile=profile,
+            category=None,
+        )
+
+    quick_reply = quick_local_chat_answer(req.message, history, selected)
+    if quick_reply:
+        return ChatResponse(
+            reply=quick_reply,
+            mode="idle",
+            profile=profile,
+            category=category,
+        )
+
+    if mode == "idle" and not category and not is_recommendation_request(req.message):
+        return ChatResponse(
+            reply=smart_ai_answer(req.message, history, selected),
+            mode="idle",
+            profile=profile,
+            category=None,
+        )
+
     if selected:
-        reply = general_answer(req.message, history, selected)
+        reply = smart_ai_answer(req.message, history, selected)
         return ChatResponse(reply=reply, mode="idle", profile=profile)
 
     # ── 1. Chip tap: real answer (no LLM needed) ──────────────────
@@ -1253,7 +2593,7 @@ def chat(req: ChatRequest):
             **question_progress(category, next_field["field"]),
         )
 
-    # ── 2. Chip tap: "I don't know" → sub-discovery ───────────────
+    # ── 4. Chip tap: "I don't know" → sub-discovery ───────────────
     if req.chip_value == "dont_know" and req.chip_field:
         reply = sub_discovery(req.message, req.chip_field, category, history)
         resolved = re.search(r'\[RESOLVED:\s*(.+?)\]', reply)
@@ -1290,7 +2630,7 @@ def chat(req: ChatRequest):
             **question_progress(category, req.chip_field),
         )
 
-    # ── 3. Continuing sub-discovery with free text ────────────────
+    # ── 5. Continuing sub-discovery with free text ────────────────
     if mode == "sub_discovery" and current_field:
         reply = sub_discovery(req.message, current_field, category, history)
         resolved = re.search(r'\[RESOLVED:\s*(.+?)\]', reply)
@@ -1327,19 +2667,19 @@ def chat(req: ChatRequest):
             **question_progress(category, current_field),
         )
 
-    # ── 4. Intent classification (only when category not yet detected) ──
+    # ── 6. Intent classification (only when category not yet detected) ──
     if not category:
         classification = classify_intent(req.message, history)
         if classification["intent"] == "recommendation" and classification.get("category"):
             category = classification["category"]
             mode = "questioning"
 
-    # ── 5. General answer (no recommendation intent) ──────────────
+    # ── 7. General answer (no recommendation intent) ──────────────
     if mode == "idle" or not category:
-        reply = general_answer(req.message, history, None)
+        reply = smart_ai_answer(req.message, history, None)
         return ChatResponse(reply=reply, mode="idle", profile=profile, category=category)
 
-    # ── 6. Guided conversation (free text in recommendation flow) ──
+    # ── 8. Guided conversation (free text in recommendation flow) ──
     next_field = get_next_field(category, profile)
     result = guided_conversation(req.message, history, profile, category, next_field)
 
@@ -2590,7 +3930,13 @@ def get_me(current_user: Optional[dict] = Depends(get_current_user)):
 def _read_system_settings(conn: sqlite3.Connection) -> dict:
     settings = dict(DEFAULT_SYSTEM_SETTINGS)
     rows = conn.execute("SELECT key, value FROM system_settings").fetchall()
-    settings.update({row["key"]: row["value"] for row in rows})
+    for row in rows:
+        value = str(row["value"] or "").strip()
+        if not value:
+            continue
+        if row["key"] == "email" and value.endswith("@meday.local"):
+            continue
+        settings[row["key"]] = value
     return settings
 
 

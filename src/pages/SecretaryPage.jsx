@@ -1,6 +1,6 @@
 import { createElement, useState, useEffect, useRef } from "react";
 import { addContactInquiryFeedback, CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
-import { fetchTreatments, fetchAppointments, createAppointment, deleteAppointment, updateAppointment } from "../api/medayApi";
+import { fetchAppointments, createAppointment, deleteAppointment, updateAppointment } from "../api/medayApi";
 import {
   ChevronLeft, ChevronRight, Trash2, Plus, Sparkles, User, Phone, CalendarDays, Clock, X, LayoutGrid, MessageCircle, Settings, CheckCircle2, Home,
 } from "lucide-react";
@@ -983,9 +983,7 @@ export default function SecretaryPage() {
   const [selectedTreatmentSubcategory, setSelectedTreatmentSubcategory] = useState("");
 
   useEffect(() => {
-    fetchTreatments()
-      .then((data) => setTreatments(mergeSecretaryTreatments(data)))
-      .catch(console.error);
+    setTreatments(mergeSecretaryTreatments([]));
     load();
   }, []);
 
