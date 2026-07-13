@@ -12,9 +12,7 @@ import {
   UserRound,
 } from "lucide-react";
 import ClientProfile from "../components/ClientProfile";
-import RecommendationWidget from "../components/RecommendationWidget";
 import { useAuth } from "../context/useAuth";
-import { getChatSessions } from "../api/medayApi";
 
 function ClientActionButton({ children, icon: Icon, variant = "secondary", ...props }) {
   const className =
@@ -152,8 +150,6 @@ export default function ClientArea() {
   const [isEditOpen, setIsEditOpen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [appointments, setAppointments] = useState([]);
-  const [chatSessions, setChatSessions] = useState([]);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -177,14 +173,6 @@ export default function ClientArea() {
         .finally(() => {
           if (active) setProfileLoading(false);
         });
-    }
-
-    if (user?.isGoogle) {
-      setSessionsLoading(true);
-      getChatSessions()
-        .then(setChatSessions)
-        .catch(() => {})
-        .finally(() => setSessionsLoading(false));
     }
 
     return () => {
@@ -342,15 +330,6 @@ export default function ClientArea() {
           </div>
         ) : null}
 
-        {user?.isGoogle && (
-          <ChatHistoryPanel sessions={chatSessions} loading={sessionsLoading} />
-        )}
-
-        {user?.isGoogle && (
-          <div className="rounded-[2rem] border border-white/75 bg-white/85 p-8 shadow-2xl shadow-[#9B5C38]/10">
-            <RecommendationWidget limit={4} />
-          </div>
-        )}
       </div>
     </section>
   );

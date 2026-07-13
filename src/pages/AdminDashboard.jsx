@@ -5,7 +5,7 @@ import CountUp from "react-countup";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, addContactInquiryFeedback, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
 import { JOB_APPLICATION_EVENT, JOB_APPLICATIONS_STORAGE_KEY, getJobApplications, updateJobApplicationStatus, addJobApplicationFeedback } from "../api/jobsApi";
-import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl, getChatbotConfig, listTreatmentsDB, createTreatmentDB, updateTreatmentDB, deleteTreatmentDB } from "../api/medayApi";
+import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl } from "../api/medayApi";
 import { getSettings, updateSettingsAccount, updateSettingsPassword, updateSystemSettings } from "../api/settingsApi";
 import {
   Activity,
@@ -107,7 +107,6 @@ const NAV_ITEMS = [
   { key: "appointments", icon: Calendar, label: "תורים" },
   { key: "inquiries", icon: MessageCircle, label: "פניות" },
   { key: "jobs", icon: Briefcase, label: "דרושים" },
-  { key: "treatments", icon: Sparkles, label: "טיפולים" },
   { key: "analytics", icon: Activity, label: "ניתוח" },
   { key: "settings", icon: Settings, label: "הגדרות" },
 ];
@@ -2427,27 +2426,6 @@ export default function AdminDashboard() {
               </Motion.div>
             ) : null}
 
-            {activeTab === "treatments" ? (
-              <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5">
-                <SectionCard
-                  icon={Sparkles}
-                  title="ניהול טיפולים"
-                  subtitle="הוסיפי, ערכי ומחקי טיפולים — שינויים נשמרים מיידית ומגיעים לצ׳אטבוט"
-                  className="col-span-1"
-                >
-                  <TreatmentsManagerPanel mainRef={mainRef} />
-                </SectionCard>
-                <KnowledgeBasePanel mainRef={mainRef} />
-                <SectionCard
-                  icon={MessageCircle}
-                  title="הגדרות הצ׳אטבוט לפי קטגוריה"
-                  subtitle="שאלות, עדיפויות ותנאי המלצה — עודכן מ-category_questions.xlsx"
-                  className="col-span-1"
-                >
-                  <ChatbotConfigPanel mainRef={mainRef} />
-                </SectionCard>
-              </Motion.div>
-            ) : null}
 
             {activeTab === "analytics" ? (
               <>
