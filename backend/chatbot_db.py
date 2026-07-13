@@ -33,7 +33,14 @@ def init_chatbot_db():
             duration_notes TEXT,
             aliases TEXT,
             canonical_id TEXT,
-            source TEXT
+            source TEXT,
+            preparation TEXT,
+            aftercare TEXT,
+            downtime TEXT,
+            pain_level TEXT,
+            sessions_recommended TEXT,
+            results_longevity TEXT,
+            what_to_expect TEXT
         )
     """)
     conn.execute("""
@@ -90,8 +97,24 @@ def init_chatbot_db():
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    _migrate_treatment_columns(conn)
     conn.commit()
     conn.close()
+
+
+# New attribute columns added after the initial schema shipped. ALTER them in
+# so an existing chatbot.db picks them up without a full rebuild.
+_TREATMENT_EXTRA_COLS = [
+    "preparation", "aftercare", "downtime", "pain_level",
+    "sessions_recommended", "results_longevity", "what_to_expect",
+]
+
+
+def _migrate_treatment_columns(conn: sqlite3.Connection):
+    existing = {r["name"] for r in conn.execute("PRAGMA table_info(cb_treatments)").fetchall()}
+    for col in _TREATMENT_EXTRA_COLS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE cb_treatments ADD COLUMN {col} TEXT")
 
 
 # ── Session management ────────────────────────────────────────────────────

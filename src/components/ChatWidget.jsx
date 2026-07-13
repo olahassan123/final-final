@@ -18,6 +18,12 @@ function getOrCreateSessionId() {
 const WELCOME_MSG = {
   from: "bot",
   text: "היי! אני העוזרת האישית של MeDay 💬\nאיך אני יכולה לעזור לך היום?",
+  suggestions: [
+    "מה הטיפולים שלכם?",
+    "עזרי לי לבחור טיפול פנים",
+    "עזרי לי לבחור עיסוי",
+    "שעות פתיחה ומיקום",
+  ],
 };
 
 export default function ChatWidget() {
@@ -72,6 +78,7 @@ export default function ChatWidget() {
         from: "bot",
         text: resp.reply,
         buttons: resp.buttons || null,
+        suggestions: resp.suggestions || null,
         offerContinue: resp.offer_continue || null,
         questionProgress: resp.question_progress || null,
         mode: resp.mode,
@@ -208,6 +215,26 @@ export default function ChatWidget() {
                         )}
                       >
                         {btn.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Soft suggestion chips — send free text, non-binding guidance */}
+                {m.from === "bot" && m.suggestions && idx === messages.length - 1 && (
+                  <div className="mt-2 flex flex-wrap gap-2 max-w-[88%]">
+                    {m.suggestions.map((text) => (
+                      <button
+                        key={text}
+                        onClick={() => handleTextSend(text)}
+                        disabled={loading}
+                        className={cn(
+                          "px-3 py-1.5 rounded-full text-xs font-medium border border-dashed transition-all",
+                          "border-gray-300 text-gray-500 bg-white hover:border-primary/50 hover:text-primary hover:bg-pink-50/60",
+                          loading && "opacity-40 cursor-not-allowed"
+                        )}
+                      >
+                        {text}
                       </button>
                     ))}
                   </div>
