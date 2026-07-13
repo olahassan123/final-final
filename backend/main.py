@@ -25,7 +25,7 @@ from google.auth.transport import requests as google_requests
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
-from chatbot_db import get_categories as get_branch_chatbot_categories, init_chatbot_db
+from chatbot_db import init_chatbot_db
 from chatbot_router import handle_message as handle_branch_chatbot_message
 from import_meday_data import import_all as import_branch_chatbot_data
 
@@ -302,10 +302,11 @@ app = FastAPI(title="MeDay Backend")
 
 
 def initialize_integrated_chatbot() -> None:
-    """Initialize Safa's chatbot data as part of the main MeDay backend."""
+    """Load Safa's branch Excel as the authoritative chatbot data source."""
     init_chatbot_db()
-    if not get_branch_chatbot_categories():
-        import_branch_chatbot_data()
+    # Reimport on every backend start so updates in the branch Excel are never
+    # hidden by an older local chatbot.db. Sessions are preserved by the importer.
+    import_branch_chatbot_data()
 
 
 try:
