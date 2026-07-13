@@ -70,35 +70,16 @@ export async function fetchAnalytics({ fromDate, toDate } = {}) {
   return res.json();
 }
 
-/**
- * Sends a chat message with full flow state to the AI assistant.
- *
- * @param {string}  message              - The text the user typed or the chip label
- * @param {object}  flowState            - { profile, mode, category, currentField }
- * @param {object}  chipData             - { chip_field, chip_value } when a chip was tapped
- * @param {string|null} selectedTreatmentId  - ID of the treatment page the user is viewing
- * @param {Array}   history              - Previous messages [{from, text}]
- */
-export async function sendChat(
-  message,
-  flowState = {},
-  chipData = {},
-  selectedTreatmentId = null,
-  history = []
-) {
+/** Sends a message or recommendation-flow button through the unified MeDay chatbot. */
+export async function sendChat(sessionId, message = null, buttonValue = null, questionId = null) {
   const res = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      session_id: sessionId,
       message,
-      history,
-      selected_treatment_id: selectedTreatmentId,
-      profile: flowState.profile ?? {},
-      mode: flowState.mode ?? "idle",
-      category: flowState.category ?? null,
-      current_field: flowState.currentField ?? null,
-      chip_field: chipData.chip_field ?? null,
-      chip_value: chipData.chip_value ?? null,
+      button_value: buttonValue,
+      question_id: questionId,
     }),
   });
 

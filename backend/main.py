@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 import pandas as pd
 from typing import Optional, List, Dict
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from groq import Groq
 import os
 import shutil
@@ -24,6 +24,10 @@ from google.auth.transport import requests as google_requests
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
+
+from chatbot_db import get_categories as get_branch_chatbot_categories, init_chatbot_db
+from chatbot_router import handle_message as handle_branch_chatbot_message
+from import_meday_data import import_all as import_branch_chatbot_data
 
 # ------------------------------------------------------------
 # Auth config
@@ -295,6 +299,20 @@ def verify_google_token(credential: str) -> dict:
 # App setup
 # ------------------------------------------------------------
 app = FastAPI(title="MeDay Backend")
+
+
+def initialize_integrated_chatbot() -> None:
+    """Initialize Safa's chatbot data as part of the main MeDay backend."""
+    init_chatbot_db()
+    if not get_branch_chatbot_categories():
+        import_branch_chatbot_data()
+
+
+try:
+    initialize_integrated_chatbot()
+except Exception as error:
+    # Keep the rest of MeDay available and surface a clear error when chat is used.
+    print(f"[Integrated chatbot initialization error] {error}")
 
 app.add_middleware(
     CORSMiddleware,
@@ -2483,7 +2501,11 @@ def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> D
 # ------------------------------------------------------------
 
 class ChatRequest(BaseModel):
-    message: str
+    message: Optional[str] = None
+    # Integrated chatbot session protocol used by ChatWidget.
+    session_id: Optional[str] = None
+    button_value: Optional[str] = None
+    question_id: Optional[str] = None
     history: Optional[List[Dict]] = None
     selected_treatment_id: Optional[str] = None
     # Flow state (persisted by frontend, sent each turn)
@@ -2499,13 +2521,16 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     reply: str
     mode: str
-    profile: Dict
+    profile: Dict = Field(default_factory=dict)
     category: Optional[str] = None
     current_field: Optional[str] = None
     quick_replies: Optional[List[str]] = None
     question_number: Optional[int] = None
     total_questions: Optional[int] = None
     suggested_treatments: Optional[List[Dict]] = None
+    buttons: Optional[List[Dict]] = None
+    offer_continue: Optional[Dict] = None
+    question_progress: Optional[Dict] = None
 
 
 class SkinAnalysisRequest(BaseModel):
@@ -2519,6 +2544,35 @@ class SkinAnalysisRequest(BaseModel):
 
 @app.post("/chat", response_model=ChatResponse)
 def chat(req: ChatRequest):
+    # Safa's session-based recommendation flow is the primary website chatbot.
+    # The legacy fields below remain supported for older callers/admin tools.
+    if req.session_id:
+        try:
+            result = handle_branch_chatbot_message(
+                session_id=req.session_id,
+                message=req.message,
+                button_value=req.button_value,
+                question_id=req.question_id,
+            )
+        except sqlite3.OperationalError:
+            initialize_integrated_chatbot()
+            result = handle_branch_chatbot_message(
+                session_id=req.session_id,
+                message=req.message,
+                button_value=req.button_value,
+                question_id=req.question_id,
+            )
+        return ChatResponse(
+            reply=result.get("reply", ""),
+            mode=result.get("mode", "general"),
+            buttons=result.get("buttons"),
+            offer_continue=result.get("offer_continue"),
+            question_progress=result.get("question_progress"),
+        )
+
+    if not req.message:
+        raise HTTPException(status_code=400, detail="message or session_id action is required")
+
     profile = dict(req.profile or {})
     mode = req.mode or "idle"
     category = req.category

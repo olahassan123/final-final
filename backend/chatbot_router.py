@@ -9,6 +9,7 @@ Routing for in_flow (recommendation) mode is still button-based and LLM-free.
 """
 import os
 import json
+import requests
 from typing import Optional
 from groq import Groq
 
@@ -29,10 +30,65 @@ from chatbot_flow import (
 
 _GROQ_KEY = os.getenv("GROQ_API_KEY", "")
 _groq = Groq(api_key=_GROQ_KEY) if _GROQ_KEY else None
+_OLLAMA_ENABLED = os.getenv("OLLAMA_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
+_OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
+_OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:4b-instruct").strip() or "qwen3:4b-instruct"
+_OLLAMA_TIMEOUT = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
 
 
 def _groq_ok() -> bool:
     return bool(_GROQ_KEY and _GROQ_KEY.strip().startswith("gsk_") and _groq)
+
+
+def _ollama_ok() -> bool:
+    if not _OLLAMA_ENABLED:
+        return False
+    try:
+        return requests.get(f"{_OLLAMA_BASE_URL}/api/tags", timeout=0.75).ok
+    except requests.RequestException:
+        return False
+
+
+def _llm_available() -> bool:
+    return _ollama_ok() or _groq_ok()
+
+
+def _json_llm_completion(messages: list[dict]) -> str:
+    """Use the project's local Ollama model first, then Groq as fallback."""
+    ollama_error = None
+    if _ollama_ok():
+        try:
+            response = requests.post(
+                f"{_OLLAMA_BASE_URL}/api/chat",
+                json={
+                    "model": _OLLAMA_MODEL,
+                    "messages": messages,
+                    "format": "json",
+                    "stream": False,
+                    "options": {"temperature": 0.4, "num_predict": 500},
+                },
+                timeout=_OLLAMA_TIMEOUT,
+            )
+            response.raise_for_status()
+            content = response.json().get("message", {}).get("content", "").strip()
+            if content:
+                return content
+            raise RuntimeError("Ollama response did not include content")
+        except Exception as error:
+            ollama_error = error
+            print(f"[chatbot Ollama error] {error}")
+
+    if _groq_ok():
+        response = _groq.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=messages,
+            response_format={"type": "json_object"},
+            temperature=0.4,
+            max_tokens=500,
+        )
+        return response.choices[0].message.content
+
+    raise ollama_error or RuntimeError("No chatbot LLM provider is available")
 
 
 # ── Small-talk / acknowledgment short-circuit (no LLM) ───────────────────────
@@ -220,17 +276,13 @@ def _llm_respond(message: str, context: list, lang: str) -> dict:
 - "forward": true רק אם נדרשת התערבות אנושית (שאלה רפואית ספציפית, תלונה, תיאום תור)"""
 
     try:
-        resp = _groq.chat.completions.create(
-            model=GROQ_MODEL,
+        content = _json_llm_completion(
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
             ],
-            response_format={"type": "json_object"},
-            temperature=0.4,
-            max_tokens=500,
         )
-        data = json.loads(resp.choices[0].message.content)
+        data = json.loads(content)
         # Safety: strip price info from reply
         reply = data.get("reply") or ""
         return {
@@ -443,7 +495,7 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
         return {"reply": reply, "buttons": None, "mode": "general"}
 
     # Single LLM call
-    if not _groq_ok():
+    if not _llm_available():
         # Try DB category fallback before giving up
         cat_id = _detect_category_in_message(message)
         if cat_id:
