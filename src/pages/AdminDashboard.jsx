@@ -5,7 +5,7 @@ import CountUp from "react-countup";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, addContactInquiryFeedback, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
 import { JOB_APPLICATION_EVENT, JOB_APPLICATIONS_STORAGE_KEY, getJobApplications, updateJobApplicationStatus, addJobApplicationFeedback } from "../api/jobsApi";
-import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl, getChatbotConfig, listTreatmentsDB, createTreatmentDB, updateTreatmentDB, deleteTreatmentDB } from "../api/medayApi";
+import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl, listTreatmentsDB, createTreatmentDB, updateTreatmentDB, deleteTreatmentDB } from "../api/medayApi";
 import { getSettings, updateSettingsAccount, updateSettingsPassword, updateSystemSettings } from "../api/settingsApi";
 import {
   Activity,
@@ -973,19 +973,7 @@ const KB_FILES = [
     type: "questions",
     label: "שאלות ותשובות",
     filename: "questions.xlsx",
-    description: "שאלות ותשובות ספציפיות לכל טיפול שהצ'אטבוט משתמש בהן",
-  },
-  {
-    type: "category_questions",
-    label: "שאלות לפי קטגוריה",
-    filename: "category_questions.xlsx",
-    description: "אילו שאלות הצ'אטבוט שואל לכל קטגוריה, באיזה סדר, עם אילו אפשרויות, ואיזה שדות נדרשים לפני המלצה",
-  },
-  {
-    type: "chatbot_settings",
-    label: "נושאים חסומים",
-    filename: "chatbot_settings.xlsx",
-    description: "נושאים שהצ'אטבוט לא יענה עליהם ויפנה לצוות — מחירים, זמינות, עובדות ועוד. הוסיפי שורות להוספת נושאים חדשים.",
+    description: "שאלות ותשובות ספציפיות לכל טיפול, מוצגות בעמוד הטיפול",
   },
 ];
 
@@ -1224,197 +1212,6 @@ function KnowledgeBasePanel({ mainRef }) {
         </button>
       </div>
     </SectionCard>
-  );
-}
-
-const PRIORITY_STYLE = {
-  critical: { label: "קריטי", cls: "bg-red-50 text-red-700 border border-red-200" },
-  high:     { label: "גבוה",  cls: "bg-orange-50 text-orange-700 border border-orange-200" },
-  medium:   { label: "בינוני", cls: "bg-gray-100 text-gray-600 border border-gray-200" },
-};
-
-function ChatbotConfigPanel({ mainRef }) {
-  const [config, setConfig] = useState(null);
-  const [loadingConfig, setLoadingConfig] = useState(true);
-  const [expanded, setExpanded] = useState({});
-
-  useEffect(() => {
-    getChatbotConfig()
-      .then(setConfig)
-      .catch(() => setConfig(null))
-      .finally(() => setLoadingConfig(false));
-  }, []);
-
-  const toggle = (cat) => setExpanded((prev) => ({ ...prev, [cat]: !prev[cat] }));
-
-  if (loadingConfig) {
-    return (
-      <div className="space-y-3">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-14 animate-pulse rounded-2xl bg-white/70" />
-        ))}
-      </div>
-    );
-  }
-
-  if (!config || !config.categories?.length) {
-    return (
-      <EmptyState
-        icon={MessageCircle}
-        title="לא נמצאו הגדרות קטגוריות"
-        text="העלי קובץ category_questions.xlsx כדי להגדיר את שאלות הצ'אטבוט לפי קטגוריה."
-      />
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {/* How the chatbot uses this legend */}
-      <div className="rounded-2xl bg-gradient-to-l from-[#FAF6F1] to-[#F5EDE3] p-4 text-right">
-        <p className="mb-2 text-sm font-extrabold text-gray-800">איך הצ׳אטבוט משתמש בהגדרות אלה?</p>
-        <div className="grid gap-3 text-xs leading-6 text-gray-600 sm:grid-cols-3">
-          <div className="flex items-start gap-2">
-            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-500" />
-            <span><span className="font-bold text-red-700">קריטי</span> — נשאל ראשון, חובה לפני כל שאלה אחרת</span>
-          </div>
-          <div className="flex items-start gap-2">
-            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-orange-500" />
-            <span><span className="font-bold text-orange-700">גבוה</span> — נשאל מיד אחרי קריטי, משפיע מאוד על ההמלצה</span>
-          </div>
-          <div className="flex items-start gap-2">
-            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-gray-400" />
-            <span><span className="font-bold text-gray-700">בינוני</span> — משפר את ההמלצה אם הלקוחה עונה</span>
-          </div>
-        </div>
-        <p className="mt-3 text-xs text-gray-500">
-          שדות <span className="font-bold text-[#C4795A]">מינימום נדרש</span> חייבים להיות מלאים לפני שהצ׳אטבוט יציע המלצה.
-          הלקוחה יכולה גם לבקש "תמליצי לי עכשיו" אחרי שמולא לפחות שדה אחד.
-        </p>
-      </div>
-
-      {/* Mode flow diagram */}
-      <div className="flex items-center gap-2 overflow-x-auto rounded-2xl border border-[#E8C4A0]/60 bg-white/80 px-4 py-3">
-        {[
-          { label: "idle", desc: "שאלות כלליות" },
-          { label: "→" },
-          { label: "questioning", desc: "אוסף מידע" },
-          { label: "→" },
-          { label: "sub_discovery", desc: "עוזרת להבין" },
-          { label: "→" },
-          { label: "recommending", desc: "ממליצה" },
-        ].map((step, i) =>
-          step.label === "→" ? (
-            <ChevronRight key={i} size={14} className="shrink-0 text-gray-300" />
-          ) : (
-            <div key={i} className="shrink-0 text-center">
-              <span className="block rounded-lg bg-[#C4795A]/10 px-2 py-1 text-xs font-bold text-[#8B5030]">{step.label}</span>
-              <span className="mt-1 block text-[10px] text-gray-400">{step.desc}</span>
-            </div>
-          )
-        )}
-      </div>
-
-      {/* Blocked topics live view */}
-      {config.blocked_topics?.length > 0 && (
-        <div className="rounded-2xl border border-[#E8C4A0]/60 bg-[#FAF6F1] p-4">
-          <p className="mb-3 text-right text-sm font-extrabold text-gray-800">
-            נושאים חסומים — הצ׳אטבוט יפנה לצוות במקום לענות
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {config.blocked_topics.map((t) => (
-              <div
-                key={t.topic}
-                className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold ${
-                  t.active
-                    ? "bg-red-50 text-red-700 border border-red-200"
-                    : "bg-gray-100 text-gray-400 border border-gray-200 line-through"
-                }`}
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${t.active ? "bg-red-500" : "bg-gray-300"}`} />
-                {t.topic}
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-right text-xs text-gray-400">
-            לשינוי — ערכי את <span className="font-bold">chatbot_settings.xlsx</span> והעלי מחדש
-          </p>
-        </div>
-      )}
-
-      {/* Category cards */}
-      <div className="space-y-2">
-        {config.categories.map((cat) => (
-          <div key={cat.category} className="overflow-hidden rounded-2xl border border-[#E8C4A0]/60 bg-[#FAF6F1]">
-            <button
-              type="button"
-              onClick={() => toggle(cat.category)}
-              className="flex w-full items-center justify-between gap-3 p-4 text-right transition hover:bg-[#F5EDE3]"
-            >
-              <div className="flex shrink-0 items-center gap-2">
-                {createElement(expanded[cat.category] ? ChevronUp : ChevronDown, { size: 15, className: "text-gray-400" })}
-                <span className="rounded-lg bg-white px-2 py-0.5 text-xs font-semibold text-gray-600 shadow-sm">
-                  {cat.total_fields} שאלות
-                </span>
-                <span className="rounded-lg bg-[#C4795A]/10 px-2 py-0.5 text-xs font-bold text-[#8B5030]">
-                  מינימום {cat.can_recommend_after} שדות
-                </span>
-              </div>
-              <span className="text-sm font-extrabold text-gray-900">{cat.category}</span>
-            </button>
-
-            {expanded[cat.category] && (
-              <div className="space-y-2 border-t border-[#E8C4A0]/40 p-4">
-                {cat.fields.map((field) => {
-                  const pStyle = PRIORITY_STYLE[field.priority] ?? PRIORITY_STYLE.medium;
-                  return (
-                    <div
-                      key={field.field}
-                      className={`rounded-xl p-3 text-right ${field.is_minimum ? "border border-[#C4795A]/30 bg-white" : "border border-gray-100 bg-white/60"}`}
-                    >
-                      <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <span className={`rounded-lg px-2 py-0.5 text-[11px] font-bold ${pStyle.cls}`}>
-                            {pStyle.label}
-                          </span>
-                          {field.is_minimum && (
-                            <span className="rounded-lg border border-[#C4795A]/25 bg-[#C4795A]/8 px-2 py-0.5 text-[11px] font-bold text-[#C4795A]">
-                              מינימום
-                            </span>
-                          )}
-                          {field.has_guidance && (
-                            <span className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-600">
-                              כולל הנחיה
-                            </span>
-                          )}
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold text-gray-900">{field.question}</p>
-                          <p className="text-[11px] text-gray-400 font-mono">{field.field}</p>
-                        </div>
-                      </div>
-                      {field.options?.length > 0 && (
-                        <div className="flex flex-wrap justify-end gap-1.5">
-                          {field.options.map((opt) => (
-                            <span key={opt} className="rounded-full bg-[#F5EDE3] px-2.5 py-0.5 text-xs font-semibold text-[#8B5030]">
-                              {opt}
-                            </span>
-                          ))}
-                          {field.has_guidance && (
-                            <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-500">
-                              + לא יודעת
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -2438,14 +2235,6 @@ export default function AdminDashboard() {
                   <TreatmentsManagerPanel mainRef={mainRef} />
                 </SectionCard>
                 <KnowledgeBasePanel mainRef={mainRef} />
-                <SectionCard
-                  icon={MessageCircle}
-                  title="הגדרות הצ׳אטבוט לפי קטגוריה"
-                  subtitle="שאלות, עדיפויות ותנאי המלצה — עודכן מ-category_questions.xlsx"
-                  className="col-span-1"
-                >
-                  <ChatbotConfigPanel mainRef={mainRef} />
-                </SectionCard>
               </Motion.div>
             ) : null}
 

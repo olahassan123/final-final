@@ -73,32 +73,20 @@ export async function fetchAnalytics({ fromDate, toDate } = {}) {
 /**
  * Sends a chat message with full flow state to the AI assistant.
  *
- * @param {string}  message              - The text the user typed or the chip label
- * @param {object}  flowState            - { profile, mode, category, currentField }
- * @param {object}  chipData             - { chip_field, chip_value } when a chip was tapped
- * @param {string|null} selectedTreatmentId  - ID of the treatment page the user is viewing
- * @param {Array}   history              - Previous messages [{from, text}]
+ * @param {string}  sessionId    - Stable per-browser session id
+ * @param {string|null} message  - Free-text message, or null for a button tap
+ * @param {string|null} buttonValue - Value of the tapped button, if any
+ * @param {string|null} questionId  - id of the question the button belongs to
  */
-export async function sendChat(
-  message,
-  flowState = {},
-  chipData = {},
-  selectedTreatmentId = null,
-  history = []
-) {
+export async function sendChat(sessionId, message = null, buttonValue = null, questionId = null) {
   const res = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
+      session_id: sessionId,
       message,
-      history,
-      selected_treatment_id: selectedTreatmentId,
-      profile: flowState.profile ?? {},
-      mode: flowState.mode ?? "idle",
-      category: flowState.category ?? null,
-      current_field: flowState.currentField ?? null,
-      chip_field: chipData.chip_field ?? null,
-      chip_value: chipData.chip_value ?? null,
+      button_value: buttonValue,
+      question_id: questionId,
     }),
   });
 
@@ -180,12 +168,6 @@ export const getExcelDownloadUrl = (fileType) => {
   const query = token ? `?access_token=${encodeURIComponent(token)}` : "";
   return `${API_BASE_URL}/admin/excel/download/${fileType}${query}`;
 };
-
-export async function getChatbotConfig() {
-  const res = await fetch(`${API_BASE_URL}/admin/chatbot/config`, { headers: authHeaders() });
-  if (!res.ok) throw new Error("Failed to fetch chatbot config");
-  return res.json();
-}
 
 export async function listTreatmentsDB() {
   const res = await fetch(`${API_BASE_URL}/admin/treatments-db`, { headers: authHeaders() });

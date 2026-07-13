@@ -4,7 +4,6 @@ from fastapi.responses import FileResponse
 import pandas as pd
 from typing import Optional, List, Dict
 from pydantic import BaseModel
-from groq import Groq
 import os
 import shutil
 import sqlite3
@@ -302,20 +301,17 @@ app.add_middleware(
 )
 
 # ------------------------------------------------------------
-# Groq setup
-# ------------------------------------------------------------
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-groq_client = Groq(api_key=GROQ_API_KEY)
-
-
-def groq_is_configured() -> bool:
-    key = (GROQ_API_KEY or "").strip()
-    return bool(key and key.startswith("gsk_") and "." not in key)
-
-# ------------------------------------------------------------
 # Load Excel data once on startup
 # ------------------------------------------------------------
 EXCEL_DIR = Path(__file__).parent
+
+# ------------------------------------------------------------
+# Chatbot
+# ------------------------------------------------------------
+from chatbot_db import init_chatbot_db
+from chatbot_router import handle_message as _chatbot_handle
+
+init_chatbot_db()
 
 
 def to_text(x):
@@ -323,80 +319,6 @@ def to_text(x):
         return ""
     s = str(x).strip()
     return "" if s.lower() == "nan" else s
-
-
-def _default_chatbot_settings() -> List[Dict]:
-    return [
-        {"topic": "מחירים ועלויות",    "keywords": ["מחיר", "עולה", "עלות", "תשלום", "מבצע", "הנחה", "כמה עולה"], "redirect_message": "", "active": True},
-        {"topic": "זמינות תורים",       "keywords": ["פנוי", "תור", "זמין", "ביומן", "מתי אפשר", "לקבוע"],         "redirect_message": "", "active": True},
-        {"topic": "פרטי עובדות",        "keywords": ["מטפלת", "עובדת", "צוות", "מי עושה", "מי נותנת"],             "redirect_message": "", "active": True},
-        {"topic": "מדיניות ביטולים",   "keywords": ["ביטול", "החזר", "בטל", "שינוי תור", "לבטל"],                 "redirect_message": "", "active": True},
-        {"topic": "אבחון רפואי",        "keywords": ["אבחנה", "מחלה", "רופא", "מה יש לי", "לאבחן"],                "redirect_message": "", "active": True},
-        {"topic": "מתחרים",             "keywords": ["מתחרה", "אחרים", "מקום אחר", "השוואה", "עדיף"],              "redirect_message": "", "active": True},
-    ]
-
-
-def load_chatbot_settings() -> List[Dict]:
-    path = EXCEL_DIR / "chatbot_settings.xlsx"
-    if not path.exists():
-        return _default_chatbot_settings()
-    try:
-        df = pd.read_excel(path).fillna("")
-        settings = []
-        for _, row in df.iterrows():
-            topic = to_text(row.get("נושא", ""))
-            if not topic:
-                continue
-            active_val = to_text(row.get("פעיל", "כן")).strip().lower()
-            settings.append({
-                "topic": topic,
-                "keywords": [k.strip() for k in to_text(row.get("מילות_מפתח", "")).split(",") if k.strip()],
-                "redirect_message": to_text(row.get("הודעת_הפניה", "")),
-                "active": active_val in ("כן", "yes", "true", "1"),
-            })
-        return settings or _default_chatbot_settings()
-    except Exception as e:
-        print(f"[Chatbot settings load error] {e}")
-        return _default_chatbot_settings()
-
-
-def _ensure_default_chatbot_settings():
-    path = EXCEL_DIR / "chatbot_settings.xlsx"
-    if path.exists():
-        return
-    defaults = _default_chatbot_settings()
-    df = pd.DataFrame({
-        "נושא":          [s["topic"] for s in defaults],
-        "מילות_מפתח":   [",".join(s["keywords"]) for s in defaults],
-        "הודעת_הפניה":  [s["redirect_message"] for s in defaults],
-        "פעיל":          ["כן" for _ in defaults],
-    })
-    df.to_excel(path, index=False)
-    print("[Chatbot settings] Created default chatbot_settings.xlsx")
-
-
-def _build_blocked_topics_prompt(settings: List[Dict]) -> str:
-    active = [s for s in settings if s.get("active")]
-    if not active:
-        return ""
-    topic_lines = []
-    for s in active:
-        kw_hint = f" (לדוגמה: {', '.join(s['keywords'][:4])})" if s.get("keywords") else ""
-        topic_lines.append(f"- {s['topic']}{kw_hint}")
-    topics_block = "\n".join(topic_lines)
-    default_redirect = (
-        '"לגבי [נושא השאלה], הכי טוב לדבר ישירות עם הצוות שלנו 😊 '
-        'ניתן ליצור קשר בטלפון או בוואטסאפ ונשמח לעזור!"'
-    )
-    custom_lines = [
-        f"  עבור '{s['topic']}': {s['redirect_message']}"
-        for s in active if s.get("redirect_message")
-    ]
-    custom_block = ("\nהודעות הפניה מותאמות:\n" + "\n".join(custom_lines)) if custom_lines else ""
-    return (
-        f"נושאים שאסור לך לענות עליהם — הפני תמיד לצוות:\n{topics_block}\n\n"
-        f"כאשר נשאלת על אחד מהנושאים האסורים, השב:\n{default_redirect}{custom_block}\n\n"
-    )
 
 
 def load_treatments() -> List[Dict]:
@@ -444,43 +366,6 @@ def load_treatments() -> List[Dict]:
     return treatments
 
 
-def load_category_fields():
-    path = EXCEL_DIR / "category_questions.xlsx"
-    if not path.exists():
-        return {}, {}
-    df = pd.read_excel(path).fillna("").sort_values(["קטגוריה", "סדר"])
-    category_fields: Dict[str, List[Dict]] = {}
-    minimum_fields: Dict[str, List[str]] = {}
-    for _, row in df.iterrows():
-        cat = to_text(row.get("קטגוריה", ""))
-        field = to_text(row.get("שדה", ""))
-        if not cat or not field:
-            continue
-        opts_raw = to_text(row.get("אפשרויות", ""))
-        guidance_raw = to_text(row.get("הנחיה", ""))
-        is_min = to_text(row.get("מינימום_נדרש", "לא")).strip() in ("כן", "yes", "true", "1")
-        category_fields.setdefault(cat, []).append({
-            "field": field,
-            "priority": to_text(row.get("עדיפות", "medium")) or "medium",
-            "question": to_text(row.get("שאלה", "")),
-            "options": [o.strip() for o in opts_raw.split(",") if o.strip()],
-            "guidance": guidance_raw or None,
-        })
-        if is_min:
-            minimum_fields.setdefault(cat, [])
-            if field not in minimum_fields[cat]:
-                minimum_fields[cat].append(field)
-    if "_default" not in category_fields:
-        category_fields["_default"] = [
-            {"field": "goal", "priority": "high", "question": "מה המטרה שלך?", "options": [], "guidance": None},
-            {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?", "options": ["כן", "לא"], "guidance": None},
-        ]
-        minimum_fields["_default"] = ["goal"]
-    return category_fields, minimum_fields
-
-
-_ensure_default_chatbot_settings()
-CHATBOT_SETTINGS = load_chatbot_settings()
 TREATMENTS = load_treatments()
 
 # ── Hardcoded extra categories not yet in the Excel ──────────
@@ -529,8 +414,6 @@ def get_treatment(treatment_id: str):
 _EXCEL_FILES = {
     "treatments": "Treatments.xlsx",
     "questions": "questions.xlsx",
-    "category_questions": "category_questions.xlsx",
-    "chatbot_settings": "chatbot_settings.xlsx",
 }
 
 
@@ -584,7 +467,7 @@ def admin_excel_preview(file_type: str, _: dict = Depends(require_admin)):
 
 @app.post("/admin/excel/upload")
 async def admin_excel_upload(file_type: str = Form(...), file: UploadFile = File(...), _: dict = Depends(require_admin)):
-    global TREATMENTS, TREATMENT_MAP, CATEGORY_FIELDS, MINIMUM_FIELDS, CHATBOT_SETTINGS
+    global TREATMENTS, TREATMENT_MAP
     if file_type not in _EXCEL_FILES:
         raise HTTPException(status_code=400, detail="Invalid file type")
     if not (file.filename or "").endswith(".xlsx"):
@@ -596,10 +479,6 @@ async def admin_excel_upload(file_type: str = Form(...), file: UploadFile = File
         excel_treatments = load_treatments()
         _seed_treatments_to_db(excel_treatments)
         _refresh_treatments_from_db()
-    elif file_type == "category_questions":
-        CATEGORY_FIELDS, MINIMUM_FIELDS = load_category_fields()
-    elif file_type == "chatbot_settings":
-        CHATBOT_SETTINGS = load_chatbot_settings()
     df = pd.read_excel(path)
     return {"success": True, "rows": len(df), "filename": _EXCEL_FILES[file_type]}
 
@@ -616,53 +495,6 @@ def admin_excel_download(file_type: str, _: dict = Depends(require_admin)):
         filename=_EXCEL_FILES[file_type],
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
-
-
-# ------------------------------------------------------------
-# Category field registry
-# ------------------------------------------------------------
-CATEGORY_FIELDS, MINIMUM_FIELDS = load_category_fields()
-
-
-@app.get("/admin/chatbot/config")
-def admin_chatbot_config(_: dict = Depends(require_admin)):
-    """
-    Returns the live chatbot configuration derived from category_questions.xlsx.
-    Used by the admin panel to show which questions are asked per category,
-    their priority, options, and which fields must be collected before recommending.
-    """
-    result = []
-    for cat, fields in CATEGORY_FIELDS.items():
-        if cat == "_default":
-            continue
-        min_fields = MINIMUM_FIELDS.get(cat, [])
-        result.append({
-            "category": cat,
-            "total_fields": len(fields),
-            "minimum_fields": min_fields,
-            "can_recommend_after": len(min_fields),
-            "fields": [
-                {
-                    "field": f["field"],
-                    "priority": f["priority"],
-                    "question": f["question"],
-                    "options": f["options"],
-                    "has_guidance": bool(f.get("guidance")),
-                    "is_minimum": f["field"] in min_fields,
-                }
-                for f in fields
-            ],
-        })
-    # Sort by category name for stable display
-    result.sort(key=lambda x: x["category"])
-    return {
-        "categories": result,
-        "total_categories": len(result),
-        "blocked_topics": [
-            {"topic": s["topic"], "keywords": s["keywords"], "active": s["active"]}
-            for s in CHATBOT_SETTINGS
-        ],
-    }
 
 
 # ------------------------------------------------------------
@@ -748,450 +580,8 @@ def delete_treatment_db(treatment_id: str, _: dict = Depends(require_admin)):
 
 
 # ------------------------------------------------------------
-# Helper: field registry utilities
-# ------------------------------------------------------------
-def get_fields_for_category(category: str) -> List[Dict]:
-    return CATEGORY_FIELDS.get(category, CATEGORY_FIELDS["_default"])
-
-
-def get_next_field(category: str, profile: Dict) -> Optional[Dict]:
-    """Return the next most important field that hasn't been collected yet."""
-    fields = get_fields_for_category(category)
-    for priority in ("critical", "high", "medium"):
-        for f in fields:
-            if f["priority"] == priority and f["field"] not in profile:
-                return f
-    return None
-
-
-def can_recommend(category: str, profile: Dict) -> bool:
-    minimums = MINIMUM_FIELDS.get(category, MINIMUM_FIELDS["_default"])
-    return all(f in profile for f in minimums)
-
-
-def field_chips(field_info: Dict) -> List[str]:
-    chips = list(field_info["options"])
-    if field_info.get("guidance"):
-        chips.append("לא יודעת")
-    return chips
-
-
-def question_progress(category: str, field: Optional[str]) -> Dict:
-    if not field:
-        return {}
-    fields = get_fields_for_category(category)
-    question_fields = [f["field"] for f in fields]
-    if field not in question_fields:
-        return {}
-    return {
-        "question_number": question_fields.index(field) + 1,
-        "total_questions": len(question_fields),
-    }
-
-
-# ------------------------------------------------------------
-# Local chat fallback
-# Keeps the chatbot usable when Groq is not configured locally.
-# ------------------------------------------------------------
-def detect_category_locally(message: str) -> Optional[str]:
-    text = (message or "").lower()
-    categories = [c for c in sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"])) if c]
-
-    for category in categories:
-        if category.lower() in text:
-            return category
-
-    keyword_groups = [
-        (("אקנה", "פצע", "פצעונים", "עור", "קמטים", "פיגמנט", "כתמים", "יובש", "קוסמטיקה"), "קוסמטיקה"),
-        (("ציפורן", "ציפורניים", "מניקור", "פדיקור", "לק"), "מניקור ופדיקור"),
-        (("שיער", "פן", "תסרוקת", "החלקה", "צבע"), "עיצוב שיער"),
-        (("איפור", "גבות", "ריסים"), "איפור מקצועי"),
-        (("סטיילינג", "לבוש", "מלתחה", "תדמית"), "סטיילינג אישי"),
-        (("גוף", "עיסוי", "מסאז", "חיטוב"), "טיפולי גוף"),
-        (("לייזר", "הסרת שיער", "שעווה"), "הסרת שיער"),
-    ]
-    for keywords, category in keyword_groups:
-        if any(keyword in text for keyword in keywords) and category in categories:
-            return category
-
-    return None
-
-
-def local_general_answer(message: str, selected: Optional[Dict] = None) -> str:
-    if selected:
-        return (
-            f"בטח. לגבי {selected['name']}: "
-            f"{selected.get('aftercare') or selected.get('suitable_for_all_skins') or 'יש לנו מידע על הטיפול הזה במערכת.'} "
-            "אם תרצי, כתבי לי מה חשוב לך לדעת ואכוון אותך."
-        )
-
-    categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
-    return (
-        "אני כאן כדי לעזור לבחור טיפול מתאים או לענות על שאלה כללית. "
-        "אפשר לבחור קטגוריה כמו " + ", ".join(categories[:5]) + ", "
-        "או לכתוב לי מה מפריע לך ומה המטרה שלך."
-    )
-
-
-def local_guided_conversation(profile: Dict, next_field_info: Optional[Dict]) -> Dict:
-    if not next_field_info:
-        return {
-            "reply": "יש לי מספיק פרטים כדי להציע כיוון מתאים.",
-            "profile_update": {},
-            "ready_to_recommend": True,
-        }
-    return {
-        "reply": next_field_info["question"],
-        "profile_update": {},
-        "ready_to_recommend": False,
-    }
-
-
-def local_recommendation(profile: Dict, category: str) -> Dict:
-    category_treatments = [t for t in TREATMENTS if t.get("class_name") == category]
-    if not category_treatments:
-        category_treatments = TREATMENTS[:3]
-
-    suggested = [
-        {"id": t["id"], "name": t["name"], "category": t.get("category", "")}
-        for t in category_treatments[:3]
-    ]
-    names = ", ".join(t["name"] for t in category_treatments[:3])
-    reply = (
-        "לפי הפרטים שנתת, אלו הטיפולים שהכי כדאי לבדוק: "
-        f"{names}. "
-        "כדאי לבחור טיפול ולקרוא את הפרטים, או לפנות לצוות כדי לוודא התאמה אישית מלאה."
-    )
-    return {"reply": reply, "suggested_treatments": suggested}
-
-
-# ------------------------------------------------------------
-# LLM helpers
-# ------------------------------------------------------------
-
-def classify_intent(message: str, history: List[Dict]) -> Dict:
-    """
-    Call 1 — Intent Router.
-    Returns {"intent": "general"|"recommendation", "category": str|None}
-    """
-    if not groq_is_configured():
-        category = detect_category_locally(message)
-        return {
-            "intent": "recommendation" if category else "general",
-            "category": category,
-        }
-
-    categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
-
-    history_text = ""
-    for msg in history[-4:]:
-        role = "User" if msg.get("from") == "user" else "Assistant"
-        history_text += f"{role}: {msg.get('text', '')}\n"
-
-    system = f"""You are a classifier for MeDay, an Israeli beauty clinic chatbot.
-
-Classify the user's latest message as:
-- "general": general question, logistics (hours/prices/location), small talk, question about a specific treatment they already know about
-- "recommendation": user has a beauty/skin/hair problem to solve, wants treatment advice, mentions a concern or symptom, asks "מה מומלץ"
-
-Available treatment categories: {', '.join(categories)}
-
-If intent is "recommendation", also pick the single most relevant category from the list above. If unclear, set category to null.
-
-Respond ONLY with valid JSON on one line, no explanation:
-{{"intent": "general", "category": null}}"""
-
-    try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": f"Conversation:\n{history_text}Latest message: {message}"},
-            ],
-            temperature=0,
-            response_format={"type": "json_object"},
-            max_tokens=60,
-        )
-        result = json.loads(resp.choices[0].message.content)
-        return {
-            "intent": result.get("intent", "general"),
-            "category": result.get("category"),
-        }
-    except Exception as e:
-        print(f"[Intent router error] {e}")
-        return {"intent": "general", "category": None}
-
-
-def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) -> str:
-    """
-    Call 2A — Pure conversation, no flow logic.
-    Handles general questions and treatment-specific questions.
-    """
-    if not groq_is_configured():
-        return local_general_answer(message, selected)
-
-    if selected:
-        faq_text = "\n".join(
-            [f"ש: {q}\nת: {a}" for q, a in selected.get("faq", {}).items()]
-        )
-        context = (
-            f"המשתמשת צופה בטיפול: {selected['name']}\n\n"
-            f"פרטי הטיפול:\n"
-            f"- קטגוריה: {selected['class_name']} / {selected['category']}\n"
-            f"- תיאור: {selected['aftercare']}\n"
-            f"- תוצאות: {selected['results_timing']}\n"
-            f"- למי מתאים: {selected['suitable_for_all_skins']}\n"
-            f"- למי לא מתאים: {selected['medical_limitations']}\n"
-            f"- הריון והנקה: {selected['pregnancy_breastfeeding']}\n"
-            f"- תדירות מומלצת: {selected['recommended_frequency']}\n"
-            f"- הערות: {selected['keywords']}\n\n"
-            f"שאלות ותשובות נפוצות:\n{faq_text or 'אין.'}"
-        )
-    else:
-        categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
-        context = f"קטגוריות טיפולים בקליניקה: {', '.join(categories)}"
-
-    system = (
-        "אתה עוזרת AI של MeDay - קליניקת יופי וטיפולים קוסמטיים.\n"
-        "ענה תמיד בעברית בצורה חמה, מקצועית ומזמינה.\n"
-        "בסס את תשובותיך אך ורק על המידע שנמסר לך להלן. אל תמציאי מידע שאינו בהקשר.\n\n"
-        + _build_blocked_topics_prompt(CHATBOT_SETTINGS)
-        + context
-    )
-
-    messages = [{"role": "system", "content": system}]
-    for msg in history[-8:]:
-        role = "user" if msg.get("from") == "user" else "assistant"
-        messages.append({"role": role, "content": msg.get("text", "")})
-    messages.append({"role": "user", "content": message})
-
-    try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.7,
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"[General answer error] {e}")
-        return local_general_answer(message, selected)
-
-
-def guided_conversation(
-    message: str,
-    history: List[Dict],
-    profile: Dict,
-    category: str,
-    next_field_info: Optional[Dict],
-) -> Dict:
-    """
-    Call 2B — Guided recommendation flow with free-text input.
-    Returns {"reply", "profile_update", "ready_to_recommend", "is_general_question", "switch_category"}
-
-    is_general_question: True when user asks something off-topic (hours, prices, etc.)
-      → backend answers without advancing or resetting the flow.
-    switch_category: non-null when user clearly wants a different service category
-      → backend resets flow to the new category.
-    ready_to_recommend: True when user explicitly asks for recommendations early,
-      or when the LLM determines enough data has been collected.
-    """
-    if not groq_is_configured():
-        return local_guided_conversation(profile, next_field_info)
-
-    known = "\n".join([f"- {k}: {v}" for k, v in profile.items()]) or "עדיין לא נאסף מידע"
-    all_categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
-
-    if next_field_info:
-        next_instruction = (
-            f"השאלה הבאה שצריך לשאול (אם עוד לא נענתה): {next_field_info['question']}\n"
-            f"אפשרויות לשדה זה: {', '.join(next_field_info['options']) if next_field_info['options'] else 'תשובה חופשית'}"
-        )
-        ready_instruction = "קבע ready_to_recommend: false אלא אם כן הלקוחה ביקשה המלצה עכשיו."
-    else:
-        next_instruction = "נאסף מספיק מידע. אין צורך לשאול שאלות נוספות."
-        ready_instruction = "קבע ready_to_recommend: true."
-
-    system = f"""אתה יועצת יופי חכמה של MeDay בקטגוריה: {category}.
-מנהלת שיחה אישית עם לקוחה כדי להמליץ על הטיפול הכי מתאים לה.
-
-מידע שכבר ידוע:
-{known}
-
-{next_instruction}
-
-כללים — חשוב מאוד:
-1. ענה בעברית חמה ואישית
-2. אם הלקוחה ענתה על שאלה קודמת — חלצי את הערך המדויק ל-profile_update
-3. אם הלקוחה שאלה שאלה כללית על הקליניקה (שעות, מחירים, כתובת, חנייה) — ענה בקצרה ב-reply, הגדר is_general_question: true, ואל תמלאי profile_update
-4. אם הלקוחה ביקשה "תמליצי לי עכשיו" / "מספיק שאלות" / "מה מתאים לי" — הגדר ready_to_recommend: true
-5. אם הלקוחה רוצה לעבור לקטגוריה אחרת (למשל מציפורניים לשיער) — הגדר switch_category לשם הקטגוריה המדויק מהרשימה
-6. {ready_instruction}
-7. אל תמציאי מידע רפואי שאינו מוצג לך
-
-קטגוריות שירות זמינות: {', '.join(all_categories)}
-
-החזירי ONLY valid JSON (כל שדות חייבים להיות נוכחים):
-{{"reply": "...", "profile_update": {{}}, "ready_to_recommend": false, "is_general_question": false, "switch_category": null}}"""
-
-    messages = [{"role": "system", "content": system}]
-    for msg in history[-6:]:
-        role = "user" if msg.get("from") == "user" else "assistant"
-        messages.append({"role": role, "content": msg.get("text", "")})
-    messages.append({"role": "user", "content": message})
-
-    try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.7,
-            response_format={"type": "json_object"},
-            max_tokens=400,
-        )
-        result = json.loads(resp.choices[0].message.content)
-        return {
-            "reply": result.get("reply", ""),
-            "profile_update": result.get("profile_update", {}),
-            "ready_to_recommend": bool(result.get("ready_to_recommend", False)),
-            "is_general_question": bool(result.get("is_general_question", False)),
-            "switch_category": result.get("switch_category") or None,
-        }
-    except Exception as e:
-        print(f"[Guided conversation error] {e}")
-        return local_guided_conversation(profile, next_field_info)
-
-
-def sub_discovery(
-    message: str,
-    field: str,
-    category: str,
-    history: List[Dict],
-) -> str:
-    """
-    Sub-discovery call — helps the client figure out an answer they don't know.
-    When resolved, the reply contains [RESOLVED: value] which the backend strips.
-    """
-    if not groq_is_configured():
-        return "אין בעיה. נסי לתאר לי במילים שלך מה את מרגישה או מה המטרה שלך, ואני אמשיך לכוון אותך."
-
-    fields = get_fields_for_category(category)
-    field_info = next((f for f in fields if f["field"] == field), None)
-    guidance = field_info["guidance"] if field_info else None
-    options = field_info["options"] if field_info else []
-
-    system = (
-        f"אתה יועצת יופי של MeDay המנסה לעזור ללקוחה להבין מה ה-{field} שלה.\n\n"
-        + (f"הנחיה לאבחון: {guidance}\n" if guidance else "")
-        + (f"האפשרויות הסופיות: {', '.join(options)}\n" if options else "")
-        + "\nשאלי שאלות אבחון פשוטות, חמות ומובנות. "
-        "ברגע שאת בטוחה מה התשובה, ציני בסוף התשובה: [RESOLVED: הערך]\n"
-        "לדוגמה: 'מעולה! נראה שיש לך עור שמן 😊 [RESOLVED: שמן]'\n"
-        "אל תכתבי [RESOLVED:] עד שאת בטוחה לגמרי."
-    )
-
-    messages = [{"role": "system", "content": system}]
-    for msg in history[-6:]:
-        role = "user" if msg.get("from") == "user" else "assistant"
-        messages.append({"role": role, "content": msg.get("text", "")})
-    messages.append({"role": "user", "content": message})
-
-    try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.7,
-        )
-        return resp.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"[Sub-discovery error] {e}")
-        return f"מצטערת, יש לי תקלה. נסי לתאר את ה-{field} שלך בכמה מילים."
-
-
-def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> Dict:
-    """
-    Final recommendation call — filters treatments to category, picks best matches.
-    Returns {"reply": str, "suggested_treatments": list}
-    """
-    if not groq_is_configured():
-        return local_recommendation(profile, category)
-
-    category_treatments = [t for t in TREATMENTS if t.get("class_name") == category]
-    if not category_treatments:
-        category_treatments = TREATMENTS[:10]
-
-    treatments_text = "\n".join([
-        f"- {t['name']}: {(t['suitable_for_all_skins'] or t['aftercare'])[:120]}"
-        f" | מגבלות: {t['medical_limitations'][:80]}"
-        f" | הריון/הנקה: {t['pregnancy_breastfeeding'][:60]}"
-        for t in category_treatments
-    ])
-
-    profile_text = "\n".join([f"- {k}: {v}" for k, v in profile.items()])
-
-    system = (
-        f"אתה יועצת יופי מומחית של MeDay בקטגוריה: {category}.\n\n"
-        f"פרופיל הלקוחה:\n{profile_text}\n\n"
-        f"טיפולים זמינים:\n{treatments_text}\n\n"
-        "המלץ על 1-3 הטיפולים הכי מתאימים.\n"
-        "הסבירי בחמימות למה כל טיפול מתאים לפרופיל הספציפי הזה.\n"
-        "ציין את שמות הטיפולים בדיוק כפי שהם מופיעים ברשימה.\n"
-        "ענה בעברית חמה ומקצועית."
-    )
-
-    messages = [{"role": "system", "content": system}]
-    for msg in history[-4:]:
-        role = "user" if msg.get("from") == "user" else "assistant"
-        messages.append({"role": role, "content": msg.get("text", "")})
-    messages.append({"role": "user", "content": "על סמך כל מה שסיפרתי, מה הטיפולים המומלצים לי?"})
-
-    try:
-        resp = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=messages,
-            temperature=0.7,
-        )
-        reply = resp.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"[Recommendation error] {e}")
-        return local_recommendation(profile, category)
-
-    suggested = []
-    for t in category_treatments:
-        if t["name"] in reply:
-            suggested.append({"id": t["id"], "name": t["name"], "category": t["category"]})
-    suggested = suggested[:3]
-
-    return {"reply": reply, "suggested_treatments": suggested}
-
-
-# ------------------------------------------------------------
 # Chat schemas
 # ------------------------------------------------------------
-
-class ChatRequest(BaseModel):
-    message: str
-    history: Optional[List[Dict]] = None
-    selected_treatment_id: Optional[str] = None
-    # Flow state (persisted by frontend, sent each turn)
-    profile: Optional[Dict] = None
-    mode: Optional[str] = "idle"       # idle | questioning | sub_discovery | recommending
-    category: Optional[str] = None
-    current_field: Optional[str] = None
-    # Chip tap signals
-    chip_field: Optional[str] = None
-    chip_value: Optional[str] = None   # "dont_know" or the actual answer
-
-
-class ChatResponse(BaseModel):
-    reply: str
-    mode: str
-    profile: Dict
-    category: Optional[str] = None
-    current_field: Optional[str] = None
-    quick_replies: Optional[List[str]] = None
-    question_number: Optional[int] = None
-    total_questions: Optional[int] = None
-    suggested_treatments: Optional[List[Dict]] = None
-
 
 class SkinAnalysisRequest(BaseModel):
     image_base64: str
@@ -1202,209 +592,23 @@ class SkinAnalysisRequest(BaseModel):
 # Chat endpoint
 # ------------------------------------------------------------
 
-@app.post("/chat", response_model=ChatResponse)
+class ChatRequest(BaseModel):
+    session_id: str
+    message: Optional[str] = None
+    button_value: Optional[str] = None
+    question_id: Optional[str] = None
+
+
+@app.post("/chat")
 def chat(req: ChatRequest):
-    profile = dict(req.profile or {})
-    mode = req.mode or "idle"
-    category = req.category
-    history = req.history or []
-    current_field = req.current_field
-
-    # ── 0. Treatment-page context (existing behavior, unchanged) ──
-    selected = TREATMENT_MAP.get(req.selected_treatment_id) if req.selected_treatment_id else None
-    if selected:
-        reply = general_answer(req.message, history, selected)
-        return ChatResponse(reply=reply, mode="idle", profile=profile)
-
-    # ── 1. Chip tap: real answer (no LLM needed) ──────────────────
-    if req.chip_value and req.chip_field and req.chip_value != "dont_know":
-        profile[req.chip_field] = req.chip_value
-
-        if can_recommend(category, profile):
-            next_field = get_next_field(category, profile)
-            if next_field is None:
-                rec = build_recommendation(profile, category, history)
-                return ChatResponse(
-                    reply=rec["reply"],
-                    mode="recommending",
-                    profile=profile,
-                    category=category,
-                    suggested_treatments=rec["suggested_treatments"] or None,
-                )
-
-        next_field = get_next_field(category, profile)
-        if next_field is None:
-            rec = build_recommendation(profile, category, history)
-            return ChatResponse(
-                reply=rec["reply"],
-                mode="recommending",
-                profile=profile,
-                category=category,
-                suggested_treatments=rec["suggested_treatments"] or None,
-            )
-
-        return ChatResponse(
-            reply=next_field["question"],
-            mode="questioning",
-            profile=profile,
-            category=category,
-            current_field=next_field["field"],
-            quick_replies=field_chips(next_field),
-            **question_progress(category, next_field["field"]),
-        )
-
-    # ── 2. Chip tap: "I don't know" → sub-discovery ───────────────
-    if req.chip_value == "dont_know" and req.chip_field:
-        reply = sub_discovery(req.message, req.chip_field, category, history)
-        resolved = re.search(r'\[RESOLVED:\s*(.+?)\]', reply)
-        clean_reply = re.sub(r'\[RESOLVED:\s*.+?\]', '', reply).strip()
-
-        if resolved:
-            profile[req.chip_field] = resolved.group(1).strip()
-            next_field = get_next_field(category, profile)
-            if next_field is None or can_recommend(category, profile):
-                rec = build_recommendation(profile, category, history)
-                return ChatResponse(
-                    reply=clean_reply + "\n\n" + rec["reply"],
-                    mode="recommending",
-                    profile=profile,
-                    category=category,
-                    suggested_treatments=rec["suggested_treatments"] or None,
-                )
-            return ChatResponse(
-                reply=clean_reply,
-                mode="questioning",
-                profile=profile,
-                category=category,
-                current_field=next_field["field"],
-                quick_replies=field_chips(next_field),
-                **question_progress(category, next_field["field"]),
-            )
-
-        return ChatResponse(
-            reply=clean_reply,
-            mode="sub_discovery",
-            profile=profile,
-            category=category,
-            current_field=req.chip_field,
-            **question_progress(category, req.chip_field),
-        )
-
-    # ── 3. Continuing sub-discovery with free text ────────────────
-    if mode == "sub_discovery" and current_field:
-        reply = sub_discovery(req.message, current_field, category, history)
-        resolved = re.search(r'\[RESOLVED:\s*(.+?)\]', reply)
-        clean_reply = re.sub(r'\[RESOLVED:\s*.+?\]', '', reply).strip()
-
-        if resolved:
-            profile[current_field] = resolved.group(1).strip()
-            next_field = get_next_field(category, profile)
-            if next_field is None or can_recommend(category, profile):
-                rec = build_recommendation(profile, category, history)
-                return ChatResponse(
-                    reply=clean_reply + "\n\n" + rec["reply"],
-                    mode="recommending",
-                    profile=profile,
-                    category=category,
-                    suggested_treatments=rec["suggested_treatments"] or None,
-                )
-            return ChatResponse(
-                reply=clean_reply,
-                mode="questioning",
-                profile=profile,
-                category=category,
-                current_field=next_field["field"],
-                quick_replies=field_chips(next_field),
-                **question_progress(category, next_field["field"]),
-            )
-
-        return ChatResponse(
-            reply=clean_reply,
-            mode="sub_discovery",
-            profile=profile,
-            category=category,
-            current_field=current_field,
-            **question_progress(category, current_field),
-        )
-
-    # ── 4. Intent classification (only when category not yet detected) ──
-    if not category:
-        classification = classify_intent(req.message, history)
-        if classification["intent"] == "recommendation" and classification.get("category"):
-            category = classification["category"]
-            mode = "questioning"
-
-    # ── 5. General answer (no recommendation intent) ──────────────
-    if mode == "idle" or not category:
-        reply = general_answer(req.message, history, None)
-        return ChatResponse(reply=reply, mode="idle", profile=profile, category=category)
-
-    # ── 6. Guided conversation (free text in recommendation flow) ──
-    next_field = get_next_field(category, profile)
-    result = guided_conversation(req.message, history, profile, category, next_field)
-
-    # 6a. General question mid-flow — answer without changing mode or field
-    if result.get("is_general_question"):
-        reask_field = get_next_field(category, profile)
-        return ChatResponse(
-            reply=result["reply"],
-            mode="questioning",
-            profile=profile,
-            category=category,
-            current_field=current_field,
-            quick_replies=field_chips(reask_field) if reask_field else None,
-            **question_progress(category, current_field),
-        )
-
-    # 6b. Category pivot — user wants to switch service area
-    switch_cat = result.get("switch_category")
-    if switch_cat and switch_cat in CATEGORY_FIELDS:
-        profile = {}
-        category = switch_cat
-        pivot_field = get_next_field(category, profile)
-        if pivot_field:
-            return ChatResponse(
-                reply=result["reply"],
-                mode="questioning",
-                profile=profile,
-                category=category,
-                current_field=pivot_field["field"],
-                quick_replies=field_chips(pivot_field),
-                **question_progress(category, pivot_field["field"]),
-            )
-
-    profile.update(result.get("profile_update", {}))
-
-    # Re-evaluate after profile update
-    next_field = get_next_field(category, profile)
-
-    # Allow early recommendation when user explicitly requests it and we have something
-    user_wants_now = result.get("ready_to_recommend", False)
-    ready = can_recommend(category, profile) or (user_wants_now and len(profile) > 0)
-
-    if (user_wants_now or next_field is None) and ready:
-        rec = build_recommendation(profile, category, history)
-        rec_reply = rec["reply"]
-        # Only prepend guided reply if it adds context (not if it would duplicate)
-        combined = (result["reply"] + "\n\n" + rec_reply) if result["reply"] and not user_wants_now else rec_reply
-        return ChatResponse(
-            reply=combined,
-            mode="recommending",
-            profile=profile,
-            category=category,
-            suggested_treatments=rec["suggested_treatments"] or None,
-        )
-
-    return ChatResponse(
-        reply=result["reply"],
-        mode="questioning",
-        profile=profile,
-        category=category,
-        current_field=next_field["field"] if next_field else None,
-        quick_replies=field_chips(next_field) if next_field else None,
-        **question_progress(category, next_field["field"] if next_field else None),
+    if not req.session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    return _chatbot_handle(
+        session_id=req.session_id,
+        message=req.message,
+        button_value=req.button_value,
+        question_id=req.question_id,
     )
-
 
 @app.post("/analyze-skin")
 def analyze_skin(req: SkinAnalysisRequest):
