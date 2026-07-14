@@ -173,6 +173,8 @@ def _greeting_reply(lang: str) -> str:
     return msgs.get(lang, msgs["he"])
 
 
+
+
 # ── Hard price guard (no LLM — enforced before everything) ───────────────────
 
 _PRICE_KW = [
@@ -247,15 +249,100 @@ def _forward_msg(lang: str = "he") -> str:
     return msgs.get(lang, msgs["he"])
 
 
+_OUT_OF_SCOPE_MSGS = {
+    "he": "אני כאן כדי לעזור רק בנושאים שקשורים ל-MeDay — טיפולים, שירותים ומידע על המכון 😊 בנושאים אחרים אני לצערי לא אוכל לסייע, אבל אשמח לענות על כל שאלה על הקליניקה שלנו!",
+    "ar": "أنا هنا لمساعدتك فقط في كل ما يتعلق بـ MeDay — العلاجات والخدمات ومعلومات المركز 😊 لا يمكنني للأسف الإجابة عن مواضيع أخرى، لكن يسعدني مساعدتك في أي سؤال عن عيادتنا!",
+    "en": "I'm here to help only with things related to MeDay — treatments, services and clinic info 😊 I'm not able to help with topics outside that, but I'd love to answer anything about our clinic!",
+}
+
+
 def _out_of_scope_reply(lang: str = "he") -> dict:
     """For questions unrelated to the clinic: a short in-frame decline. No chips,
     and we do NOT forward random topics to the phone."""
+    return {"reply": _OUT_OF_SCOPE_MSGS.get(lang, _OUT_OF_SCOPE_MSGS["he"]), "buttons": None, "mode": "general", "no_suggest": True}
+
+
+# Generic clinic/beauty vocabulary (beyond category-specific keywords) that marks a
+# message as plausibly in-scope even when no category/treatment name is mentioned.
+# "עזר"/"help" are roots, not full words, so they also catch עזרה/עזרי/עזרו/תעזור etc.
+_GENERIC_CLINIC_VOCAB = [
+    "meday", "מיידיי",
+    "טיפול", "טיפולים", "שירות", "שירותים", "תור", "מכון", "קליניקה", "יופי",
+    "עור", "איפור", "יעוץ", "המלצה", "ממליצ", "עזר", "עזור",
+    "علاج", "خدمة", "موعد", "عيادة", "جمال", "بشرة", "استشارة", "ساعد",
+    "treatment", "service", "appointment", "clinic", "beauty", "recommend", "help",
+]
+
+
+def _is_plausibly_in_scope(message: str) -> bool:
+    """Fast, LLM-free relevance check. True if the message contains any clinic/
+    category vocabulary — used to skip the (slow) LLM call entirely for messages
+    with zero topical overlap, instead of waiting on a live API round-trip just to
+    find out it's off-topic. Only reached after every other on-topic detector
+    (category, treatment, FAQ, comparison, etc.) has already failed to match, so
+    this only ever short-circuits messages with no relevance signal at all."""
+    ml = (message or "").lower()
+    if any(kw in ml for kw in _GENERIC_CLINIC_VOCAB):
+        return True
+    for keywords in _CAT_UNIQUE_KW.values():
+        if any(kw in ml for kw in keywords):
+            return True
+    return False
+
+
+def _has_active_context(session: dict) -> bool:
+    """True if the conversation already has on-topic momentum — a treatment/
+    category discussed, or mid-recommendation-flow — in which case a vague
+    follow-up ("what about it?", "is it suitable for me?") should be judged with
+    conversation history (by the LLM) rather than in isolation by keyword. Without
+    this, coreference-based follow-ups with no repeated clinic keyword would get
+    wrongly declined by _is_plausibly_in_scope right after a perfectly good
+    on-topic exchange."""
+    if session.get("last_treatment_id"):
+        return True
+    if session.get("mode") == "in_flow":
+        return True
+    ctx = session.get("recent_context") or []
+    # The current user message was already appended before this check runs, so
+    # the turn before it (if any) is the bot's previous reply.
+    if len(ctx) >= 2 and ctx[-2].get("role") == "assistant":
+        prev_reply = ctx[-2].get("content") or ""
+        if prev_reply not in _OUT_OF_SCOPE_MSGS.values():
+            return True
+    return False
+
+
+def _cant_parse_reply(lang: str = "he") -> dict:
+    """Honest fallback for a message we couldn't match to any data-driven answer
+    while mid-conversation. Deliberately does NOT claim scope limitation (unlike
+    _out_of_scope_reply) — the user is very likely still asking something
+    MeDay-related (e.g. 'explain more', 'I don't get it'), we just have no live
+    LLM to parse the open-ended phrasing. There's no bounded keyword list that
+    covers every way someone might ask for elaboration/clarification, so instead
+    of guessing a specific canned reply, we say plainly that we couldn't follow
+    and point to a human — that's honest for ANY unmatched follow-up, not just
+    ones that happen to match a hardcoded phrase."""
     msgs = {
-        "he": "אני כאן כדי לעזור עם כל מה שקשור ל-MeDay — טיפולים, שירותים ומידע על המכון 😊 במה אוכל לעזור לך?",
-        "ar": "أنا هنا للمساعدة في كل ما يتعلق بـ MeDay — العلاجات والخدمات ومعلومات المركز 😊 كيف يمكنني مساعدتك؟",
-        "en": "I'm here to help with anything about MeDay — treatments, services and clinic info 😊 How can I help you?",
+        "he": f"מצטערת, לא הצלחתי להבין בדיוק את השאלה 🙏 אפשר לנסות לנסח אחרת, או שהצוות שלנו ב-{CLINIC_PHONE} ישמח לעזור!",
+        "ar": f"آسفة، لم أفهم السؤال تماماً 🙏 جربي صياغة أخرى، أو فريقنا على {CLINIC_PHONE} سيسعد بمساعدتك!",
+        "en": f"Sorry, I couldn't quite follow that 🙏 Feel free to try rephrasing, or our team at {CLINIC_PHONE} would be happy to help!",
     }
     return {"reply": msgs.get(lang, msgs["he"]), "buttons": None, "mode": "general", "no_suggest": True}
+
+
+def _unmatched_fallback(message: str, lang: str, session: dict) -> dict:
+    """Best-effort reply when nothing matched and there's no live LLM (or the
+    live call failed). Picks between two honest, distinct outcomes instead of
+    collapsing every miss into 'that's off-topic':
+      - no active context + no clinic vocabulary → genuinely looks unrelated.
+      - active context (mid-conversation) → we just couldn't parse the
+        phrasing; say so, rather than implying the question was off-topic."""
+    resp = _deterministic_fallback(message, lang)
+    if resp:
+        return resp
+    if _has_active_context(session):
+        return _cant_parse_reply(lang)
+    return _out_of_scope_reply(lang)
 
 
 def _match_forward_topic(message: str):
@@ -1378,9 +1465,20 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
         save_session(session_id, session)
         return {"reply": faq_ans, "buttons": None, "mode": "general", "no_suggest": True}
 
+    # 5b. No clinic/category vocabulary AND no active conversation context →
+    #     almost certainly a cold, unrelated question. Decline instantly instead of
+    #     spending a slow live LLM round-trip just to find out. If there IS active
+    #     context (mid-conversation about a treatment), give the LLM the message +
+    #     history instead — a vague follow-up may only make sense with that context.
+    if not _is_plausibly_in_scope(message) and not _has_active_context(session):
+        resp = _out_of_scope_reply(lang)
+        append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return {**resp, "offer_continue": None}
+
     # Single LLM call (only reached for open-ended questions)
     if not _llm_ok():
-        resp = _deterministic_fallback(message, lang) or _out_of_scope_reply(lang)
+        resp = _unmatched_fallback(message, lang, session)
         if resp.get("last_treatment_id"):
             session["last_treatment_id"] = resp["last_treatment_id"]
             session["answered_fields"] = []  # fresh treatment → fresh chips
@@ -1394,7 +1492,7 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
 
     if not reply:
         # LLM failed (rate limit / error) — answer from data instead of forwarding.
-        resp = _deterministic_fallback(message, lang) or _out_of_scope_reply(lang)
+        resp = _unmatched_fallback(message, lang, session)
         if resp.get("last_treatment_id"):
             session["last_treatment_id"] = resp["last_treatment_id"]
         append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
