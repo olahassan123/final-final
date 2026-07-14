@@ -2693,15 +2693,13 @@ export default function AdminDashboard() {
             ) : null}
 
             {activeTab === "settings" ? (
-              <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+              // NOTE: plain div (not the whileInView motion wrapper) on purpose — the
+              // account/password/business panels load their data async and mount after
+              // the one-time scroll-in animation fires, which left them stuck at opacity:0.
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
                 <AdminSettingsPanel />
                 <AiAssistantPanel />
-                {false ? <PlaceholderPanel
-                  icon={Settings}
-                  title="הגדרות מערכת"
-                  text="כאן יתווספו בהמשך הגדרות ניהול, הרשאות, פרטי קליניקה והעדפות תצוגה. בסיס הידע והגדרות הצ׳אטבוט נמצאים בלשונית טיפולים."
-                /> : null}
-              </Motion.div>
+              </div>
             ) : null}
           </div>
         </main>
