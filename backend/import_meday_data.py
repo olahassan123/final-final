@@ -52,8 +52,8 @@ def import_all():
         if not cat_id:
             continue
         conn.execute(
-            "INSERT OR REPLACE INTO cb_categories (category_id, category_name, has_recommendation, recommendation_intro) VALUES (?, ?, ?, ?)",
-            (cat_id, _v(d.get("category_name")), 1 if _v(d.get("has_recommendation")) == "1" else 0, _v(d.get("recommendation_intro"))),
+            "INSERT OR REPLACE INTO cb_categories (category_id, category_name, has_recommendation, recommendation_intro, short_description) VALUES (?, ?, ?, ?, ?)",
+            (cat_id, _v(d.get("category_name")), 1 if _v(d.get("has_recommendation")) == "1" else 0, _v(d.get("recommendation_intro")), _v(d.get("short_description"))),
         )
         count += 1
     print(f"  Categories: {count}")

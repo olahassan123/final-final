@@ -1,6 +1,6 @@
 import { useRef, useState, useEffect, forwardRef } from "react";
 import ReactMarkdown from "react-markdown";
-import { sendChat } from "../api/medayApi";
+import { sendChat, getChatCategories } from "../api/medayApi";
 import { MessageCircle, X, Send, RotateCcw, Sparkles } from "lucide-react";
 import { cn } from "../lib/utils";
 
@@ -15,9 +15,25 @@ function getOrCreateSessionId() {
   return id;
 }
 
+// Category options shown on the welcome screen. Clicking one sends the category
+// name → the bot replies with that category's description. Mirrors the
+// Categories sheet; kept in sync dynamically on open (see fetch in the widget).
+const WELCOME_CATEGORIES = [
+  "מניקור ופדיקור",
+  "עיצוב שיער",
+  "טיפולי קוסמטיקה",
+  "טיפולי גוף",
+  "הסרת שיער",
+  "איפור מקצועי",
+  "איפור קבוע ועיצוב גבות",
+  "סטיילינג אישי",
+  "טיפולי אסתטיקה",
+];
+
 const WELCOME_MSG = {
   from: "bot",
-  text: "היי! אני העוזרת האישית של MeDay 💬\nאיך אני יכולה לעזור לך היום?",
+  text: "היי! אני העוזרת האישית של MeDay 💬\nבאיזה תחום תרצי שנתחיל?",
+  suggestions: WELCOME_CATEGORIES,
 };
 
 export default function ChatWidget() {
@@ -39,6 +55,21 @@ export default function ChatWidget() {
   useEffect(() => {
     if (open) setTimeout(() => inputRef.current?.focus(), 150);
   }, [open]);
+
+  // Sync welcome category chips with the backend (falls back to hardcoded list)
+  useEffect(() => {
+    getChatCategories()
+      .then((cats) => {
+        if (cats?.length) {
+          setMessages((m) =>
+            m.length && m[0].from === "bot"
+              ? [{ ...m[0], suggestions: cats }, ...m.slice(1)]
+              : m
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   // Listen for external "open chat" events (from treatment pages etc.)
   useEffect(() => {
@@ -72,6 +103,7 @@ export default function ChatWidget() {
         from: "bot",
         text: resp.reply,
         buttons: resp.buttons || null,
+        suggestions: resp.suggestions || null,
         offerContinue: resp.offer_continue || null,
         questionProgress: resp.question_progress || null,
         mode: resp.mode,
@@ -208,6 +240,26 @@ export default function ChatWidget() {
                         )}
                       >
                         {btn.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {/* Soft suggestion chips — send free text, non-binding guidance */}
+                {m.from === "bot" && m.suggestions && idx === messages.length - 1 && (
+                  <div className="mt-2 flex flex-wrap gap-2 max-w-[88%]">
+                    {m.suggestions.map((text) => (
+                      <button
+                        key={text}
+                        onClick={() => handleTextSend(text)}
+                        disabled={loading}
+                        className={cn(
+                          "px-3 py-1.5 rounded-full text-xs font-medium border border-dashed transition-all",
+                          "border-gray-300 text-gray-500 bg-white hover:border-primary/50 hover:text-primary hover:bg-pink-50/60",
+                          loading && "opacity-40 cursor-not-allowed"
+                        )}
+                      >
+                        {text}
                       </button>
                     ))}
                   </div>

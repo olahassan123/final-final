@@ -79,7 +79,7 @@ function CategoryCard({ category, index }) {
         {/* ── full-width image zone ── */}
         <div className="relative h-44 overflow-hidden bg-[#F5EFE8]">
           <img
-            src={photo?.startsWith("photo-") ? `https://images.unsplash.com/${photo}?auto=format&fit=crop&w=600&q=80` : photo}
+            src={photo?.startsWith('photo-') ? `https://images.unsplash.com/${photo}?auto=format&fit=crop&w=600&q=80` : photo}
             alt={category.name}
             className="w-full h-full object-cover object-center transition-transform duration-700 group-hover:scale-105"
             onError={e => { e.currentTarget.style.display = "none"; }}

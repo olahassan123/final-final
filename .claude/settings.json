@@ -6,7 +6,11 @@
       "PowerShell(Start-Process powershell -ArgumentList '-NoExit', '-Command', 'cd \"c:\\\\Users\\\\user\\\\final-final\\\\backend\"; .\\\\.venv\\\\Scripts\\\\Activate.ps1; uvicorn main:app --reload --port 8000' -WindowStyle Normal)",
       "Bash(npm run dev > /tmp/vite.log 2>&1 & *)",
       "Bash(curl -s http://localhost:5175)",
-      "Bash(curl -s http://localhost:8000/docs)"
+      "Bash(curl -s http://localhost:8000/docs)",
+      "Bash(git commit -m ' *)",
+      "PowerShell(netstat -ano)",
+      "PowerShell(Start-Process \"C:\\\\Users\\\\user\\\\final-final\\\\backend\\\\venv\\\\Scripts\\\\uvicorn.exe\" -ArgumentList 'main:app', '--reload', '--host', '0.0.0.0', '--port', '8000' -WorkingDirectory 'C:\\\\Users\\\\user\\\\final-final\\\\backend' -WindowStyle Normal)",
+      "PowerShell(Get-Process -Id 26208 -ErrorAction SilentlyContinue)"
     ],
     "additionalDirectories": [
       "\\tmp"

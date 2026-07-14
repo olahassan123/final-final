@@ -1,11 +1,8 @@
-from fastapi import FastAPI, HTTPException, Header, Depends, UploadFile, File, Form, Query
+from fastapi import FastAPI, HTTPException, Header, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-import pandas as pd
 from typing import Optional, List, Dict
 from pydantic import BaseModel
 import os
-import shutil
 import sqlite3
 import json
 import re
@@ -28,7 +25,6 @@ JWT_SECRET = os.getenv("JWT_SECRET", "meday-jwt-secret-change-in-production")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 30
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
-
 
 STAFF_ROLES = {"secretary", "admin"}
 ADMIN_ROLES = {"admin"}
@@ -138,9 +134,6 @@ def verify_password(password: str, stored_hash: str) -> bool:
 def verify_or_migrate_password(conn: sqlite3.Connection, table: str, user_id: int, password: str, stored_password: str) -> bool:
     if verify_password(password, stored_password):
         return True
-
-    # Development migration for old rows that accidentally stored plain text.
-    # The table names are controlled by server code, not user input.
     if "$" not in (stored_password or "") and hmac.compare_digest(password, stored_password or ""):
         conn.execute(
             f"UPDATE {table} SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -148,7 +141,6 @@ def verify_or_migrate_password(conn: sqlite3.Connection, table: str, user_id: in
         )
         conn.commit()
         return True
-
     return False
 
 
@@ -185,7 +177,6 @@ def validate_settings_phone(phone: Optional[str], required: bool = False) -> str
 
 
 def normalize_phone_for_match(phone: Optional[str]) -> str:
-    # Phone matching ignores formatting differences such as spaces and hyphens.
     return re.sub(r"\D", "", phone or "")
 
 
@@ -197,7 +188,6 @@ def validate_password_strength(password: str):
 
 
 def validate_customer_password_strength(password: str):
-    # Customer passwords need a clear strength policy, while still using the existing hash_password storage.
     validate_password_strength(password)
     missing = []
     if not re.search(r"[A-Z]", password):
@@ -300,9 +290,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ------------------------------------------------------------
-# Load Excel data once on startup
-# ------------------------------------------------------------
 EXCEL_DIR = Path(__file__).parent
 
 # ------------------------------------------------------------
@@ -314,284 +301,17 @@ from chatbot_router import handle_message as _chatbot_handle
 init_chatbot_db()
 
 
-def to_text(x):
-    if x is None:
-        return ""
-    s = str(x).strip()
-    return "" if s.lower() == "nan" else s
-
-
-def load_treatments() -> List[Dict]:
-    treatments_df = pd.read_excel(EXCEL_DIR / "Treatments.xlsx")
-    faq_df = pd.read_excel(EXCEL_DIR / "questions.xlsx")
-
-    treatments = []
-    for i, row in treatments_df.iterrows():
-        name = to_text(row.get("שם_הטיפול", ""))
-        if not name:
-            continue
-
-        tid = f"t_{i}"
-
-        # Match FAQs by treatment name
-        faqs = {}
-        mask = (
-            faq_df["שם_הטיפול"].astype(str).str.strip().str.lower()
-            == name.strip().lower()
-        )
-        for _, frow in faq_df[mask].iterrows():
-            q = to_text(frow.get("שאלה", ""))
-            a = to_text(frow.get("תשובה", ""))
-            if q and a:
-                faqs[q] = a
-
-        treatments.append({
-            "id": tid,
-            "name": name,
-            "class_name": to_text(row.get("קטגוריה ראשית", "")),
-            "category": to_text(row.get("תת_קטגוריה", "")),
-            "keywords": to_text(row.get("הערות_כלליות", "")),
-            "suitable_for_all_skins": to_text(row.get("למי_מתאים", "")),
-            "ages": "",
-            "results_timing": to_text(row.get("תוצאות", "")),
-            "complementary_products": "",
-            "aftercare": to_text(row.get("תיאור_הטיפול", "")),
-            "consultation_required": "",
-            "recommended_frequency": to_text(row.get("מספר_טיפולים_מומלץ", "")),
-            "pregnancy_breastfeeding": to_text(row.get("הריון_והנקה", "")),
-            "medical_limitations": to_text(row.get("למי_לא_מתאים", "")),
-            "faq": faqs,
-        })
-
-    return treatments
-
-
-TREATMENTS = load_treatments()
-
-# ── Hardcoded extra categories not yet in the Excel ──────────
-_EXTRA_TREATMENTS = [
-    {"id": "manicure_1", "name": "מניקור",                               "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_2", "name": "לק גל",                                "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_3", "name": "עיצוב ופיסול ציפורן",                  "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_4", "name": "פדיקור אסתטי+ לק גל",                 "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_5", "name": "פדיקור טיפולי+ לק\\לק גל",            "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-]
-
-# Only add if not already present (safe to restart server repeatedly)
-_existing_ids = {t["id"] for t in TREATMENTS}
-for _t in _EXTRA_TREATMENTS:
-    if _t["id"] not in _existing_ids:
-        TREATMENTS.append(_t)
-
-TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
-
 # ------------------------------------------------------------
 # Basic routes
 # ------------------------------------------------------------
-
-
 @app.get("/health")
 def health():
     return {"ok": True}
 
 
-@app.get("/treatments")
-def list_treatments():
-    return TREATMENTS
-
-
-@app.get("/treatments/{treatment_id}")
-def get_treatment(treatment_id: str):
-    t = TREATMENT_MAP.get(treatment_id)
-    if not t:
-        raise HTTPException(status_code=404, detail="Treatment not found")
-    return t
-
-
 # ------------------------------------------------------------
-# Admin – Excel knowledge-base management
+# Chat endpoint (new)
 # ------------------------------------------------------------
-_EXCEL_FILES = {
-    "treatments": "Treatments.xlsx",
-    "questions": "questions.xlsx",
-}
-
-
-@app.get("/admin/excel/info")
-def admin_excel_info(_: dict = Depends(require_admin)):
-    result = []
-    for file_type, filename in _EXCEL_FILES.items():
-        path = EXCEL_DIR / filename
-        if path.exists():
-            stat = path.stat()
-            try:
-                df = pd.read_excel(path)
-                rows = len(df)
-                columns = list(df.columns)
-            except Exception:
-                rows, columns = 0, []
-            result.append({
-                "file_type": file_type,
-                "filename": filename,
-                "rows": rows,
-                "columns": columns,
-                "last_modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                "size_kb": round(stat.st_size / 1024, 1),
-            })
-        else:
-            result.append({
-                "file_type": file_type,
-                "filename": filename,
-                "rows": 0,
-                "columns": [],
-                "last_modified": None,
-                "size_kb": 0,
-            })
-    return result
-
-
-@app.get("/admin/excel/preview/{file_type}")
-def admin_excel_preview(file_type: str, _: dict = Depends(require_admin)):
-    if file_type not in _EXCEL_FILES:
-        raise HTTPException(status_code=400, detail="Invalid file type")
-    path = EXCEL_DIR / _EXCEL_FILES[file_type]
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    df = pd.read_excel(path).fillna("")
-    return {
-        "columns": list(df.columns),
-        "rows": df.head(20).to_dict(orient="records"),
-        "total_rows": len(df),
-    }
-
-
-@app.post("/admin/excel/upload")
-async def admin_excel_upload(file_type: str = Form(...), file: UploadFile = File(...), _: dict = Depends(require_admin)):
-    global TREATMENTS, TREATMENT_MAP
-    if file_type not in _EXCEL_FILES:
-        raise HTTPException(status_code=400, detail="Invalid file type")
-    if not (file.filename or "").endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Only .xlsx files are accepted")
-    path = EXCEL_DIR / _EXCEL_FILES[file_type]
-    with open(path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    if file_type in ("treatments", "questions"):
-        excel_treatments = load_treatments()
-        _seed_treatments_to_db(excel_treatments)
-        _refresh_treatments_from_db()
-    df = pd.read_excel(path)
-    return {"success": True, "rows": len(df), "filename": _EXCEL_FILES[file_type]}
-
-
-@app.get("/admin/excel/download/{file_type}")
-def admin_excel_download(file_type: str, _: dict = Depends(require_admin)):
-    if file_type not in _EXCEL_FILES:
-        raise HTTPException(status_code=400, detail="Invalid file type")
-    path = EXCEL_DIR / _EXCEL_FILES[file_type]
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(
-        path=str(path),
-        filename=_EXCEL_FILES[file_type],
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-
-
-# ------------------------------------------------------------
-# Admin — Treatment CRUD
-# ------------------------------------------------------------
-
-class TreatmentUpsert(BaseModel):
-    name: str
-    class_name: Optional[str] = ""
-    category: Optional[str] = ""
-    keywords: Optional[str] = ""
-    suitable_for_all_skins: Optional[str] = ""
-    results_timing: Optional[str] = ""
-    aftercare: Optional[str] = ""
-    recommended_frequency: Optional[str] = ""
-    pregnancy_breastfeeding: Optional[str] = ""
-    medical_limitations: Optional[str] = ""
-
-
-@app.get("/admin/treatments-db")
-def list_treatments_db(_: dict = Depends(require_admin)):
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM treatments_db ORDER BY class_name, name"
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.post("/admin/treatments-db", status_code=201)
-def create_treatment_db(data: TreatmentUpsert, _: dict = Depends(require_admin)):
-    tid = f"admin_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
-    conn = get_db()
-    conn.execute("""
-        INSERT INTO treatments_db
-        (id, name, class_name, category, keywords, suitable_for_all_skins,
-         results_timing, aftercare, recommended_frequency,
-         pregnancy_breastfeeding, medical_limitations, source)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin')
-    """, (tid, data.name, data.class_name, data.category, data.keywords,
-          data.suitable_for_all_skins, data.results_timing, data.aftercare,
-          data.recommended_frequency, data.pregnancy_breastfeeding, data.medical_limitations))
-    conn.commit()
-    conn.close()
-    _refresh_treatments_from_db()
-    return {"id": tid, **data.model_dump(), "source": "admin"}
-
-
-@app.put("/admin/treatments-db/{treatment_id}")
-def update_treatment_db(treatment_id: str, data: TreatmentUpsert, _: dict = Depends(require_admin)):
-    conn = get_db()
-    result = conn.execute(
-        "SELECT id FROM treatments_db WHERE id = ?", (treatment_id,)
-    ).fetchone()
-    if not result:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Treatment not found")
-    conn.execute("""
-        UPDATE treatments_db SET
-            name=?, class_name=?, category=?, keywords=?,
-            suitable_for_all_skins=?, results_timing=?, aftercare=?,
-            recommended_frequency=?, pregnancy_breastfeeding=?,
-            medical_limitations=?, updated_at=CURRENT_TIMESTAMP
-        WHERE id=?
-    """, (data.name, data.class_name, data.category, data.keywords,
-          data.suitable_for_all_skins, data.results_timing, data.aftercare,
-          data.recommended_frequency, data.pregnancy_breastfeeding,
-          data.medical_limitations, treatment_id))
-    conn.commit()
-    conn.close()
-    _refresh_treatments_from_db()
-    return {"id": treatment_id, **data.model_dump()}
-
-
-@app.delete("/admin/treatments-db/{treatment_id}")
-def delete_treatment_db(treatment_id: str, _: dict = Depends(require_admin)):
-    conn = get_db()
-    conn.execute("DELETE FROM treatments_db WHERE id = ?", (treatment_id,))
-    conn.commit()
-    conn.close()
-    _refresh_treatments_from_db()
-    return {"ok": True}
-
-
-# ------------------------------------------------------------
-# Chat schemas
-# ------------------------------------------------------------
-
-class SkinAnalysisRequest(BaseModel):
-    image_base64: str
-    mime_type: Optional[str] = "image/jpeg"
-
-
-# ------------------------------------------------------------
-# Chat endpoint
-# ------------------------------------------------------------
-
 class ChatRequest(BaseModel):
     session_id: str
     message: Optional[str] = None
@@ -603,47 +323,100 @@ class ChatRequest(BaseModel):
 def chat(req: ChatRequest):
     if not req.session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
-    return _chatbot_handle(
+    result = _chatbot_handle(
         session_id=req.session_id,
         message=req.message,
         button_value=req.button_value,
         question_id=req.question_id,
     )
+    return result
 
-@app.post("/analyze-skin")
-def analyze_skin(req: SkinAnalysisRequest):
-    if not req.image_base64:
-        raise HTTPException(status_code=400, detail="Image data is required")
 
+@app.get("/chat/categories")
+def chat_categories():
+    """Category names for the chat welcome chips (kept in sync with the Excel)."""
+    from chatbot_db import get_categories
+    return {"categories": [c["category_name"] for c in get_categories() if c.get("category_name")]}
+
+
+# ── AI assistant settings (admin) ─────────────────────────────────────────────
+class AiSettingsUpdate(BaseModel):
+    api_key: Optional[str] = None   # None = leave unchanged; "" = clear
+    enabled: Optional[bool] = None
+
+
+def _mask_key(k: str) -> str:
+    k = (k or "").strip()
+    if not k:
+        return ""
+    return (k[:4] + "…" + k[-4:]) if len(k) > 10 else "****"
+
+
+@app.get("/chat/ai-settings")
+def get_ai_settings(_: dict = Depends(require_staff)):
+    """Status of the optional AI layer for the admin panel."""
+    from chatbot_db import get_setting
+    from chatbot_config import GEMINI_KEY_URL
+    key = (get_setting("llm_api_key") or "").strip()
+    env_key = bool(os.getenv("GEMINI_API_KEY"))
+    enabled = get_setting("llm_enabled", "1") != "0"
+    has_key = bool(key or env_key)
+    last = (get_setting("llm_last_status") or "").strip()
+    if not enabled:
+        status = "off"
+    elif not has_key:
+        status = "no_key"
+    elif last == "rate_limited":
+        status = "limited"     # free daily quota used up
+    elif last == "invalid_key":
+        status = "invalid"     # key no longer valid
+    elif last == "error":
+        status = "error"       # transient connection issue
+    else:
+        status = "active"
     return {
-        "skin_type": "combination",
-        "summary": (
-            "The image was received successfully. This preliminary analysis "
-            "suggests a balanced routine with hydration, gentle cleansing, "
-            "and SPF. A clinic consultation is recommended for a precise plan."
-        ),
-        "concerns": [
-            {"label": "Hydration", "severity": "mild"},
-            {"label": "Texture", "severity": "moderate"},
-        ],
-        "recommended_treatments": [
-            {
-                "slug": "classic-meday",
-                "name": "MeDay Classic",
-                "desc": "A gentle facial for cleansing, hydration, and maintenance.",
-            },
-            {
-                "slug": "skin-booster",
-                "name": "Skin Booster",
-                "desc": "A technology treatment focused on glow and skin vitality.",
-            },
-            {
-                "slug": "clear-skin-plus",
-                "name": "Clear Skin Plus",
-                "desc": "A supportive option for visible texture and congestion.",
-            },
-        ],
+        "enabled": enabled,
+        "key_set": has_key,
+        "key_masked": _mask_key(key) if key else ("(from environment)" if env_key else ""),
+        "status": status,
+        "last_status_at": get_setting("llm_last_status_at", ""),
+        "provider": "Google Gemini",
+        "get_key_url": GEMINI_KEY_URL,
     }
+
+
+@app.post("/chat/ai-settings")
+def update_ai_settings(body: AiSettingsUpdate, _: dict = Depends(require_admin)):
+    """Save a pasted API key (validated first) and/or the on/off flag."""
+    from chatbot_db import set_setting
+    from chatbot_router import _test_llm_key
+    out = {"ok": True}
+    if body.api_key is not None:
+        key = body.api_key.strip()
+        if key:
+            accepted, status = _test_llm_key(key)
+            if not accepted:
+                if status == "no_quota":
+                    detail = ("המפתח תקין, אך לחשבון Google הזה אין מכסת שימוש חינמית ל-Gemini (limit: 0). "
+                              "כדי להפעיל את ה-AI יש להפעיל חיוב (billing) בפרויקט ב-Google Cloud, "
+                              "או ליצור מפתח בחשבון Google אחר שיש בו מכסה חינמית. "
+                              "הצ׳אט ממשיך לעבוד מצוין גם בלי מפתח.")
+                elif status == "invalid_key":
+                    detail = "המפתח לא תקין"
+                else:
+                    detail = "שגיאת חיבור ל-Google, נסי שוב"
+                raise HTTPException(status_code=400, detail=detail)
+            out["tested"] = True
+            set_setting("llm_last_status", status)  # 'ok' or 'rate_limited'
+            if status == "rate_limited":
+                out["warning"] = (
+                    "המפתח תקין ונשמר, אך כרגע הגיע למגבלת הקצב החינמית. "
+                    "הצ׳אט ישתמש בו אוטומטית ברגע שהמכסה תתאפס (בדרך כלל תוך דקה או ביום העוקב)."
+                )
+        set_setting("llm_api_key", key)
+    if body.enabled is not None:
+        set_setting("llm_enabled", "1" if body.enabled else "0")
+    return out
 
 
 # ------------------------------------------------------------
@@ -862,78 +635,6 @@ def _seed_admin_from_env():
 _seed_admin_from_env()
 
 
-def _seed_treatments_to_db(treatments_list: List[Dict]):
-    """Overwrite Excel-sourced rows in DB from the in-memory treatments list."""
-    conn = get_db()
-    conn.execute("DELETE FROM treatments_db WHERE source = 'excel'")
-    for t in treatments_list:
-        conn.execute("""
-            INSERT OR REPLACE INTO treatments_db
-            (id, name, class_name, category, keywords, suitable_for_all_skins,
-             results_timing, aftercare, recommended_frequency,
-             pregnancy_breastfeeding, medical_limitations, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'excel')
-        """, (t["id"], t["name"], t["class_name"], t["category"], t["keywords"],
-              t["suitable_for_all_skins"], t["results_timing"], t["aftercare"],
-              t["recommended_frequency"], t["pregnancy_breastfeeding"], t["medical_limitations"]))
-    conn.commit()
-    conn.close()
-
-
-def _faq_map_from_excel() -> Dict[str, Dict]:
-    """Build name→{question: answer} map from questions.xlsx."""
-    try:
-        faq_df = pd.read_excel(EXCEL_DIR / "questions.xlsx")
-        m: Dict[str, Dict] = {}
-        for _, row in faq_df.iterrows():
-            name = to_text(row.get("שם_הטיפול", "")).lower()
-            q = to_text(row.get("שאלה", ""))
-            a = to_text(row.get("תשובה", ""))
-            if name and q and a:
-                m.setdefault(name, {})[q] = a
-        return m
-    except Exception:
-        return {}
-
-
-def _refresh_treatments_from_db():
-    """Reload TREATMENTS and TREATMENT_MAP from the DB (Excel rows + admin rows)."""
-    global TREATMENTS, TREATMENT_MAP
-    faq_map = _faq_map_from_excel()
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM treatments_db ORDER BY class_name, name"
-    ).fetchall()
-    conn.close()
-    treatments = []
-    for r in rows:
-        d = dict(r)
-        d["faq"] = faq_map.get(d["name"].lower(), {})
-        d["ages"] = ""
-        d["complementary_products"] = ""
-        d["consultation_required"] = ""
-        treatments.append(d)
-    existing_ids = {t["id"] for t in treatments}
-    for _t in _EXTRA_TREATMENTS:
-        if _t["id"] not in existing_ids:
-            treatments.append(_t)
-    TREATMENTS = treatments
-    TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
-
-
-# Seed DB from Excel on first startup (only if table is empty)
-def _initial_seed():
-    conn = get_db()
-    count = conn.execute("SELECT COUNT(*) FROM treatments_db WHERE source='excel'").fetchone()[0]
-    conn.close()
-    if count == 0:
-        _seed_treatments_to_db(TREATMENTS)
-
-
-_initial_seed()
-_refresh_treatments_from_db()
-
-
 class AppointmentCreate(BaseModel):
     client_name: str
     client_phone: Optional[str] = None
@@ -974,7 +675,6 @@ def list_appointments(_: dict = Depends(require_staff)):
 def create_appointment(appt: AppointmentCreate, _: dict = Depends(require_staff)):
     conn = get_db()
     normalized_phone = normalize_phone_for_match(appt.client_phone)
-    # Customer-appointment linking logic: match by normalized phone before saving.
     matched_customer = find_customer_by_phone(conn, appt.client_phone)
     cursor = conn.execute(
         """INSERT INTO appointments
@@ -1036,9 +736,7 @@ def reschedule_appointment(appt_id: int, data: AppointmentReschedule, _: dict = 
 @app.get("/appointments/analytics-legacy")
 def get_analytics(_: dict = Depends(require_staff)):
     conn = get_db()
-
     total = conn.execute("SELECT COUNT(*) as c FROM appointments").fetchone()["c"]
-
     by_treatment = conn.execute("""
         SELECT treatment_name, COUNT(*) as count
         FROM appointments
@@ -1046,7 +744,6 @@ def get_analytics(_: dict = Depends(require_staff)):
         ORDER BY count DESC
         LIMIT 10
     """).fetchall()
-
     by_day = conn.execute("""
         SELECT strftime('%w', date) as day_num, COUNT(*) as count
         FROM appointments
@@ -1054,7 +751,6 @@ def get_analytics(_: dict = Depends(require_staff)):
         GROUP BY day_num
         ORDER BY day_num
     """).fetchall()
-
     by_hour = conn.execute("""
         SELECT substr(time, 1, 2) as hour, COUNT(*) as count
         FROM appointments
@@ -1062,15 +758,11 @@ def get_analytics(_: dict = Depends(require_staff)):
         GROUP BY hour
         ORDER BY hour
     """).fetchall()
-
     recent = conn.execute("""
         SELECT * FROM appointments ORDER BY created_at DESC LIMIT 5
     """).fetchall()
-
     conn.close()
-
     day_names = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
-
     return {
         "total": total,
         "by_treatment": [{"name": r["treatment_name"], "count": r["count"]} for r in by_treatment],
@@ -1209,43 +901,30 @@ def get_business_analytics(
     }
     categories = {}
     total_revenue = 0.0
-    has_revenue = bool(appointment_revenue_col or treatment_revenue_col)
 
     for row in analytics_rows:
-        appointment_date = _parse_appointment_date(row["date"])
-        revenue = _safe_float(row["appointment_revenue_value"]) or _safe_float(row["treatment_revenue_value"])
-        total_revenue += revenue
-
-        if appointment_date:
-            key = _month_key(appointment_date)
+        dt = _parse_appointment_date(row["date"])
+        if dt:
+            key = _month_key(dt)
             if key in monthly:
                 monthly[key]["count"] += 1
-                monthly[key]["revenue"] += revenue
-
-        category = (
-            row["treatment_class_name"]
-            or row["treatment_category"]
-            or row["treatment_name"]
-            or "ללא קטגוריה"
-        )
-        item = categories.setdefault(category, {"category": category, "count": 0, "revenue": 0.0})
-        item["count"] += 1
-        item["revenue"] += revenue
+        rev = _safe_float(row["appointment_revenue_value"]) or _safe_float(row["treatment_revenue_value"])
+        total_revenue += rev
+        if dt and key in monthly:
+            monthly[key]["revenue"] += rev
+        cat = row["treatment_class_name"] or "אחר"
+        categories[cat] = categories.get(cat, 0) + 1
 
     monthly_trend = list(monthly.values())
-    last_count = monthly_trend[-1]["count"] if monthly_trend else 0
-    prev_count = monthly_trend[-2]["count"] if len(monthly_trend) >= 2 else 0
-    if prev_count > 0:
-        monthly_growth_pct = round(((last_count - prev_count) / prev_count) * 100, 1)
-    elif last_count > 0:
-        monthly_growth_pct = 100.0
-    else:
-        monthly_growth_pct = 0.0
+    prev_month = monthly_trend[-2]["count"] if len(monthly_trend) >= 2 else 0
+    curr_month = monthly_trend[-1]["count"] if monthly_trend else 0
+    growth_pct = ((curr_month - prev_month) / prev_month * 100) if prev_month else 0.0
 
-    by_category = sorted(categories.values(), key=lambda item: item["count"], reverse=True)
-    for item in by_category:
-        item["percentage"] = round((item["count"] / total) * 100, 1) if total else 0
-        item["revenue"] = round(item["revenue"], 2)
+    by_category = sorted(
+        [{"category": k, "count": v} for k, v in categories.items()],
+        key=lambda x: x["count"],
+        reverse=True,
+    )
 
     day_names = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
 
@@ -1253,13 +932,10 @@ def get_business_analytics(
         "total": total,
         "today": today_count,
         "this_week": this_week_count,
-        "total_revenue": round(total_revenue, 2),
-        "has_revenue": has_revenue,
-        "monthly_growth_pct": monthly_growth_pct,
-        "monthly_trend": [
-            {**item, "revenue": round(item["revenue"], 2)}
-            for item in monthly_trend
-        ],
+        "total_revenue": total_revenue,
+        "has_revenue": total_revenue > 0,
+        "monthly_growth_pct": round(growth_pct, 1),
+        "monthly_trend": monthly_trend,
         "by_category": by_category,
         "top_category": by_category[0] if by_category else None,
         "least_category": by_category[-1] if by_category else None,
@@ -1299,111 +975,6 @@ def get_appointments_by_category_analytics(
         "top_category": data["top_category"],
         "least_category": data["least_category"],
     }
-
-# ------------------------------------------------------------
-# Recommendation engine
-# ------------------------------------------------------------
-
-def score_treatment(treatment: dict, profile: dict) -> float:
-    text = " ".join(filter(None, [
-        treatment.get("suitable_for_all_skins", ""),
-        treatment.get("keywords", ""),
-        treatment.get("aftercare", ""),
-        treatment.get("results_timing", ""),
-        treatment.get("category", ""),
-        treatment.get("class_name", ""),
-    ])).lower()
-
-    limitations = (treatment.get("medical_limitations") or "").lower()
-    pregnancy_text = (treatment.get("pregnancy_breastfeeding") or "").lower()
-
-    score = 0.0
-
-    goal = (profile.get("goal") or "").lower()
-    if goal and goal in text:
-        score += 3.0
-
-    skin_type = (profile.get("skin_type") or "").lower()
-    if skin_type and skin_type in text:
-        score += 2.5
-
-    age = (profile.get("age_range") or "").lower()
-    if age and age in text:
-        score += 1.0
-
-    area = (profile.get("area") or "").lower()
-    if area and area in text:
-        score += 2.0
-
-    skin_tone = (profile.get("skin_tone") or "").lower()
-    if skin_tone:
-        if skin_tone in limitations:
-            score -= 5.0
-        elif skin_tone in text:
-            score += 1.5
-
-    pregnant = profile.get("pregnant", "")
-    if pregnant == "כן":
-        if "הריון" in limitations or "הנקה" in limitations:
-            score -= 10.0
-        if pregnancy_text and "לא" in pregnancy_text:
-            score -= 5.0
-
-    return score
-
-
-@app.get("/recommendations")
-def get_recommendations(
-    exclude_id: Optional[str] = None,
-    limit: int = 4,
-    current_user: Optional[dict] = Depends(get_current_user),
-):
-    profile = {}
-    preferred_category = None
-
-    if current_user:
-        conn = get_db()
-        row = conn.execute(
-            "SELECT skin_profile, category FROM chat_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
-            (current_user["id"],),
-        ).fetchone()
-        conn.close()
-        if row:
-            profile = json.loads(row["skin_profile"] or "{}")
-            preferred_category = row["category"]
-
-    candidates = [t for t in TREATMENTS if t["id"] != exclude_id]
-
-    if profile:
-        scored = [(t, score_treatment(t, profile)) for t in candidates]
-        scored.sort(key=lambda x: x[1], reverse=True)
-        top = [t for t, s in scored if s > 0][:limit]
-        if len(top) < limit:
-            extras = [t for t, _ in scored if t not in top][: limit - len(top)]
-            top = top + extras
-    else:
-        conn = get_db()
-        rows = conn.execute(
-            "SELECT treatment_id, COUNT(*) as cnt FROM appointments GROUP BY treatment_id ORDER BY cnt DESC LIMIT 20"
-        ).fetchall()
-        conn.close()
-        popular_ids = {r["treatment_id"] for r in rows}
-        popular = [t for t in candidates if t["id"] in popular_ids]
-        rest = [t for t in candidates if t["id"] not in popular_ids]
-        if preferred_category:
-            rest = sorted(rest, key=lambda t: 0 if t.get("class_name") == preferred_category else 1)
-        top = (popular + rest)[:limit]
-
-    return [
-        {
-            "id": t["id"],
-            "name": t["name"],
-            "class_name": t.get("class_name", ""),
-            "category": t.get("category", ""),
-            "description": (t.get("suitable_for_all_skins") or t.get("aftercare") or "")[:100],
-        }
-        for t in top
-    ]
 
 
 # ------------------------------------------------------------
@@ -1657,7 +1228,6 @@ def start_customer_password_reset(body: PasswordResetStartRequest):
     )
     conn.commit()
     conn.close()
-    # Development flow: replace this print/response code with real SMS/email sending later.
     print(f"[password reset] Customer {row['username']} temporary code: {code}")
     return {
         "ok": True,
@@ -1744,7 +1314,7 @@ def bootstrap_admin_info():
     conn.close()
     return {
         "ok": True,
-        "message": "Use POST /auth/staff/bootstrap-admin with JSON username, password, full_name, and optional email. Opening this URL in a browser sends GET and will not create an admin.",
+        "message": "Use POST /auth/staff/bootstrap-admin with JSON username, password, full_name, and optional email.",
         "admin_exists": admin_count > 0,
     }
 
@@ -1935,15 +1505,13 @@ def update_account_settings(body: AccountSettingsUpdate, current_user: dict = De
     conn = get_db()
 
     if user_type == "staff":
-      row = conn.execute("SELECT * FROM staff_users WHERE id = ? AND active = 1", (current_user["id"],)).fetchone()
-      table = "staff_users"
-      display_name_col = "full_name"
-      exclude_type = "staff"
+        row = conn.execute("SELECT * FROM staff_users WHERE id = ? AND active = 1", (current_user["id"],)).fetchone()
+        table = "staff_users"
+        exclude_type = "staff"
     else:
-      row = conn.execute("SELECT * FROM customer_users WHERE id = ? AND active = 1", (current_user["id"],)).fetchone()
-      table = "customer_users"
-      display_name_col = "full_name"
-      exclude_type = "customer"
+        row = conn.execute("SELECT * FROM customer_users WHERE id = ? AND active = 1", (current_user["id"],)).fetchone()
+        table = "customer_users"
+        exclude_type = "customer"
 
     if not row:
         conn.close()
@@ -2061,7 +1629,6 @@ def get_customer_appointments(current_user: dict = Depends(require_authenticated
     if not normalized_phone:
         conn.close()
         return {"ok": True, "appointments": []}
-    # Customer appointments are loaded by saved customer link first, with normalized phone fallback for old rows.
     rows = conn.execute(
         """SELECT id, client_name, client_phone, treatment_id, treatment_name, employee_name,
                   date, time, end_time, status, notes, created_at
@@ -2094,10 +1661,7 @@ def list_staff_users(_: dict = Depends(require_admin)):
         "SELECT * FROM staff_users WHERE role = 'secretary' ORDER BY full_name, username"
     ).fetchall()
     conn.close()
-    return {
-        "ok": True,
-        "users": [staff_user_response(row) for row in rows],
-    }
+    return {"ok": True, "users": [staff_user_response(row) for row in rows]}
 
 
 @app.post("/admin/secretaries", status_code=201)
@@ -2169,11 +1733,7 @@ def create_staff_user(body: StaffUserCreate, current_user: dict = Depends(requir
         raise HTTPException(status_code=409, detail="Username already exists")
     conn.close()
     log_audit("secretary created", current_user, "staff", row["id"], row["username"])
-    return {
-        "ok": True,
-        "message": "Secretary user created successfully",
-        "user": staff_user_response(row),
-    }
+    return {"ok": True, "message": "Secretary user created successfully", "user": staff_user_response(row)}
 
 
 @app.put("/admin/secretaries/{secretary_id}")
@@ -2182,8 +1742,7 @@ def update_secretary(secretary_id: int, body: StaffUserUpdate, current_user: dic
         raise HTTPException(status_code=403, detail="Admins can only update secretary users from this endpoint")
     conn = get_db()
     row = conn.execute(
-        "SELECT * FROM staff_users WHERE id = ? AND role = 'secretary'",
-        (secretary_id,),
+        "SELECT * FROM staff_users WHERE id = ? AND role = 'secretary'", (secretary_id,)
     ).fetchone()
     if not row:
         conn.close()
@@ -2233,8 +1792,7 @@ def update_staff_user(staff_user_id: int, body: StaffUserUpdate, current_user: d
         raise HTTPException(status_code=403, detail="Admins can only update secretary users from this endpoint")
     conn = get_db()
     row = conn.execute(
-        "SELECT * FROM staff_users WHERE id = ? AND role = 'secretary'",
-        (staff_user_id,),
+        "SELECT * FROM staff_users WHERE id = ? AND role = 'secretary'", (staff_user_id,)
     ).fetchone()
     if not row:
         conn.close()
@@ -2275,19 +1833,14 @@ def update_staff_user(staff_user_id: int, body: StaffUserUpdate, current_user: d
         log_audit("username changed", current_user, "staff", staff_user_id, username, f"{row['username']} -> {username}")
     if body.password:
         log_audit("password changed", current_user, "staff", staff_user_id, username)
-    return {
-        "ok": True,
-        "message": "Secretary user updated successfully",
-        "user": staff_user_response(updated),
-    }
+    return {"ok": True, "message": "Secretary user updated successfully", "user": staff_user_response(updated)}
 
 
 @app.delete("/admin/secretaries/{secretary_id}")
 def delete_secretary(secretary_id: int, current_user: dict = Depends(require_admin)):
     conn = get_db()
     row = conn.execute(
-        "SELECT id, username FROM staff_users WHERE id = ? AND role = 'secretary'",
-        (secretary_id,),
+        "SELECT id, username FROM staff_users WHERE id = ? AND role = 'secretary'", (secretary_id,)
     ).fetchone()
     if not row:
         conn.close()
@@ -2303,8 +1856,7 @@ def delete_secretary(secretary_id: int, current_user: dict = Depends(require_adm
 def delete_staff_user(staff_user_id: int, current_user: dict = Depends(require_admin)):
     conn = get_db()
     row = conn.execute(
-        "SELECT id, username FROM staff_users WHERE id = ? AND role = 'secretary'",
-        (staff_user_id,),
+        "SELECT id, username FROM staff_users WHERE id = ? AND role = 'secretary'", (staff_user_id,)
     ).fetchone()
     if not row:
         conn.close()
@@ -2444,61 +1996,6 @@ def get_audit_log(limit: int = 100, _: dict = Depends(require_admin)):
     ).fetchall()
     conn.close()
     return {"ok": True, "items": [dict(row) for row in rows]}
-
-
-# ------------------------------------------------------------
-# Chat session endpoints
-# ------------------------------------------------------------
-
-class SaveSessionRequest(BaseModel):
-    messages: List[Dict]
-    skin_profile: Optional[Dict] = None
-    category: Optional[str] = None
-
-
-@app.post("/chat-sessions")
-def save_chat_session(
-    body: SaveSessionRequest,
-    current_user: Optional[dict] = Depends(get_current_user),
-):
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    conn = get_db()
-    cursor = conn.execute(
-        "INSERT INTO chat_sessions (user_id, messages, skin_profile, category) VALUES (?, ?, ?, ?)",
-        (
-            current_user["id"],
-            json.dumps(body.messages, ensure_ascii=False),
-            json.dumps(body.skin_profile or {}, ensure_ascii=False),
-            body.category,
-        ),
-    )
-    conn.commit()
-    session_id = cursor.lastrowid
-    conn.close()
-    return {"id": session_id}
-
-
-@app.get("/chat-sessions")
-def get_chat_sessions(current_user: Optional[dict] = Depends(get_current_user)):
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 20",
-        (current_user["id"],),
-    ).fetchall()
-    conn.close()
-
-    sessions = []
-    for row in rows:
-        s = dict(row)
-        s["messages"] = json.loads(s["messages"])
-        s["skin_profile"] = json.loads(s.get("skin_profile") or "{}")
-        sessions.append(s)
-    return sessions
 
 
 if __name__ == "__main__":

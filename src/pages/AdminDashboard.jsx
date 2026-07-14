@@ -5,8 +5,8 @@ import CountUp from "react-countup";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, addContactInquiryFeedback, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
 import { JOB_APPLICATION_EVENT, JOB_APPLICATIONS_STORAGE_KEY, getJobApplications, updateJobApplicationStatus, addJobApplicationFeedback } from "../api/jobsApi";
-import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl, listTreatmentsDB, createTreatmentDB, updateTreatmentDB, deleteTreatmentDB } from "../api/medayApi";
-import { getSettings, updateSettingsAccount, updateSettingsPassword, updateSystemSettings } from "../api/settingsApi";
+import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl } from "../api/medayApi";
+import { getSettings, updateSettingsAccount, updateSettingsPassword, updateSystemSettings, getAiSettings, updateAiSettings } from "../api/settingsApi";
 import {
   Activity,
   AlertCircle,
@@ -28,6 +28,7 @@ import {
   Home,
   MessageCircle,
   RefreshCw,
+  Save,
   Search,
   Settings,
   ShieldCheck,
@@ -107,7 +108,6 @@ const NAV_ITEMS = [
   { key: "appointments", icon: Calendar, label: "תורים" },
   { key: "inquiries", icon: MessageCircle, label: "פניות" },
   { key: "jobs", icon: Briefcase, label: "דרושים" },
-  { key: "treatments", icon: Sparkles, label: "טיפולים" },
   { key: "analytics", icon: Activity, label: "ניתוח" },
   { key: "settings", icon: Settings, label: "הגדרות" },
 ];
@@ -973,7 +973,19 @@ const KB_FILES = [
     type: "questions",
     label: "שאלות ותשובות",
     filename: "questions.xlsx",
-    description: "שאלות ותשובות ספציפיות לכל טיפול, מוצגות בעמוד הטיפול",
+    description: "שאלות ותשובות ספציפיות לכל טיפול שהצ'אטבוט משתמש בהן",
+  },
+  {
+    type: "category_questions",
+    label: "שאלות לפי קטגוריה",
+    filename: "category_questions.xlsx",
+    description: "אילו שאלות הצ'אטבוט שואל לכל קטגוריה, באיזה סדר, עם אילו אפשרויות, ואיזה שדות נדרשים לפני המלצה",
+  },
+  {
+    type: "chatbot_settings",
+    label: "נושאים חסומים",
+    filename: "chatbot_settings.xlsx",
+    description: "נושאים שהצ'אטבוט לא יענה עליהם ויפנה לצוות — מחירים, זמינות, עובדות ועוד. הוסיפי שורות להוספת נושאים חדשים.",
   },
 ];
 
@@ -1212,6 +1224,197 @@ function KnowledgeBasePanel({ mainRef }) {
         </button>
       </div>
     </SectionCard>
+  );
+}
+
+const PRIORITY_STYLE = {
+  critical: { label: "קריטי", cls: "bg-red-50 text-red-700 border border-red-200" },
+  high:     { label: "גבוה",  cls: "bg-orange-50 text-orange-700 border border-orange-200" },
+  medium:   { label: "בינוני", cls: "bg-gray-100 text-gray-600 border border-gray-200" },
+};
+
+function ChatbotConfigPanel({ mainRef }) {
+  const [config, setConfig] = useState(null);
+  const [loadingConfig, setLoadingConfig] = useState(true);
+  const [expanded, setExpanded] = useState({});
+
+  useEffect(() => {
+    getChatbotConfig()
+      .then(setConfig)
+      .catch(() => setConfig(null))
+      .finally(() => setLoadingConfig(false));
+  }, []);
+
+  const toggle = (cat) => setExpanded((prev) => ({ ...prev, [cat]: !prev[cat] }));
+
+  if (loadingConfig) {
+    return (
+      <div className="space-y-3">
+        {[...Array(3)].map((_, i) => (
+          <div key={i} className="h-14 animate-pulse rounded-2xl bg-white/70" />
+        ))}
+      </div>
+    );
+  }
+
+  if (!config || !config.categories?.length) {
+    return (
+      <EmptyState
+        icon={MessageCircle}
+        title="לא נמצאו הגדרות קטגוריות"
+        text="העלי קובץ category_questions.xlsx כדי להגדיר את שאלות הצ'אטבוט לפי קטגוריה."
+      />
+    );
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* How the chatbot uses this legend */}
+      <div className="rounded-2xl bg-gradient-to-l from-[#FAF6F1] to-[#F5EDE3] p-4 text-right">
+        <p className="mb-2 text-sm font-extrabold text-gray-800">איך הצ׳אטבוט משתמש בהגדרות אלה?</p>
+        <div className="grid gap-3 text-xs leading-6 text-gray-600 sm:grid-cols-3">
+          <div className="flex items-start gap-2">
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-500" />
+            <span><span className="font-bold text-red-700">קריטי</span> — נשאל ראשון, חובה לפני כל שאלה אחרת</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-orange-500" />
+            <span><span className="font-bold text-orange-700">גבוה</span> — נשאל מיד אחרי קריטי, משפיע מאוד על ההמלצה</span>
+          </div>
+          <div className="flex items-start gap-2">
+            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-gray-400" />
+            <span><span className="font-bold text-gray-700">בינוני</span> — משפר את ההמלצה אם הלקוחה עונה</span>
+          </div>
+        </div>
+        <p className="mt-3 text-xs text-gray-500">
+          שדות <span className="font-bold text-[#C4795A]">מינימום נדרש</span> חייבים להיות מלאים לפני שהצ׳אטבוט יציע המלצה.
+          הלקוחה יכולה גם לבקש "תמליצי לי עכשיו" אחרי שמולא לפחות שדה אחד.
+        </p>
+      </div>
+
+      {/* Mode flow diagram */}
+      <div className="flex items-center gap-2 overflow-x-auto rounded-2xl border border-[#E8C4A0]/60 bg-white/80 px-4 py-3">
+        {[
+          { label: "idle", desc: "שאלות כלליות" },
+          { label: "→" },
+          { label: "questioning", desc: "אוסף מידע" },
+          { label: "→" },
+          { label: "sub_discovery", desc: "עוזרת להבין" },
+          { label: "→" },
+          { label: "recommending", desc: "ממליצה" },
+        ].map((step, i) =>
+          step.label === "→" ? (
+            <ChevronRight key={i} size={14} className="shrink-0 text-gray-300" />
+          ) : (
+            <div key={i} className="shrink-0 text-center">
+              <span className="block rounded-lg bg-[#C4795A]/10 px-2 py-1 text-xs font-bold text-[#8B5030]">{step.label}</span>
+              <span className="mt-1 block text-[10px] text-gray-400">{step.desc}</span>
+            </div>
+          )
+        )}
+      </div>
+
+      {/* Blocked topics live view */}
+      {config.blocked_topics?.length > 0 && (
+        <div className="rounded-2xl border border-[#E8C4A0]/60 bg-[#FAF6F1] p-4">
+          <p className="mb-3 text-right text-sm font-extrabold text-gray-800">
+            נושאים חסומים — הצ׳אטבוט יפנה לצוות במקום לענות
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {config.blocked_topics.map((t) => (
+              <div
+                key={t.topic}
+                className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold ${
+                  t.active
+                    ? "bg-red-50 text-red-700 border border-red-200"
+                    : "bg-gray-100 text-gray-400 border border-gray-200 line-through"
+                }`}
+              >
+                <span className={`h-1.5 w-1.5 rounded-full ${t.active ? "bg-red-500" : "bg-gray-300"}`} />
+                {t.topic}
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-right text-xs text-gray-400">
+            לשינוי — ערכי את <span className="font-bold">chatbot_settings.xlsx</span> והעלי מחדש
+          </p>
+        </div>
+      )}
+
+      {/* Category cards */}
+      <div className="space-y-2">
+        {config.categories.map((cat) => (
+          <div key={cat.category} className="overflow-hidden rounded-2xl border border-[#E8C4A0]/60 bg-[#FAF6F1]">
+            <button
+              type="button"
+              onClick={() => toggle(cat.category)}
+              className="flex w-full items-center justify-between gap-3 p-4 text-right transition hover:bg-[#F5EDE3]"
+            >
+              <div className="flex shrink-0 items-center gap-2">
+                {createElement(expanded[cat.category] ? ChevronUp : ChevronDown, { size: 15, className: "text-gray-400" })}
+                <span className="rounded-lg bg-white px-2 py-0.5 text-xs font-semibold text-gray-600 shadow-sm">
+                  {cat.total_fields} שאלות
+                </span>
+                <span className="rounded-lg bg-[#C4795A]/10 px-2 py-0.5 text-xs font-bold text-[#8B5030]">
+                  מינימום {cat.can_recommend_after} שדות
+                </span>
+              </div>
+              <span className="text-sm font-extrabold text-gray-900">{cat.category}</span>
+            </button>
+
+            {expanded[cat.category] && (
+              <div className="space-y-2 border-t border-[#E8C4A0]/40 p-4">
+                {cat.fields.map((field) => {
+                  const pStyle = PRIORITY_STYLE[field.priority] ?? PRIORITY_STYLE.medium;
+                  return (
+                    <div
+                      key={field.field}
+                      className={`rounded-xl p-3 text-right ${field.is_minimum ? "border border-[#C4795A]/30 bg-white" : "border border-gray-100 bg-white/60"}`}
+                    >
+                      <div className="mb-1.5 flex items-center justify-between gap-2">
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <span className={`rounded-lg px-2 py-0.5 text-[11px] font-bold ${pStyle.cls}`}>
+                            {pStyle.label}
+                          </span>
+                          {field.is_minimum && (
+                            <span className="rounded-lg border border-[#C4795A]/25 bg-[#C4795A]/8 px-2 py-0.5 text-[11px] font-bold text-[#C4795A]">
+                              מינימום
+                            </span>
+                          )}
+                          {field.has_guidance && (
+                            <span className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-600">
+                              כולל הנחיה
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-sm font-bold text-gray-900">{field.question}</p>
+                          <p className="text-[11px] text-gray-400 font-mono">{field.field}</p>
+                        </div>
+                      </div>
+                      {field.options?.length > 0 && (
+                        <div className="flex flex-wrap justify-end gap-1.5">
+                          {field.options.map((opt) => (
+                            <span key={opt} className="rounded-full bg-[#F5EDE3] px-2.5 py-0.5 text-xs font-semibold text-[#8B5030]">
+                              {opt}
+                            </span>
+                          ))}
+                          {field.has_guidance && (
+                            <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-500">
+                              + לא יודעת
+                            </span>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -1469,6 +1672,172 @@ function SettingsMessage({ type, children }) {
     </div>
   );
 }
+
+function AiAssistantPanel() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [info, setInfo] = useState(null);
+  const [keyInput, setKeyInput] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setInfo(await getAiSettings());
+    } catch (err) {
+      setError(err.message || "שגיאה בטעינת הגדרות ה-AI");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const saveKey = async (event) => {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (!keyInput.trim()) {
+      setError("יש להדביק מפתח API");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await updateAiSettings({ api_key: keyInput.trim() });
+      setKeyInput("");
+      setMessage(res?.warning || "המפתח נשמר ואומת בהצלחה ✓");
+      await load();
+    } catch (err) {
+      setError(err.message || "שמירת המפתח נכשלה");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggle = async () => {
+    setError("");
+    setMessage("");
+    try {
+      await updateAiSettings({ enabled: !info?.enabled });
+      await load();
+    } catch (err) {
+      setError(err.message || "עדכון נכשל");
+    }
+  };
+
+  const status = info?.status;
+  const STATUS_UI = {
+    active: { label: "פעיל", color: "#3F9E6A" },
+    off: { label: "כבוי", color: "#9AA0A6" },
+    no_key: { label: "ללא מפתח", color: "#D9822B" },
+    limited: { label: "המכסה נוצלה", color: "#D9822B" },
+    invalid: { label: "מפתח לא תקין", color: "#C4544E" },
+    error: { label: "תקלה זמנית", color: "#9AA0A6" },
+  };
+  const statusLabel = (STATUS_UI[status] || STATUS_UI.no_key).label;
+  const statusColor = (STATUS_UI[status] || STATUS_UI.no_key).color;
+
+  const ALERTS = {
+    no_key: {
+      bg: "#EEF5F6", border: "#9BC7CE", icon: "💡",
+      title: "עדיין ללא מפתח AI",
+      body: "הצ׳אט עובד מצוין עם מאגר הידע 💛 להוספת ניסוח חכם בשאלות חופשיות — צרו מפתח חינמי (בקישור למטה) והדביקו אותו כאן. אפשר גם להשאיר כך.",
+    },
+    limited: {
+      bg: "#FDF3E7", border: "#E7B36E", icon: "🕒",
+      title: "המכסה החינמית של היום נוצלה",
+      body: "הצ׳אט ממשיך לעבוד כרגיל עם מאגר הידע 💛 המכסה מתאפסת אוטומטית מדי יום — או שאפשר ליצור מפתח חדש (חינם) ולהדביק אותו כאן כדי לחדש עכשיו.",
+    },
+    invalid: {
+      bg: "#FBECEB", border: "#D98B86", icon: "⚠️",
+      title: "המפתח כבר לא תקין",
+      body: "הצ׳אט ממשיך לעבוד כרגיל. כדי להחזיר את העוזר החכם — צרו מפתח חדש (חינם) בקישור למטה והדביקו אותו כאן.",
+    },
+    error: {
+      bg: "#F3F1EE", border: "#C9C3BB", icon: "🔌",
+      title: "תקלת חיבור זמנית",
+      body: "יש תקלה זמנית בחיבור ל-AI. הצ׳אט ממשיך לעבוד כרגיל — בדרך כלל זה מסתדר מעצמו.",
+    },
+  };
+  const alert = ALERTS[status];
+
+  return (
+    <SectionCard
+      icon={Sparkles}
+      title="עוזר ה-AI של הצ׳אט"
+      subtitle="שכבת בינה אופציונלית — הצ׳אט עובד מצוין גם בלעדיה"
+      className="lg:col-span-3"
+    >
+      {loading ? (
+        <div className="h-32 animate-pulse rounded-3xl bg-[#FAF6F1]" />
+      ) : (
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[#FAF6F1] px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: statusColor }} />
+              <span className="text-sm font-black text-gray-800">מצב: {statusLabel}</span>
+              {info?.key_masked ? <span className="text-xs text-gray-500">({info.key_masked})</span> : null}
+            </div>
+            <button
+              onClick={toggle}
+              className="rounded-full border border-[#C4795A]/40 px-4 py-1.5 text-xs font-black text-[#9B5C38] transition hover:bg-[#C4795A] hover:text-white"
+            >
+              {info?.enabled ? "כבה את ה-AI" : "הפעל את ה-AI"}
+            </button>
+          </div>
+
+          {alert ? (
+            <div
+              className="flex items-start gap-3 rounded-2xl border px-4 py-3"
+              style={{ background: alert.bg, borderColor: alert.border }}
+            >
+              <span className="text-xl leading-none">{alert.icon}</span>
+              <div>
+                <p className="text-sm font-black text-gray-800">{alert.title}</p>
+                <p className="mt-1 text-sm leading-6 text-gray-600">{alert.body}</p>
+              </div>
+            </div>
+          ) : null}
+
+          <p className="text-sm leading-7 text-gray-600">
+            העוזר החכם משפר את הניסוח בשאלות חופשיות. הוא חינמי לגמרי (Google Gemini) — ואם המפתח ייגמר או יפסיק לעבוד, הצ׳אט ימשיך לעבוד כרגיל עם מאגר הידע. כדי לחדש, צרו מפתח חינמי חדש והדביקו אותו כאן.
+          </p>
+
+          <ol className="space-y-2 rounded-2xl border border-[#C4795A]/15 bg-white px-4 py-3 text-sm leading-7 text-gray-700">
+            <li>
+              1. פתחו את דף המפתחות של Google:{" "}
+              <a href={info?.get_key_url} target="_blank" rel="noreferrer" className="font-black text-[#4A9BA8] underline">
+                יצירת מפתח חינמי ↗
+              </a>
+            </li>
+            <li>2. התחברו עם חשבון Google ולחצו על "Create API key".</li>
+            <li>3. העתיקו את המפתח, הדביקו אותו למטה ולחצו "שמירת מפתח".</li>
+          </ol>
+
+          <form onSubmit={saveKey} className="space-y-3">
+            <SettingsInput label="מפתח API חדש" value={keyInput} onChange={setKeyInput} type="password" placeholder="הדביקי כאן את המפתח" />
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-[#C4795A] px-5 py-3 text-sm font-black text-white shadow-lg shadow-[#C4795A]/20 transition hover:bg-[#9B5C38] disabled:opacity-60"
+            >
+              <Save size={16} />
+              {saving ? "מאמת ושומר..." : "שמירת מפתח"}
+            </button>
+          </form>
+
+          <SettingsMessage type="error">{error}</SettingsMessage>
+          <SettingsMessage type="success">{message}</SettingsMessage>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
 
 function AdminSettingsPanel() {
   const [loading, setLoading] = useState(true);
@@ -2224,19 +2593,6 @@ export default function AdminDashboard() {
               </Motion.div>
             ) : null}
 
-            {activeTab === "treatments" ? (
-              <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5">
-                <SectionCard
-                  icon={Sparkles}
-                  title="ניהול טיפולים"
-                  subtitle="הוסיפי, ערכי ומחקי טיפולים — שינויים נשמרים מיידית ומגיעים לצ׳אטבוט"
-                  className="col-span-1"
-                >
-                  <TreatmentsManagerPanel mainRef={mainRef} />
-                </SectionCard>
-                <KnowledgeBasePanel mainRef={mainRef} />
-              </Motion.div>
-            ) : null}
 
             {activeTab === "analytics" ? (
               <>
@@ -2339,6 +2695,7 @@ export default function AdminDashboard() {
             {activeTab === "settings" ? (
               <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
                 <AdminSettingsPanel />
+                <AiAssistantPanel />
                 {false ? <PlaceholderPanel
                   icon={Settings}
                   title="הגדרות מערכת"

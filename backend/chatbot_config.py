@@ -10,9 +10,14 @@ CONFIDENCE_THRESHOLD = 0.70
 MAX_CONTEXT_MESSAGES = 6
 
 CLINIC_PHONE = "*3691"
-# openai/gpt-oss-120b is a reasoning model — chatbot_router passes reasoning_effort="low"
-# so hidden reasoning tokens don't crowd out the JSON reply within MAX_TOKENS.
-GROQ_MODEL = "openai/gpt-oss-120b"
+# Optional LLM layer. Provider is Google Gemini (generous free tier, no card).
+# The API key is stored in the DB (cb_settings 'llm_api_key') so the clinic can
+# paste a fresh free key from the admin page — env GEMINI_API_KEY is a fallback.
+# NOTE: gemini-2.0-flash returns free-tier limit:0 on some accounts/regions;
+# gemini-flash-latest has free quota and works — keep this unless you enable billing.
+GEMINI_MODEL = "gemini-flash-latest"
+# Where the owner creates a free key (shown in the admin page):
+GEMINI_KEY_URL = "https://aistudio.google.com/app/apikey"
 EXCEL_FILENAME = "MeDay_Treatments_Data_finalalmost.xlsx"
 CHATBOT_DB_PATH = BASE_DIR / "chatbot.db"
 

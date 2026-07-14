@@ -158,57 +158,6 @@ const SECTION_META = {
   "everyday-styling": { eyebrow: "EVERYDAY & LESSONS"   },
 };
 
-const TREATMENT_PREVIEW_LINE_LIMIT = 4;
-const TREATMENT_PREVIEW_CHAR_LIMIT = 260;
-
-function getTreatmentContentLines(treatment) {
-  const source = treatment.details?.length
-    ? treatment.details
-    : treatment.description
-      ? treatment.description.split(/\n+/)
-      : [treatment.summary];
-
-  return source
-    .map((line) => String(line || "").trim())
-    .filter(Boolean)
-    .filter((line, index, lines) => lines.indexOf(line) === index);
-}
-
-function truncateText(text, maxLength) {
-  if (text.length <= maxLength) return text;
-
-  const sliced = text.slice(0, maxLength);
-  const withoutLastPartialWord = sliced.replace(/\s+\S*$/, "").trim();
-  return `${withoutLastPartialWord || sliced.trim()}...`;
-}
-
-function isLongTreatmentContent(lines) {
-  const contentLength = lines.join(" ").length;
-  return (
-    lines.length > TREATMENT_PREVIEW_LINE_LIMIT ||
-    contentLength > TREATMENT_PREVIEW_CHAR_LIMIT
-  );
-}
-
-function getTreatmentPreviewLines(lines) {
-  const preview = [];
-  let remainingChars = TREATMENT_PREVIEW_CHAR_LIMIT;
-
-  for (const line of lines) {
-    if (preview.length >= TREATMENT_PREVIEW_LINE_LIMIT || remainingChars <= 0) break;
-
-    if (line.length > remainingChars) {
-      preview.push(truncateText(line, remainingChars));
-      break;
-    }
-
-    preview.push(line);
-    remainingChars -= line.length + 1;
-  }
-
-  return preview;
-}
-
 function CosmeticSectionBlock({ section }) {
   const [openSlug, setOpenSlug] = useState(null);
   const meta = SECTION_META[section.slug] || SECTION_META["classic"];
@@ -244,12 +193,6 @@ function CosmeticSectionBlock({ section }) {
       <div className="px-10 py-8 grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-8">
         {section.treatments.map((treatment) => {
           const isOpen = openSlug === treatment.slug;
-          const contentLines = getTreatmentContentLines(treatment);
-          const shouldCollapse = isLongTreatmentContent(contentLines);
-          const visibleLines = isOpen || !shouldCollapse
-            ? contentLines
-            : getTreatmentPreviewLines(contentLines);
-
           return (
             <div key={treatment.slug} className="text-right">
               <h3
@@ -258,40 +201,44 @@ function CosmeticSectionBlock({ section }) {
               >
                 {treatment.name}
               </h3>
-              {visibleLines.length > 0 && (
-              <AnimatePresence initial={false} mode="popLayout">
+              <p className="text-sm leading-relaxed mb-3" style={{ color: "#5C4033" }}>
+                {treatment.summary}
+              </p>
+
+              {/* expandable details */}
+              <AnimatePresence initial={false}>
+                {isOpen && (
                   <motion.div
-                    key={isOpen || !shouldCollapse ? "full" : "preview"}
                     initial={{ height: 0, opacity: 0 }}
                     animate={{ height: "auto", opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
                     transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                     style={{ overflow: "hidden" }}
                   >
-                    <div className="mb-3 space-y-1.5 text-base leading-relaxed" style={{ color: "#5C4033" }}>
-                      {visibleLines.map((line, i) => (
-                        <p key={`${treatment.slug}-line-${i}`}>{line}</p>
+                    <div className="mb-3 space-y-1.5">
+                      {(treatment.details || []).slice(1).map((line, i) => (
+                        <p key={i} className="text-sm leading-relaxed" style={{ color: "#5C4033" }}>
+                          • {line}
+                        </p>
                       ))}
                     </div>
                   </motion.div>
+                )}
               </AnimatePresence>
-              )}
 
               {/* read more toggle */}
-              {shouldCollapse && (
               <button
                 onClick={() => setOpenSlug(isOpen ? null : treatment.slug)}
-                className="inline-flex items-center gap-1 text-base font-semibold mb-4"
+                className="inline-flex items-center gap-1 text-sm font-semibold mb-4"
                 style={{ color: "#4A9BA8" }}
               >
                 <span>{isOpen ? "סגור ▲" : "לקרוא עוד ▼"}</span>
               </button>
-              )}
 
               {/* CTA — bordered style */}
               <div>
                 <a
-                  href="https://api.whatsapp.com/send?phone=97248306544"
+                  href="https://wa.me/972"
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 px-5 py-2 text-sm font-bold rounded-full transition-colors duration-200"
@@ -416,7 +363,7 @@ function PromoDescriptionBlock({ heading, paragraphs }) {
         {/* CTA */}
         <div className="mt-12">
           <a
-            href="https://api.whatsapp.com/send?phone=97248306544"
+            href="https://wa.me/972"
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-9 py-3.5 font-bold text-white rounded-full transition-opacity hover:opacity-90"
@@ -468,12 +415,7 @@ export default function ServiceCategoryPage() {
 
         {/* full-bleed category photo */}
         <img
-          src={(() => {
-            const photo = CATEGORY_PHOTOS[categorySlug] || "photo-1570172619644-dfd03ed5d881";
-            return photo?.startsWith("photo-")
-              ? `https://images.unsplash.com/${photo}?auto=format&fit=crop&w=1400&q=85`
-              : photo;
-          })()}
+          src={(() => { const p = CATEGORY_PHOTOS[categorySlug] || "photo-1570172619644-dfd03ed5d881"; return p.startsWith?.("photo-") ? `https://images.unsplash.com/${p}?auto=format&fit=crop&w=1400&q=85` : p; })()}
           alt={category.name}
           className="absolute inset-0 w-full h-full object-cover object-center"
         />
