@@ -8,32 +8,113 @@ keyword short-circuit kept is the price guard (hard rule, belt-and-suspenders).
 Routing for in_flow (recommendation) mode is still button-based and LLM-free.
 """
 import os
+import re
 import json
+import time
 from typing import Optional
-from groq import Groq
+import requests
 
 from chatbot_config import (
     CONFIDENCE_THRESHOLD, MAX_CONTEXT_MESSAGES,
-    CLINIC_PHONE, GROQ_MODEL, SYSTEM_PROMPT,
+    CLINIC_PHONE, GEMINI_MODEL, SYSTEM_PROMPT,
 )
 from chatbot_db import (
     get_session, save_session, append_context,
     get_faq_entries, get_faq_by_id, get_categories, get_category_by_id,
     get_treatment_by_id, get_all_treatments_summary, get_treatments_in_category,
-    get_forward_topics,
+    get_forward_topics, get_setting, set_setting,
 )
+from datetime import datetime, timezone
 from chatbot_flow import (
     build_question_response, apply_score, get_top_treatments,
     get_base_treatment, format_recommendation_text,
     format_terminal_text, format_intro,
 )
 
-_GROQ_KEY = os.getenv("GROQ_API_KEY", "")
-_groq = Groq(api_key=_GROQ_KEY) if _GROQ_KEY else None
+# ── Optional LLM layer: Google Gemini (free tier). Key comes from the DB so the
+#    clinic can paste a fresh key from the admin page; env is a fallback. If no
+#    key or it's disabled, the bot runs on its deterministic core. ─────────────
+
+def _get_llm_key() -> str:
+    return (get_setting("llm_api_key") or os.getenv("GEMINI_API_KEY", "")).strip()
 
 
-def _groq_ok() -> bool:
-    return bool(_GROQ_KEY and _GROQ_KEY.strip().startswith("gsk_") and _groq)
+def _llm_enabled() -> bool:
+    return get_setting("llm_enabled", "1") != "0"
+
+
+def _llm_ok() -> bool:
+    return _llm_enabled() and bool(_get_llm_key())
+
+
+def _record_llm_status(status: str):
+    """Remember the last LLM outcome so the admin panel can show it in plain words.
+    status: 'ok' | 'rate_limited' | 'invalid_key' | 'error'."""
+    set_setting("llm_last_status", status)
+    set_setting("llm_last_status_at", datetime.now(timezone.utc).isoformat())
+
+
+def _call_gemini(system: str, user_prompt: str, key: Optional[str] = None,
+                 timeout: int = 20, max_tokens: int = 500) -> str:
+    """Single Gemini generateContent call. Returns the raw text (JSON string)."""
+    key = key or _get_llm_key()
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+    body = {
+        "system_instruction": {"parts": [{"text": system}]},
+        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+        "generationConfig": {
+            "temperature": 0.4,
+            "maxOutputTokens": max_tokens,
+            "responseMimeType": "application/json",
+            # gemini-flash-latest is a "thinking" model; without this it can spend the
+            # whole token budget on internal thoughts and return empty content.
+            "thinkingConfig": {"thinkingBudget": 0},
+        },
+    }
+    # Retry transient Google failures (timeouts, connection drops, 500/502/503).
+    for attempt in range(3):
+        try:
+            resp = requests.post(url, params={"key": key}, json=body, timeout=timeout)
+        except (requests.Timeout, requests.ConnectionError):
+            if attempt < 2:
+                time.sleep(1.2 * (attempt + 1))
+                continue
+            raise
+        if resp.status_code in (500, 502, 503) and attempt < 2:
+            time.sleep(1.2 * (attempt + 1))
+            continue
+        break
+    resp.raise_for_status()
+    data = resp.json()
+    parts = (data.get("candidates") or [{}])[0].get("content", {}).get("parts") or []
+    if not parts:
+        raise RuntimeError(f"empty completion (finishReason={(data.get('candidates') or [{}])[0].get('finishReason')})")
+    return parts[0].get("text", "")
+
+
+def _test_llm_key(key: str) -> tuple[bool, str]:
+    """Validate a key with a tiny call. Returns (accepted, status) where status is
+    one of 'ok' | 'rate_limited' | 'invalid_key' | 'error'. A 429 means the key
+    authenticated but hit its free-tier quota — the key itself is valid, so we
+    accept it (an invalid key returns 400/401/403, never 429)."""
+    key = (key or "").strip()
+    if not key:
+        return False, "invalid_key"
+    try:
+        _call_gemini('Reply with JSON {"ok":true}.', "ping", key=key, timeout=25, max_tokens=20)
+        return True, "ok"
+    except requests.HTTPError as e:
+        code = e.response.status_code if e.response is not None else 0
+        body = e.response.text if e.response is not None else ""
+        if code == 429:
+            if "limit: 0" in body:
+                return False, "no_quota"     # this Google account/project has NO free-tier allowance
+            return True, "rate_limited"      # valid key, just a transient throttle right now
+        if code in (400, 401, 403):
+            return False, "invalid_key"
+        return False, "error"
+    except Exception:
+        return False, "error"
 
 
 # ── Small-talk / acknowledgment short-circuit (no LLM) ───────────────────────
@@ -237,6 +318,40 @@ def _build_detail_block(treatments: list) -> str:
             continue
         lines.append(f"■ {t['treatment_name']} ({t['category_id']})\n  " + " | ".join(parts))
     return "\n".join(lines)
+
+
+# The Groq free tier caps requests at 12k tokens/min. Sending every treatment's
+# full attribute block (~28k chars) makes EVERY call 413 → the LLM never answers
+# and the bot silently drops to keyword fallback. So we send detail only for the
+# treatments the message is actually about, capped to a safe char budget.
+_DETAIL_BLOCK_CAP = 2000
+
+
+def _build_scoped_detail_block(focus_cat: Optional[str], focus_treatment: Optional[dict]) -> str:
+    """Detail only for the matched treatment + the focused category's treatments,
+    size-capped so the LLM prompt stays within the model's token budget."""
+    picked, seen = [], set()
+
+    def add(t):
+        if t and t.get("treatment_id") not in seen and _has_detail(t):
+            seen.add(t["treatment_id"])
+            picked.append(t)
+
+    add(focus_treatment)
+    if focus_cat:
+        for t in get_treatments_in_category(focus_cat):
+            add(t)
+
+    out, total = [], 0
+    for t in picked:
+        block = _build_detail_block([t])
+        if not block:
+            continue
+        if out and total + len(block) > _DETAIL_BLOCK_CAP:
+            break
+        out.append(block)
+        total += len(block)
+    return "\n".join(out)
 
 
 # ── Soft guidance: suggestion chips (send free text, non-binding) ────────────
@@ -501,6 +616,12 @@ _OFFER_Q_KW = [
     "what do you offer", "what do you have", "what treatments", "which treatments",
     "your treatments", "services do you", "what services",
     "ماذا تقدمون", "ما هي علاجاتكم", "شو عندكم", "ايش عندكم", "ما هي خدماتكم", "شو بتقدموا",
+    # "What can you help with?" — a capabilities question → answer with the catalog.
+    "במה אתה עוזר", "במה את עוזרת", "במה אתם עוזרים", "במה תוכל לעזור", "במה תוכלי לעזור",
+    "במה אתה יכול לעזור", "במה את יכולה לעזור", "מה אתה יכול לעשות", "מה את יכולה לעשות",
+    "איך אתה יכול לעזור", "איך את יכולה לעזור", "מה אתה עוזר", "מה אפשר לשאול",
+    "what can you help", "what can you do", "how can you help", "what do you do",
+    "بماذا تساعد", "كيف يمكنك مساعدتي", "ماذا تفعل", "كيف تساعدني",
 ]
 
 
@@ -610,20 +731,43 @@ def _match_logistics_faq(message: str):
     return "\n".join(answers) if answers else None
 
 
+# Hebrew final letters → base form, so "בשיער"/"שיער" and "מחזיק"/"מחזיקים" align.
+_HEB_FINAL = str.maketrans("םןץףך", "מנצפכ")
+
+
+def _norm_tokens(text: str) -> list:
+    """Normalize + tokenize: fold final letters, drop punctuation, keep words ≥3."""
+    t = (text or "").translate(_HEB_FINAL).lower()
+    t = re.sub(r"[^\w֐-׿]+", " ", t)
+    return [w for w in t.split() if len(w) >= 3]
+
+
+def _tok_hit(mt: str, cand: set) -> bool:
+    """A message token matches a candidate token by equality or substring overlap
+    (handles Hebrew prefixes like ב/ל/ה: 'בגברים' vs 'גברים')."""
+    if mt in cand:
+        return True
+    return any((len(mt) >= 4 and mt in ct) or (len(ct) >= 4 and ct in mt) for ct in cand)
+
+
 def _match_faq(message: str):
-    """Best-effort FAQ match by phrase substring (fallback use). Conservative."""
-    ml = (message or "").lower()
+    """Fuzzy FAQ match — Hebrew-normalized token overlap, no LLM. Catches phrasing
+    variations (e.g. 'כמה זמן מחזיק לק גל' → the gel-polish FAQ) that exact keyword
+    matching misses. Requires ≥2 shared significant tokens to avoid misfires."""
+    msg = _norm_tokens(message)
+    if len(msg) < 2:
+        return None
     best, best_score = None, 0
     for f in get_faq_entries():
-        phrases = []
-        if f.get("canonical_question"):
-            phrases.append(f["canonical_question"])
-        if f.get("example_phrasings"):
-            phrases += f["example_phrasings"].split(",")
-        score = sum(1 for p in phrases if len(p.strip()) >= 5 and p.strip().lower() in ml)
+        cand = set(_norm_tokens(
+            (f.get("canonical_question") or "") + " " + (f.get("example_phrasings") or "")
+        ))
+        if not cand:
+            continue
+        score = sum(1 for mt in msg if _tok_hit(mt, cand))
         if score > best_score:
             best_score, best = score, f
-    return best["answer"] if best and best_score >= 1 else None
+    return best["answer"] if best and best_score >= 2 else None
 
 
 def _match_treatment(message: str):
@@ -800,38 +944,53 @@ def _llm_respond(message: str, context: list, lang: str) -> dict:
     categories = get_categories()
     faqs = get_faq_entries()
 
-    # Build category block + treatment names per category
+    # What is this message about? Resolve a focus category/treatment from the
+    # message, then recent context ("does it hurt?" refers to the last one). Used
+    # to scope the detail we send so the prompt fits the model's token budget.
+    ctx_text = " ".join(m.get("content", "") for m in (context or []))
+    focus_cat = _detect_category_in_message(message) or _detect_category_in_message(ctx_text)
+    focus_treatment = _match_treatment(message) or _match_treatment(ctx_text)
+    if focus_treatment and not focus_cat:
+        focus_cat = focus_treatment.get("category_id")
+
+    # Category block: every category is listed by name (so the bot always knows
+    # the full menu), but treatment names are expanded only for the focused
+    # category — listing all 135 treatments on every call blows the token budget.
     cat_lines = []
     rec_ids = []
-    detail_treatments = []  # treatments carrying attributes → detail block below
     for c in categories:
         suffix = ""
         if c.get("has_recommendation"):
             suffix = f"  ← ניתן להפעיל שאלון המלצה (action=start_flow:{c['category_id']})"
             rec_ids.append(c["category_id"])
-        treatments = get_treatments_in_category(c["category_id"])
-        t_names = [t["treatment_name"] for t in treatments if t.get("treatment_name")]
-        # Mark which treatments have real detail (that the LLM actually receives)
-        # vs. name-only. Based on rich fields, not the generic short_description.
-        detailed = {t["treatment_id"] for t in treatments if _has_detail(t)}
-        t_parts = []
-        for t in treatments:
-            if t.get("treatment_name"):
-                marker = "" if t["treatment_id"] in detailed else " [שם בלבד]"
-                t_parts.append(t["treatment_name"] + marker)
-            if t["treatment_id"] in detailed:
-                detail_treatments.append(t)
-        t_block = ", ".join(t_parts) if t_parts else "—"
-        cat_lines.append(f"• [{c['category_id']}] {c['category_name']}{suffix}\n  שירותים: {t_block}")
+        line = f"• [{c['category_id']}] {c['category_name']}{suffix}"
+        if c["category_id"] == focus_cat:
+            treatments = get_treatments_in_category(c["category_id"])
+            # Mark treatments we have no detail for as [name only] so the bot
+            # won't invent specifics about them.
+            detailed = {t["treatment_id"] for t in treatments if _has_detail(t)}
+            t_parts = [
+                t["treatment_name"] + ("" if t["treatment_id"] in detailed else " [שם בלבד]")
+                for t in treatments if t.get("treatment_name")
+            ]
+            if t_parts:
+                line += "\n  שירותים: " + ", ".join(t_parts)
+        cat_lines.append(line)
     cat_block = "\n".join(cat_lines)
 
-    # Detailed attributes — lets the bot answer comparisons, duration, prep,
-    # aftercare, pain, downtime etc. strictly from data (no hallucination).
-    detail_block = _build_detail_block(detail_treatments)
+    # Detailed attributes — lets the bot answer comparisons, prep, aftercare,
+    # pain, downtime etc. strictly from data (no hallucination). Scoped to focus.
+    detail_block = _build_scoped_detail_block(focus_cat, focus_treatment)
 
+    # Scope the FAQ block to the focus category (+ general) so we don't ship every
+    # laser/botox aftercare FAQ on every call. Full list only when focus unknown.
+    faq_subset = faqs
+    if focus_cat:
+        faq_subset = [f for f in faqs
+                      if (f.get("category_id") in (focus_cat, "GENERAL")) or not f.get("category_id")]
     faq_block = "\n\n".join(
         f"שאלה: {f['canonical_question']}\nתשובה: {f['answer']}"
-        for f in faqs
+        for f in faq_subset
     )
 
     ctx_str = ""
@@ -877,25 +1036,22 @@ def _llm_respond(message: str, context: list, lang: str) -> dict:
 - "forward": true רק אם נדרשת התערבות אנושית (שאלה רפואית ספציפית, תלונה, תיאום תור)"""
 
     try:
-        resp = _groq.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-            temperature=0.4,
-            max_tokens=500,
-        )
-        data = json.loads(resp.choices[0].message.content)
-        # Safety: strip price info from reply
-        reply = data.get("reply") or ""
+        raw = _call_gemini(SYSTEM_PROMPT, prompt)
+        data = json.loads(raw)
+        _record_llm_status("ok")
         return {
-            "reply": reply,
+            "reply": data.get("reply") or "",
             "action": data.get("action") or None,
             "forward": bool(data.get("forward", False)),
         }
+    except requests.HTTPError as e:
+        code = e.response.status_code if e.response is not None else 0
+        _record_llm_status("rate_limited" if code == 429
+                           else "invalid_key" if code in (400, 401, 403) else "error")
+        print(f"[chatbot llm error] HTTP {code}")
+        return {"reply": "", "action": None, "forward": False}
     except Exception as e:
+        _record_llm_status("error")
         print(f"[chatbot llm error] {e}")
         return {"reply": "", "action": None, "forward": False}
 
@@ -1024,7 +1180,7 @@ def _handle_flow_button(session: dict, session_id: str, button_value: str, quest
 # Words that appear in only ONE category — safe to use for unambiguous detection
 _CAT_UNIQUE_KW: dict[str, list[str]] = {
     "CAT-01": ["מניקור", "פדיקור", "ציפורניים", "ג'ל", "אקריל", "שעלק"],
-    "CAT-02": ["עיצוב שיער", "תספורת", "צביעה", "בלייצ'", "החלקה", "קרטין", "גוונים"],
+    "CAT-02": ["עיצוב שיער", "שיער", "תספורת", "צביעה", "בלייצ'", "החלקה", "קרטין", "גוונים", "פן"],
     "CAT-03": ["קוסמטיקה", "פנים", "ניקוי עמוק", "פילינג", "מסכה"],
     "CAT-04": ["טיפולי גוף", "גוף", "עיסוי", "דלקות", "ג'קוזי"],
     "CAT-05": ["הסרת שיער", "לייזר", "שעווה", "אלקטרולוגיה"],
@@ -1038,11 +1194,13 @@ _CAT_UNIQUE_KW: dict[str, list[str]] = {
 def _detect_category_in_message(message: str) -> Optional[str]:
     """Return category_id if message clearly mentions one specific category."""
     msg_lower = " " + message + " "
+    # Score by matched-keyword length so a specific phrase ("הסרת שיער" → CAT-05)
+    # outweighs a generic word it contains ("שיער" → CAT-02) and wins the category.
     scores: dict[str, int] = {}
     for cat_id, keywords in _CAT_UNIQUE_KW.items():
         for kw in keywords:
             if kw in msg_lower:
-                scores[cat_id] = scores.get(cat_id, 0) + 1
+                scores[cat_id] = scores.get(cat_id, 0) + len(kw)
     if not scores:
         return None
     best = max(scores, key=scores.get)
@@ -1212,8 +1370,16 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
         save_session(session_id, session)
         return picker
 
+    # 5. Known FAQ (fuzzy, LLM-free) → answer from the FAQ table. Runs before the
+    #    LLM so FAQ answers work forever, even with no LLM available.
+    faq_ans = _match_faq(message)
+    if faq_ans:
+        append_context(session, "assistant", faq_ans, MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return {"reply": faq_ans, "buttons": None, "mode": "general", "no_suggest": True}
+
     # Single LLM call (only reached for open-ended questions)
-    if not _groq_ok():
+    if not _llm_ok():
         resp = _deterministic_fallback(message, lang) or _out_of_scope_reply(lang)
         if resp.get("last_treatment_id"):
             session["last_treatment_id"] = resp["last_treatment_id"]

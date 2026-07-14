@@ -33,6 +33,29 @@ export async function updateSystemSettings(settings) {
   return res.json();
 }
 
+export async function getAiSettings() {
+  const res = await fetch(`${API_BASE_URL}/chat/ai-settings`, {
+    headers: authHeaders(),
+  });
+  if (!res.ok) {
+    throw new Error(await readApiError(res, "Failed to load AI settings"));
+  }
+  return res.json();
+}
+
+export async function updateAiSettings(data) {
+  const res = await fetch(`${API_BASE_URL}/chat/ai-settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(data),
+  });
+  const result = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(result.detail || "Failed to update AI settings");
+  }
+  return result;
+}
+
 export async function updateSettingsAccount(data) {
   const res = await fetch(`${API_BASE_URL}/settings/account`, {
     method: "PUT",

@@ -99,7 +99,32 @@ def init_chatbot_db():
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cb_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
     _migrate_treatment_columns(conn)
+    conn.commit()
+    conn.close()
+
+
+# ── Key/value settings (LLM API key, enabled flag, …) ─────────────────────────
+
+def get_setting(key: str, default=None):
+    conn = get_chatbot_db()
+    row = conn.execute("SELECT value FROM cb_settings WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value):
+    conn = get_chatbot_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO cb_settings (key, value) VALUES (?, ?)",
+        (key, "" if value is None else str(value)),
+    )
     conn.commit()
     conn.close()
 

@@ -6,7 +6,7 @@ import { useAutoAnimate } from "@formkit/auto-animate/react";
 import { CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, addContactInquiryFeedback, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
 import { JOB_APPLICATION_EVENT, JOB_APPLICATIONS_STORAGE_KEY, getJobApplications, updateJobApplicationStatus, addJobApplicationFeedback } from "../api/jobsApi";
 import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl } from "../api/medayApi";
-import { getSettings, updateSettingsAccount, updateSettingsPassword, updateSystemSettings } from "../api/settingsApi";
+import { getSettings, updateSettingsAccount, updateSettingsPassword, updateSystemSettings, getAiSettings, updateAiSettings } from "../api/settingsApi";
 import {
   Activity,
   AlertCircle,
@@ -28,6 +28,7 @@ import {
   Home,
   MessageCircle,
   RefreshCw,
+  Save,
   Search,
   Settings,
   ShieldCheck,
@@ -1672,6 +1673,172 @@ function SettingsMessage({ type, children }) {
   );
 }
 
+function AiAssistantPanel() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [info, setInfo] = useState(null);
+  const [keyInput, setKeyInput] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError("");
+    try {
+      setInfo(await getAiSettings());
+    } catch (err) {
+      setError(err.message || "שגיאה בטעינת הגדרות ה-AI");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const saveKey = async (event) => {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+    if (!keyInput.trim()) {
+      setError("יש להדביק מפתח API");
+      return;
+    }
+    setSaving(true);
+    try {
+      const res = await updateAiSettings({ api_key: keyInput.trim() });
+      setKeyInput("");
+      setMessage(res?.warning || "המפתח נשמר ואומת בהצלחה ✓");
+      await load();
+    } catch (err) {
+      setError(err.message || "שמירת המפתח נכשלה");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const toggle = async () => {
+    setError("");
+    setMessage("");
+    try {
+      await updateAiSettings({ enabled: !info?.enabled });
+      await load();
+    } catch (err) {
+      setError(err.message || "עדכון נכשל");
+    }
+  };
+
+  const status = info?.status;
+  const STATUS_UI = {
+    active: { label: "פעיל", color: "#3F9E6A" },
+    off: { label: "כבוי", color: "#9AA0A6" },
+    no_key: { label: "ללא מפתח", color: "#D9822B" },
+    limited: { label: "המכסה נוצלה", color: "#D9822B" },
+    invalid: { label: "מפתח לא תקין", color: "#C4544E" },
+    error: { label: "תקלה זמנית", color: "#9AA0A6" },
+  };
+  const statusLabel = (STATUS_UI[status] || STATUS_UI.no_key).label;
+  const statusColor = (STATUS_UI[status] || STATUS_UI.no_key).color;
+
+  const ALERTS = {
+    no_key: {
+      bg: "#EEF5F6", border: "#9BC7CE", icon: "💡",
+      title: "עדיין ללא מפתח AI",
+      body: "הצ׳אט עובד מצוין עם מאגר הידע 💛 להוספת ניסוח חכם בשאלות חופשיות — צרו מפתח חינמי (בקישור למטה) והדביקו אותו כאן. אפשר גם להשאיר כך.",
+    },
+    limited: {
+      bg: "#FDF3E7", border: "#E7B36E", icon: "🕒",
+      title: "המכסה החינמית של היום נוצלה",
+      body: "הצ׳אט ממשיך לעבוד כרגיל עם מאגר הידע 💛 המכסה מתאפסת אוטומטית מדי יום — או שאפשר ליצור מפתח חדש (חינם) ולהדביק אותו כאן כדי לחדש עכשיו.",
+    },
+    invalid: {
+      bg: "#FBECEB", border: "#D98B86", icon: "⚠️",
+      title: "המפתח כבר לא תקין",
+      body: "הצ׳אט ממשיך לעבוד כרגיל. כדי להחזיר את העוזר החכם — צרו מפתח חדש (חינם) בקישור למטה והדביקו אותו כאן.",
+    },
+    error: {
+      bg: "#F3F1EE", border: "#C9C3BB", icon: "🔌",
+      title: "תקלת חיבור זמנית",
+      body: "יש תקלה זמנית בחיבור ל-AI. הצ׳אט ממשיך לעבוד כרגיל — בדרך כלל זה מסתדר מעצמו.",
+    },
+  };
+  const alert = ALERTS[status];
+
+  return (
+    <SectionCard
+      icon={Sparkles}
+      title="עוזר ה-AI של הצ׳אט"
+      subtitle="שכבת בינה אופציונלית — הצ׳אט עובד מצוין גם בלעדיה"
+      className="lg:col-span-3"
+    >
+      {loading ? (
+        <div className="h-32 animate-pulse rounded-3xl bg-[#FAF6F1]" />
+      ) : (
+        <div className="space-y-5">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-[#FAF6F1] px-4 py-3">
+            <div className="flex items-center gap-2">
+              <span className="inline-block h-2.5 w-2.5 rounded-full" style={{ background: statusColor }} />
+              <span className="text-sm font-black text-gray-800">מצב: {statusLabel}</span>
+              {info?.key_masked ? <span className="text-xs text-gray-500">({info.key_masked})</span> : null}
+            </div>
+            <button
+              onClick={toggle}
+              className="rounded-full border border-[#C4795A]/40 px-4 py-1.5 text-xs font-black text-[#9B5C38] transition hover:bg-[#C4795A] hover:text-white"
+            >
+              {info?.enabled ? "כבה את ה-AI" : "הפעל את ה-AI"}
+            </button>
+          </div>
+
+          {alert ? (
+            <div
+              className="flex items-start gap-3 rounded-2xl border px-4 py-3"
+              style={{ background: alert.bg, borderColor: alert.border }}
+            >
+              <span className="text-xl leading-none">{alert.icon}</span>
+              <div>
+                <p className="text-sm font-black text-gray-800">{alert.title}</p>
+                <p className="mt-1 text-sm leading-6 text-gray-600">{alert.body}</p>
+              </div>
+            </div>
+          ) : null}
+
+          <p className="text-sm leading-7 text-gray-600">
+            העוזר החכם משפר את הניסוח בשאלות חופשיות. הוא חינמי לגמרי (Google Gemini) — ואם המפתח ייגמר או יפסיק לעבוד, הצ׳אט ימשיך לעבוד כרגיל עם מאגר הידע. כדי לחדש, צרו מפתח חינמי חדש והדביקו אותו כאן.
+          </p>
+
+          <ol className="space-y-2 rounded-2xl border border-[#C4795A]/15 bg-white px-4 py-3 text-sm leading-7 text-gray-700">
+            <li>
+              1. פתחו את דף המפתחות של Google:{" "}
+              <a href={info?.get_key_url} target="_blank" rel="noreferrer" className="font-black text-[#4A9BA8] underline">
+                יצירת מפתח חינמי ↗
+              </a>
+            </li>
+            <li>2. התחברו עם חשבון Google ולחצו על "Create API key".</li>
+            <li>3. העתיקו את המפתח, הדביקו אותו למטה ולחצו "שמירת מפתח".</li>
+          </ol>
+
+          <form onSubmit={saveKey} className="space-y-3">
+            <SettingsInput label="מפתח API חדש" value={keyInput} onChange={setKeyInput} type="password" placeholder="הדביקי כאן את המפתח" />
+            <button
+              type="submit"
+              disabled={saving}
+              className="inline-flex items-center justify-center gap-2 rounded-full bg-[#C4795A] px-5 py-3 text-sm font-black text-white shadow-lg shadow-[#C4795A]/20 transition hover:bg-[#9B5C38] disabled:opacity-60"
+            >
+              <Save size={16} />
+              {saving ? "מאמת ושומר..." : "שמירת מפתח"}
+            </button>
+          </form>
+
+          <SettingsMessage type="error">{error}</SettingsMessage>
+          <SettingsMessage type="success">{message}</SettingsMessage>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+
 function AdminSettingsPanel() {
   const [loading, setLoading] = useState(true);
   const [savingSystem, setSavingSystem] = useState(false);
@@ -2528,6 +2695,7 @@ export default function AdminDashboard() {
             {activeTab === "settings" ? (
               <Motion.div {...inView(mainRef)} variants={stagger} className="grid grid-cols-1 gap-5 lg:grid-cols-3">
                 <AdminSettingsPanel />
+                <AiAssistantPanel />
                 {false ? <PlaceholderPanel
                   icon={Settings}
                   title="הגדרות מערכת"

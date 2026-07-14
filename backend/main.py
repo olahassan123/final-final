@@ -339,6 +339,86 @@ def chat_categories():
     return {"categories": [c["category_name"] for c in get_categories() if c.get("category_name")]}
 
 
+# ── AI assistant settings (admin) ─────────────────────────────────────────────
+class AiSettingsUpdate(BaseModel):
+    api_key: Optional[str] = None   # None = leave unchanged; "" = clear
+    enabled: Optional[bool] = None
+
+
+def _mask_key(k: str) -> str:
+    k = (k or "").strip()
+    if not k:
+        return ""
+    return (k[:4] + "…" + k[-4:]) if len(k) > 10 else "****"
+
+
+@app.get("/chat/ai-settings")
+def get_ai_settings(_: dict = Depends(require_staff)):
+    """Status of the optional AI layer for the admin panel."""
+    from chatbot_db import get_setting
+    from chatbot_config import GEMINI_KEY_URL
+    key = (get_setting("llm_api_key") or "").strip()
+    env_key = bool(os.getenv("GEMINI_API_KEY"))
+    enabled = get_setting("llm_enabled", "1") != "0"
+    has_key = bool(key or env_key)
+    last = (get_setting("llm_last_status") or "").strip()
+    if not enabled:
+        status = "off"
+    elif not has_key:
+        status = "no_key"
+    elif last == "rate_limited":
+        status = "limited"     # free daily quota used up
+    elif last == "invalid_key":
+        status = "invalid"     # key no longer valid
+    elif last == "error":
+        status = "error"       # transient connection issue
+    else:
+        status = "active"
+    return {
+        "enabled": enabled,
+        "key_set": has_key,
+        "key_masked": _mask_key(key) if key else ("(from environment)" if env_key else ""),
+        "status": status,
+        "last_status_at": get_setting("llm_last_status_at", ""),
+        "provider": "Google Gemini",
+        "get_key_url": GEMINI_KEY_URL,
+    }
+
+
+@app.post("/chat/ai-settings")
+def update_ai_settings(body: AiSettingsUpdate, _: dict = Depends(require_admin)):
+    """Save a pasted API key (validated first) and/or the on/off flag."""
+    from chatbot_db import set_setting
+    from chatbot_router import _test_llm_key
+    out = {"ok": True}
+    if body.api_key is not None:
+        key = body.api_key.strip()
+        if key:
+            accepted, status = _test_llm_key(key)
+            if not accepted:
+                if status == "no_quota":
+                    detail = ("המפתח תקין, אך לחשבון Google הזה אין מכסת שימוש חינמית ל-Gemini (limit: 0). "
+                              "כדי להפעיל את ה-AI יש להפעיל חיוב (billing) בפרויקט ב-Google Cloud, "
+                              "או ליצור מפתח בחשבון Google אחר שיש בו מכסה חינמית. "
+                              "הצ׳אט ממשיך לעבוד מצוין גם בלי מפתח.")
+                elif status == "invalid_key":
+                    detail = "המפתח לא תקין"
+                else:
+                    detail = "שגיאת חיבור ל-Google, נסי שוב"
+                raise HTTPException(status_code=400, detail=detail)
+            out["tested"] = True
+            set_setting("llm_last_status", status)  # 'ok' or 'rate_limited'
+            if status == "rate_limited":
+                out["warning"] = (
+                    "המפתח תקין ונשמר, אך כרגע הגיע למגבלת הקצב החינמית. "
+                    "הצ׳אט ישתמש בו אוטומטית ברגע שהמכסה תתאפס (בדרך כלל תוך דקה או ביום העוקב)."
+                )
+        set_setting("llm_api_key", key)
+    if body.enabled is not None:
+        set_setting("llm_enabled", "1" if body.enabled else "0")
+    return out
+
+
 # ------------------------------------------------------------
 # Appointments DB
 # ------------------------------------------------------------
