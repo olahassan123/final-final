@@ -291,25 +291,23 @@ def _is_plausibly_in_scope(message: str) -> bool:
 
 
 def _has_active_context(session: dict) -> bool:
-    """True if the conversation already has on-topic momentum — a treatment/
-    category discussed, or mid-recommendation-flow — in which case a vague
-    follow-up ("what about it?", "is it suitable for me?") should be judged with
-    conversation history (by the LLM) rather than in isolation by keyword. Without
-    this, coreference-based follow-ups with no repeated clinic keyword would get
-    wrongly declined by _is_plausibly_in_scope right after a perfectly good
-    on-topic exchange."""
+    """True once the session has had ANY prior exchange. Only a brand-new
+    session's very first, keyword-less message should get the firm 'that looks
+    unrelated to MeDay' decline — we simply have nothing else to go on yet. Once
+    a conversation is underway, every later message always gets a real attempt
+    (deterministic match or LLM) and, at worst, an honest 'couldn't parse that'
+    instead of a firm refusal (see _unmatched_fallback) — never back to a hard
+    decline. A hard decline earlier in the session must NOT reset this, or a
+    single false-negative traps the user in a decline loop with no way to
+    recover ("explain more" after a miss would itself miss, forever)."""
     if session.get("last_treatment_id"):
         return True
     if session.get("mode") == "in_flow":
         return True
     ctx = session.get("recent_context") or []
-    # The current user message was already appended before this check runs, so
-    # the turn before it (if any) is the bot's previous reply.
-    if len(ctx) >= 2 and ctx[-2].get("role") == "assistant":
-        prev_reply = ctx[-2].get("content") or ""
-        if prev_reply not in _OUT_OF_SCOPE_MSGS.values():
-            return True
-    return False
+    # ctx already includes the just-appended current user turn, so >1 means
+    # there was a real prior exchange, regardless of how that exchange ended.
+    return len(ctx) > 1
 
 
 def _cant_parse_reply(lang: str = "he") -> dict:
