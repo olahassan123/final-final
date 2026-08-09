@@ -15,6 +15,7 @@ import hmac
 import secrets
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+from chatbot_config import MAX_CHAT_MESSAGE_CHARS
 
 load_dotenv()
 
@@ -41,6 +42,29 @@ DEFAULT_BOOTSTRAP_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin").strip() 
 DEFAULT_BOOTSTRAP_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Admin123!")
 DEFAULT_BOOTSTRAP_ADMIN_FULL_NAME = os.getenv("ADMIN_FULL_NAME", "System Admin").strip() or "System Admin"
 DEFAULT_BOOTSTRAP_ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@meday.local").strip()
+TREATMENT_CATEGORIES = [
+    "מניקור ופדיקור",
+    "עיצוב שיער",
+    "טיפולי קוסמטיקה",
+    "טיפולי גוף",
+    "הסרת שיער",
+    "איפור מקצועי",
+    "איפור קבוע ועיצוב גבות",
+    "סטיילינג אישי",
+    "טיפולי אסתטיקה",
+]
+DEFAULT_EMPLOYEES = [
+    {"full_name": "Ranin", "specialties": ["טיפולי קוסמטיקה", "טיפולי אסתטיקה"]},
+    {"full_name": "Regev", "specialties": ["עיצוב שיער"]},
+    {"full_name": "Irit", "specialties": ["עיצוב שיער"]},
+    {"full_name": "Ira", "specialties": ["מניקור ופדיקור"]},
+    {"full_name": "Dana", "specialties": ["איפור מקצועי"]},
+    {"full_name": "Maya", "specialties": ["סטיילינג אישי"]},
+    {"full_name": "Adele", "specialties": ["טיפולי גוף", "הסרת שיער"]},
+    {"full_name": "Miri", "specialties": ["איפור קבוע ועיצוב גבות"]},
+    {"full_name": "Amjad", "specialties": ["טיפולי אסתטיקה"]},
+]
+TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 def normalize_role(role: str) -> str:
@@ -317,19 +341,29 @@ class ChatRequest(BaseModel):
     message: Optional[str] = None
     button_value: Optional[str] = None
     question_id: Optional[str] = None
-
+    selected_treatment: Optional[Dict] = None
 
 @app.post("/chat")
 def chat(req: ChatRequest):
     if not req.session_id:
         raise HTTPException(status_code=400, detail="session_id is required")
+    if req.message and len(req.message) > MAX_CHAT_MESSAGE_CHARS:
+        raise HTTPException(status_code=413, detail="ההודעה ארוכה מדי. נסי לקצר אותה.")
     result = _chatbot_handle(
         session_id=req.session_id,
         message=req.message,
         button_value=req.button_value,
         question_id=req.question_id,
+        selected_treatment=req.selected_treatment,
     )
     return result
+
+
+@app.delete("/chat/session/{session_id}")
+def clear_chat_session(session_id: str):
+    from chatbot_db import delete_session
+    delete_session(session_id)
+    return {"ok": True}
 
 
 @app.get("/chat/categories")
@@ -337,6 +371,33 @@ def chat_categories():
     """Category names for the chat welcome chips (kept in sync with the Excel)."""
     from chatbot_db import get_categories
     return {"categories": [c["category_name"] for c in get_categories() if c.get("category_name")]}
+
+
+@app.get("/chat/treatments/{treatment_id}")
+def chat_treatment_details(treatment_id: str):
+    from chatbot_db import get_category_by_id, get_treatment_by_id
+
+    treatment = get_treatment_by_id(treatment_id)
+    if not treatment:
+        raise HTTPException(status_code=404, detail="treatment not found")
+    category = get_category_by_id(treatment.get("category_id") or "") or {}
+    return {
+        "id": treatment["treatment_id"],
+        "name": treatment["treatment_name"],
+        "category_id": treatment.get("category_id"),
+        "category": category.get("category_name") or treatment.get("category_id") or "",
+        "summary": treatment.get("short_description") or treatment.get("what_to_expect") or "",
+        "description": treatment.get("short_description") or treatment.get("what_to_expect") or "",
+        "good_for": treatment.get("good_for") or "",
+        "technique_or_equipment": treatment.get("technique_or_equipment") or "",
+        "preparation": treatment.get("preparation") or "",
+        "aftercare": treatment.get("aftercare") or "",
+        "downtime": treatment.get("downtime") or "",
+        "pain_level": treatment.get("pain_level") or "",
+        "sessions_recommended": treatment.get("sessions_recommended") or "",
+        "results_longevity": treatment.get("results_longevity") or "",
+        "what_to_expect": treatment.get("what_to_expect") or "",
+    }
 
 
 # ── AI assistant settings (admin) ─────────────────────────────────────────────
@@ -470,6 +531,60 @@ def init_db():
         )
     """)
     conn.execute("""
+        CREATE TABLE IF NOT EXISTS employee_shifts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_name TEXT NOT NULL,
+            shift_date TEXT NOT NULL,
+            start_time TEXT,
+            end_time TEXT,
+            is_working INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(employee_name, shift_date)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_employee_shifts_date
+        ON employee_shifts(shift_date)
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS employees (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            full_name TEXT NOT NULL UNIQUE,
+            phone TEXT DEFAULT '',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS employee_specialties (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            specialty TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(employee_id, specialty),
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS employee_shift_blocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            shift_date TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(employee_id, shift_date, start_time, end_time),
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_employee_shift_blocks_date
+        ON employee_shift_blocks(shift_date)
+    """)
+    conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             google_id TEXT UNIQUE NOT NULL,
@@ -579,6 +694,41 @@ def init_db():
             conn.execute(ddl)
         except Exception:
             pass
+    for employee in DEFAULT_EMPLOYEES:
+        conn.execute(
+            "INSERT OR IGNORE INTO employees (full_name, phone, is_active) VALUES (?, '', 1)",
+            (employee["full_name"],),
+        )
+        row = conn.execute("SELECT id FROM employees WHERE full_name = ?", (employee["full_name"],)).fetchone()
+        if row:
+            for specialty in employee["specialties"]:
+                conn.execute(
+                    "INSERT OR IGNORE INTO employee_specialties (employee_id, specialty) VALUES (?, ?)",
+                    (row["id"], specialty),
+                )
+
+    # Migrate the previous one-shift-per-day table into split shift blocks once, preserving old data.
+    try:
+        old_rows = conn.execute(
+            """SELECT employee_name, shift_date, start_time, end_time
+               FROM employee_shifts
+               WHERE is_working = 1 AND start_time IS NOT NULL AND end_time IS NOT NULL"""
+        ).fetchall()
+        for old in old_rows:
+            employee = conn.execute(
+                "SELECT id FROM employees WHERE full_name = ?",
+                (old["employee_name"],),
+            ).fetchone()
+            if not employee:
+                continue
+            conn.execute(
+                """INSERT OR IGNORE INTO employee_shift_blocks
+                   (employee_id, shift_date, start_time, end_time)
+                   VALUES (?, ?, ?, ?)""",
+                (employee["id"], old["shift_date"], old["start_time"], old["end_time"]),
+            )
+    except Exception:
+        pass
     for key, value in DEFAULT_SYSTEM_SETTINGS.items():
         conn.execute(
             "INSERT OR IGNORE INTO system_settings (key, value) VALUES (?, ?)",
@@ -648,6 +798,254 @@ class AppointmentCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class EmployeeCreate(BaseModel):
+    full_name: str
+    phone: Optional[str] = ""
+    specialties: List[str]
+    is_active: Optional[bool] = True
+
+
+class EmployeeUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    specialties: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+
+class EmployeeShiftBlockItem(BaseModel):
+    employee_id: int
+    shift_date: str
+    start_time: str
+    end_time: str
+
+
+class EmployeeShiftWeekSave(BaseModel):
+    week_start: str
+    shift_blocks: List[EmployeeShiftBlockItem]
+    force_conflicts: Optional[bool] = False
+
+
+def parse_iso_date(value: str, field_name: str = "date") -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except Exception:
+        raise HTTPException(status_code=400, detail="תאריך לא תקין. יש להשתמש בפורמט YYYY-MM-DD")
+
+
+def require_valid_time(value: Optional[str], field_name: str):
+    if not value or not TIME_RE.match(value):
+        raise HTTPException(status_code=400, detail="שעה לא תקינה. יש להשתמש בפורמט HH:MM")
+
+
+def time_to_minutes(value: str) -> int:
+    hours, minutes = value.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def minutes_to_time(total_minutes: int) -> str:
+    return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+
+
+def add_days_iso(iso_date: str, days: int) -> str:
+    return (parse_iso_date(iso_date) + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def employee_response(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    specialties = conn.execute(
+        "SELECT specialty FROM employee_specialties WHERE employee_id = ? ORDER BY specialty",
+        (row["id"],),
+    ).fetchall()
+    return {
+        "id": row["id"],
+        "full_name": row["full_name"],
+        "name": row["full_name"],
+        "phone": row["phone"] or "",
+        "is_active": bool(row["is_active"]),
+        "specialties": [item["specialty"] for item in specialties],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def validate_specialties(specialties: List[str]) -> List[str]:
+    clean = []
+    for specialty in specialties or []:
+        value = (specialty or "").strip()
+        if value and value not in clean:
+            clean.append(value)
+    if not clean:
+        raise HTTPException(status_code=400, detail="יש לבחור לפחות תחום טיפול אחד")
+    invalid = [value for value in clean if value not in TREATMENT_CATEGORIES]
+    if invalid:
+        raise HTTPException(status_code=400, detail="נבחר תחום טיפול לא תקין")
+    return clean
+
+
+def validate_employee_payload(full_name: str, phone: Optional[str], specialties: List[str]) -> tuple:
+    name = (full_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="שם מלא הוא שדה חובה")
+    phone_value = validate_phone(phone) if phone else ""
+    return name, phone_value, validate_specialties(specialties)
+
+
+def set_employee_specialties(conn: sqlite3.Connection, employee_id: int, specialties: List[str]):
+    conn.execute("DELETE FROM employee_specialties WHERE employee_id = ?", (employee_id,))
+    for specialty in specialties:
+        conn.execute(
+            "INSERT OR IGNORE INTO employee_specialties (employee_id, specialty) VALUES (?, ?)",
+            (employee_id, specialty),
+        )
+
+
+def get_employee_or_404(conn: sqlite3.Connection, employee_id: int, active_only: bool = False) -> sqlite3.Row:
+    where = "id = ?"
+    params = [employee_id]
+    if active_only:
+        where += " AND is_active = 1"
+    row = conn.execute(f"SELECT * FROM employees WHERE {where}", params).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="העובד/ת לא נמצא/ה במערכת")
+    return row
+
+
+def validate_shift_blocks(conn: sqlite3.Connection, blocks: List[EmployeeShiftBlockItem], allowed_dates: set) -> List[dict]:
+    validated = []
+    for block in blocks:
+        employee = get_employee_or_404(conn, block.employee_id, active_only=True)
+        shift_date = parse_iso_date(block.shift_date, "shift_date").strftime("%Y-%m-%d")
+        if shift_date not in allowed_dates:
+            raise HTTPException(status_code=400, detail="תאריך המשמרת חייב להיות בתוך השבוע שנבחר")
+        start_time = (block.start_time or "").strip()
+        end_time = (block.end_time or "").strip()
+        require_valid_time(start_time, "start_time")
+        require_valid_time(end_time, "end_time")
+        if time_to_minutes(end_time) <= time_to_minutes(start_time):
+            raise HTTPException(status_code=400, detail="שעת הסיום חייבת להיות אחרי שעת ההתחלה")
+        validated.append({
+            "employee_id": int(block.employee_id),
+            "employee_name": employee["full_name"],
+            "shift_date": shift_date,
+            "start_time": start_time,
+            "end_time": end_time,
+        })
+
+    by_employee_date: Dict[tuple, List[dict]] = {}
+    seen = set()
+    for block in validated:
+        duplicate_key = (block["employee_id"], block["shift_date"], block["start_time"], block["end_time"])
+        if duplicate_key in seen:
+            raise HTTPException(status_code=400, detail="קיימת כפילות בחלונות העבודה")
+        seen.add(duplicate_key)
+        by_employee_date.setdefault((block["employee_id"], block["shift_date"]), []).append(block)
+
+    for day_blocks in by_employee_date.values():
+        day_blocks.sort(key=lambda item: time_to_minutes(item["start_time"]))
+        for index in range(1, len(day_blocks)):
+            if time_to_minutes(day_blocks[index]["start_time"]) < time_to_minutes(day_blocks[index - 1]["end_time"]):
+                raise HTTPException(
+                    status_code=400,
+                    detail="זמני המשמרות חופפים. יש לעדכן את שעות העבודה",
+                )
+    return sorted(validated, key=lambda item: (item["employee_id"], item["shift_date"], item["start_time"]))
+
+
+def is_appointment_inside_shift_block(appt_start: str, appt_end: str, blocks: List[dict]) -> bool:
+    start = time_to_minutes(appt_start)
+    end = time_to_minutes(appt_end)
+    return any(start >= time_to_minutes(block["start_time"]) and end <= time_to_minutes(block["end_time"]) for block in blocks)
+
+
+def get_employee_shift_blocks_for_date(conn: sqlite3.Connection, employee_id: int, shift_date: str) -> List[dict]:
+    rows = conn.execute(
+        """SELECT * FROM employee_shift_blocks
+           WHERE employee_id = ? AND shift_date = ?
+           ORDER BY start_time""",
+        (employee_id, shift_date),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def employee_has_shift_on_date(conn: sqlite3.Connection, employee_id: int, shift_date: str) -> bool:
+    return len(get_employee_shift_blocks_for_date(conn, employee_id, shift_date)) > 0
+
+
+def detect_shift_conflicts(conn: sqlite3.Connection, blocks: List[dict], week_dates: List[str], employees: List[sqlite3.Row]) -> List[dict]:
+    conflicts = []
+    by_employee_date: Dict[tuple, List[dict]] = {}
+    for block in blocks:
+        by_employee_date.setdefault((block["employee_id"], block["shift_date"]), []).append(block)
+
+    for employee in employees:
+        employee_id = employee["id"]
+        employee_name = employee["full_name"]
+        for shift_date in week_dates:
+            day_blocks = by_employee_date.get((employee_id, shift_date), [])
+            rows = conn.execute(
+                """SELECT employee_name, date, time, end_time, treatment_name
+                   FROM appointments
+                   WHERE employee_name = ? AND date = ? AND COALESCE(status, 'scheduled') != 'cancelled'
+                   ORDER BY time""",
+                (employee_name, shift_date),
+            ).fetchall()
+            for row in rows:
+                appt_start = row["time"]
+                appt_end = row["end_time"] or minutes_to_time(time_to_minutes(appt_start) + 60)
+                if not day_blocks or not is_appointment_inside_shift_block(appt_start, appt_end, day_blocks):
+                    conflicts.append({
+                        "employee_name": row["employee_name"],
+                        "date": row["date"],
+                        "start_time": appt_start,
+                        "end_time": appt_end,
+                        "treatment_name": row["treatment_name"] or "",
+                    })
+    return conflicts
+
+
+def shift_block_response(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["employee_name"] = data.get("employee_name") or data.get("full_name", "")
+    return data
+
+
+def detect_legacy_shift_conflicts(conn: sqlite3.Connection, shifts: List[dict]) -> List[dict]:
+    conflicts = []
+    for shift in shifts:
+        rows = conn.execute(
+            """SELECT employee_name, date, time, end_time
+               FROM appointments
+               WHERE employee_name = ? AND date = ? AND COALESCE(status, 'scheduled') != 'cancelled'
+               ORDER BY time""",
+            (shift["employee_name"], shift["shift_date"]),
+        ).fetchall()
+        shift_start = time_to_minutes(shift["start_time"]) if shift["is_working"] and shift["start_time"] else None
+        shift_end = time_to_minutes(shift["end_time"]) if shift["is_working"] and shift["end_time"] else None
+        for row in rows:
+            appt_start = time_to_minutes(row["time"])
+            appt_end = time_to_minutes(row["end_time"]) if row["end_time"] else appt_start + 60
+            outside_shift = (
+                not shift["is_working"] or
+                shift_start is None or
+                shift_end is None or
+                appt_start < shift_start or
+                appt_end > shift_end
+            )
+            if outside_shift:
+                conflicts.append({
+                    "employee_name": row["employee_name"],
+                    "date": row["date"],
+                    "start_time": row["time"],
+                    "end_time": row["end_time"] or minutes_to_time(appt_end),
+                })
+    return conflicts
+
+
+def shift_response(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["is_working"] = bool(data.get("is_working"))
+    return data
+
+
 def find_customer_by_phone(conn: sqlite3.Connection, phone: Optional[str]) -> Optional[sqlite3.Row]:
     normalized_phone = normalize_phone_for_match(phone)
     if not normalized_phone:
@@ -659,6 +1057,161 @@ def find_customer_by_phone(conn: sqlite3.Connection, phone: Optional[str]) -> Op
         if normalize_phone_for_match(row["phone"]) == normalized_phone:
             return row
     return None
+
+
+@app.get("/treatment-categories")
+def get_treatment_categories(_: dict = Depends(require_staff)):
+    return {"ok": True, "categories": TREATMENT_CATEGORIES}
+
+
+@app.get("/employees")
+def list_employees(include_inactive: bool = False, _: dict = Depends(require_staff)):
+    conn = get_db()
+    where = "" if include_inactive else "WHERE is_active = 1"
+    rows = conn.execute(f"SELECT * FROM employees {where} ORDER BY is_active DESC, full_name").fetchall()
+    employees = [employee_response(conn, row) for row in rows]
+    conn.close()
+    return {"ok": True, "employees": employees, "categories": TREATMENT_CATEGORIES}
+
+
+@app.post("/employees", status_code=201)
+def create_employee(body: EmployeeCreate, current_user: dict = Depends(require_admin)):
+    full_name, phone, specialties = validate_employee_payload(body.full_name, body.phone, body.specialties)
+    conn = get_db()
+    existing = conn.execute("SELECT id FROM employees WHERE lower(full_name) = lower(?)", (full_name,)).fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(status_code=409, detail="כבר קיים/ת עובד/ת בשם הזה")
+    cursor = conn.execute(
+        "INSERT INTO employees (full_name, phone, is_active) VALUES (?, ?, ?)",
+        (full_name, phone, 1 if body.is_active else 0),
+    )
+    employee_id = cursor.lastrowid
+    set_employee_specialties(conn, employee_id, specialties)
+    conn.commit()
+    row = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+    employee = employee_response(conn, row)
+    conn.close()
+    log_audit("employee created", current_user, "employee", employee_id, full_name)
+    return {"ok": True, "message": "העובד/ת נוסף/ה בהצלחה", "employee": employee}
+
+
+@app.put("/employees/{employee_id}")
+def update_employee(employee_id: int, body: EmployeeUpdate, current_user: dict = Depends(require_admin)):
+    conn = get_db()
+    row = get_employee_or_404(conn, employee_id)
+    full_name = body.full_name.strip() if body.full_name is not None else row["full_name"]
+    phone = validate_phone(body.phone) if body.phone is not None and body.phone else (body.phone if body.phone == "" else row["phone"] or "")
+    specialties = validate_specialties(body.specialties) if body.specialties is not None else None
+    if not full_name:
+        conn.close()
+        raise HTTPException(status_code=400, detail="שם מלא הוא שדה חובה")
+    duplicate = conn.execute(
+        "SELECT id FROM employees WHERE lower(full_name) = lower(?) AND id != ?",
+        (full_name, employee_id),
+    ).fetchone()
+    if duplicate:
+        conn.close()
+        raise HTTPException(status_code=409, detail="כבר קיים/ת עובד/ת בשם הזה")
+    is_active = int(body.is_active) if body.is_active is not None else row["is_active"]
+    conn.execute(
+        """UPDATE employees
+           SET full_name = ?, phone = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?""",
+        (full_name, phone or "", is_active, employee_id),
+    )
+    if specialties is not None:
+        set_employee_specialties(conn, employee_id, specialties)
+    conn.commit()
+    updated = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+    employee = employee_response(conn, updated)
+    conn.close()
+    log_audit("employee updated", current_user, "employee", employee_id, full_name)
+    return {"ok": True, "message": "פרטי העובד/ת עודכנו בהצלחה", "employee": employee}
+
+
+@app.get("/employee-shifts")
+def get_employee_shifts(week_start: str, include_inactive: bool = False, _: dict = Depends(require_staff)):
+    start = parse_iso_date(week_start, "week_start")
+    normalized_week_start = start.strftime("%Y-%m-%d")
+    week_dates = [(start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+    conn = get_db()
+    where = "" if include_inactive else "WHERE is_active = 1"
+    employee_rows = conn.execute(f"SELECT * FROM employees {where} ORDER BY is_active DESC, full_name").fetchall()
+    block_rows = conn.execute(
+        """SELECT b.*, e.full_name AS employee_name
+           FROM employee_shift_blocks b
+           JOIN employees e ON e.id = b.employee_id
+           WHERE b.shift_date BETWEEN ? AND ?
+           ORDER BY e.full_name, b.shift_date, b.start_time""",
+        (week_dates[0], week_dates[-1]),
+    ).fetchall()
+    employees = [employee_response(conn, row) for row in employee_rows]
+    conn.close()
+    return {
+        "ok": True,
+        "week_start": normalized_week_start,
+        "week_end": week_dates[-1],
+        "employees": employees,
+        "shift_blocks": [shift_block_response(row) for row in block_rows],
+        "shifts": [shift_block_response(row) for row in block_rows],
+        "has_shifts": len(block_rows) > 0,
+    }
+
+
+@app.put("/employee-shifts/week")
+def save_employee_shift_week(body: EmployeeShiftWeekSave, current_user: dict = Depends(require_admin)):
+    week_start = parse_iso_date(body.week_start, "week_start")
+    normalized_week_start = week_start.strftime("%Y-%m-%d")
+    week_dates = [(week_start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+    conn = get_db()
+    validated = validate_shift_blocks(conn, body.shift_blocks, set(week_dates))
+    active_employees = conn.execute("SELECT * FROM employees WHERE is_active = 1 ORDER BY full_name").fetchall()
+    conflicts = detect_shift_conflicts(conn, validated, week_dates, active_employees)
+    if conflicts and not body.force_conflicts:
+        conn.close()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "קיימים תורים מחוץ לחלונות העבודה החדשים",
+                "conflicts": conflicts,
+            },
+        )
+
+    # Replace the selected week for active employees, then insert sorted blocks.
+    employee_ids = [row["id"] for row in active_employees]
+    if employee_ids:
+        placeholders = ",".join("?" for _ in employee_ids)
+        conn.execute(
+            f"""DELETE FROM employee_shift_blocks
+                WHERE shift_date BETWEEN ? AND ? AND employee_id IN ({placeholders})""",
+            [week_dates[0], week_dates[-1], *employee_ids],
+        )
+    for block in validated:
+        conn.execute(
+            """INSERT INTO employee_shift_blocks
+               (employee_id, shift_date, start_time, end_time)
+               VALUES (?, ?, ?, ?)""",
+            (block["employee_id"], block["shift_date"], block["start_time"], block["end_time"]),
+        )
+    conn.commit()
+    rows = conn.execute(
+        """SELECT b.*, e.full_name AS employee_name
+           FROM employee_shift_blocks b
+           JOIN employees e ON e.id = b.employee_id
+           WHERE b.shift_date BETWEEN ? AND ?
+           ORDER BY e.full_name, b.shift_date, b.start_time""",
+        (normalized_week_start, add_days_iso(normalized_week_start, 6)),
+    ).fetchall()
+    conn.close()
+    log_audit("employee shift blocks saved", current_user, "employee_shift_blocks", None, "", normalized_week_start)
+    return {
+        "ok": True,
+        "message": "המשמרות נשמרו בהצלחה",
+        "week_start": normalized_week_start,
+        "shift_blocks": [shift_block_response(row) for row in rows],
+        "conflicts": conflicts,
+    }
 
 
 @app.get("/appointments")

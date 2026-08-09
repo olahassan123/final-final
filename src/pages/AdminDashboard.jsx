@@ -2473,7 +2473,18 @@ export default function AdminDashboard() {
                       onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
                     >
                       <Users size={16} />
-                      Secretary management
+                      ניהול מזכירות
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.location.assign("/admin/employees")}
+                      className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold transition"
+                      style={{ background: "rgba(255,255,255,0.95)", color: "#8B5030", boxShadow: "0 4px 16px rgba(0,0,0,0.20)" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#FAF6F1"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
+                    >
+                      <Users size={16} />
+                      ניהול עובדים
                     </button>
                     <button
                       type="button"
@@ -2484,7 +2495,7 @@ export default function AdminDashboard() {
                       onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
                     >
                       <Users size={16} />
-                      Customer management
+                      ניהול לקוחות
                     </button>
                     <button
                       type="button"
@@ -2496,6 +2507,17 @@ export default function AdminDashboard() {
                     >
                       <FileText size={16} />
                       Audit log
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => window.location.assign("/admin/employee-shifts")}
+                      className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold transition"
+                      style={{ background: "rgba(255,255,255,0.95)", color: "#8B5030", boxShadow: "0 4px 16px rgba(0,0,0,0.20)" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#FAF6F1"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
+                    >
+                      <CalendarDays size={16} />
+                      ניהול משמרות עובדים
                     </button>
                     <button
                       type="button"

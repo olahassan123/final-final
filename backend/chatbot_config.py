@@ -8,6 +8,8 @@ CONFIDENCE_THRESHOLD = 0.70
 
 # How many recent messages to keep for coreference ("how long is it?" resolves to last treatment).
 MAX_CONTEXT_MESSAGES = 6
+MAX_CHAT_MESSAGE_CHARS = 1000
+CHAT_SESSION_EXPIRY_DAYS = 14
 
 CLINIC_PHONE = "*3691"
 # Optional LLM layer. Provider is Google Gemini (generous free tier, no card).

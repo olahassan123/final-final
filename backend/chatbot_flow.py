@@ -101,27 +101,26 @@ def format_recommendation_text(treatments: List[dict], language: str, category_n
         return msgs.get(language, msgs["he"])
 
     if language == "ar":
-        header = f"بناءً على إجاباتك، أنصحك بـ:" if len(treatments) > 1 else "بناءً على إجاباتك، الأنسب لك هو:"
+        header = "حسب إجاباتك، هذه خيارات قد تناسبك:"
     elif language == "en":
-        header = "Based on your answers, I recommend:" if len(treatments) > 1 else "Based on your answers, the best fit for you is:"
+        header = "Based on what you shared, these options may fit:"
     else:
-        header = "לפי התשובות שלך, הטיפול המתאים ביותר הוא:" if len(treatments) == 1 else "לפי התשובות שלך, ממליצה על:"
+        header = "לפי מה שסיפרת, אלה האפשרויות שיכולות להתאים:"
 
     lines = [header]
     for t in treatments:
         name = t["treatment_name"]
         desc = t.get("short_description") or t.get("good_for") or ""
+        lines.append(f"\n**{name}**")
         if desc:
-            lines.append(f"✨ **{name}** — {desc}")
-        else:
-            lines.append(f"✨ **{name}**")
+            lines.append(desc)
 
     if language == "ar":
-        lines.append("\nللحجز أو الاستفسار، تواصل معنا على *3691 😊")
+        lines.append("\nيمكنك فتح تفاصيل العلاج أو التواصل معنا على *3691.")
     elif language == "en":
-        lines.append("\nTo book or learn more, contact us at *3691 😊")
+        lines.append("\nYou can open the treatment details or contact us at *3691.")
     else:
-        lines.append("\nלתיאום תור ופרטים נוספים, צרי קשר ב-*3691 😊")
+        lines.append("\nאפשר לפתוח את פרטי הטיפול או ליצור קשר עם הצוות ב-*3691.")
 
     return "\n".join(lines)
 

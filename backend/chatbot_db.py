@@ -1,7 +1,8 @@
 import sqlite3
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict
-from chatbot_config import CHATBOT_DB_PATH
+from chatbot_config import CHATBOT_DB_PATH, CHAT_SESSION_EXPIRY_DAYS
 
 
 def get_chatbot_db() -> sqlite3.Connection:
@@ -89,6 +90,7 @@ def init_chatbot_db():
         CREATE TABLE IF NOT EXISTS cb_sessions (
             session_id TEXT PRIMARY KEY,
             mode TEXT NOT NULL DEFAULT 'general',
+            conversation_state TEXT DEFAULT 'GENERAL_CHAT',
             flow_category_id TEXT,
             flow_question_index INTEGER DEFAULT 0,
             flow_scores TEXT DEFAULT '{}',
@@ -106,6 +108,7 @@ def init_chatbot_db():
         )
     """)
     _migrate_treatment_columns(conn)
+    _cleanup_expired_sessions(conn)
     conn.commit()
     conn.close()
 
@@ -146,6 +149,8 @@ def _migrate_treatment_columns(conn: sqlite3.Connection):
     if "short_description" not in cat_cols:
         conn.execute("ALTER TABLE cb_categories ADD COLUMN short_description TEXT")
     sess_cols = {r["name"] for r in conn.execute("PRAGMA table_info(cb_sessions)").fetchall()}
+    if "conversation_state" not in sess_cols:
+        conn.execute("ALTER TABLE cb_sessions ADD COLUMN conversation_state TEXT DEFAULT 'GENERAL_CHAT'")
     if "answered_fields" not in sess_cols:
         conn.execute("ALTER TABLE cb_sessions ADD COLUMN answered_fields TEXT DEFAULT '[]'")
 
@@ -153,6 +158,7 @@ def _migrate_treatment_columns(conn: sqlite3.Connection):
 # ── Session management ────────────────────────────────────────────────────
 
 def get_session(session_id: str) -> dict:
+    cleanup_expired_sessions()
     conn = get_chatbot_db()
     row = conn.execute(
         "SELECT * FROM cb_sessions WHERE session_id = ?", (session_id,)
@@ -172,13 +178,14 @@ def save_session(session_id: str, state: dict):
     conn = get_chatbot_db()
     conn.execute("""
         INSERT OR REPLACE INTO cb_sessions
-        (session_id, mode, flow_category_id, flow_question_index,
+        (session_id, mode, conversation_state, flow_category_id, flow_question_index,
          flow_scores, flow_answers, recent_context, last_treatment_id,
          answered_fields, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     """, (
         session_id,
         state.get("mode", "general"),
+        state.get("conversation_state", "GENERAL_CHAT"),
         state.get("flow_category_id"),
         state.get("flow_question_index", 0),
         json.dumps(state.get("flow_scores", {}), ensure_ascii=False),
@@ -191,10 +198,33 @@ def save_session(session_id: str, state: dict):
     conn.close()
 
 
+def delete_session(session_id: str):
+    conn = get_chatbot_db()
+    conn.execute("DELETE FROM cb_sessions WHERE session_id = ?", (session_id,))
+    conn.commit()
+    conn.close()
+
+
+def _cleanup_expired_sessions(conn: sqlite3.Connection):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=CHAT_SESSION_EXPIRY_DAYS)
+    conn.execute(
+        "DELETE FROM cb_sessions WHERE datetime(updated_at) < datetime(?)",
+        (cutoff.isoformat(),),
+    )
+
+
+def cleanup_expired_sessions():
+    conn = get_chatbot_db()
+    _cleanup_expired_sessions(conn)
+    conn.commit()
+    conn.close()
+
+
 def _default_session(session_id: str) -> dict:
     return {
         "session_id": session_id,
         "mode": "general",
+        "conversation_state": "GENERAL_CHAT",
         "flow_category_id": None,
         "flow_question_index": 0,
         "flow_scores": {},
@@ -266,6 +296,29 @@ def get_treatment_by_id(treatment_id: str) -> Optional[Dict]:
     row = conn.execute(
         "SELECT * FROM cb_treatments WHERE treatment_id = ?", (treatment_id,)
     ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_treatment_by_name(treatment_name: str) -> Optional[Dict]:
+    name = (treatment_name or "").strip()
+    if not name:
+        return None
+    conn = get_chatbot_db()
+    row = conn.execute(
+        "SELECT * FROM cb_treatments WHERE treatment_name = ? COLLATE NOCASE LIMIT 1",
+        (name,),
+    ).fetchone()
+    if not row:
+        row = conn.execute(
+            """
+            SELECT * FROM cb_treatments
+            WHERE aliases LIKE ?
+            ORDER BY length(treatment_name) ASC
+            LIMIT 1
+            """,
+            (f"%{name}%",),
+        ).fetchone()
     conn.close()
     return dict(row) if row else None
 

@@ -13,7 +13,7 @@ async function readApiError(res, fallback) {
 
 // ── Chat ──────────────────────────────────────────────────────────────────
 
-export async function sendChat(sessionId, message = null, buttonValue = null, questionId = null) {
+export async function sendChat(sessionId, message = null, buttonValue = null, questionId = null, selectedTreatment = null) {
   const res = await fetch(`${API_BASE_URL}/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -22,9 +22,15 @@ export async function sendChat(sessionId, message = null, buttonValue = null, qu
       message: message || null,
       button_value: buttonValue || null,
       question_id: questionId || null,
+      selected_treatment: selectedTreatment || null,
     }),
   });
-  if (!res.ok) throw new Error("Chat request failed");
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const error = new Error(data.detail || "Chat request failed");
+    error.status = res.status;
+    throw error;
+  }
   return res.json();
 }
 
@@ -33,6 +39,13 @@ export async function getChatCategories() {
   if (!res.ok) throw new Error("Failed to load categories");
   const data = await res.json();
   return data.categories || [];
+}
+
+export async function clearChatSession(sessionId) {
+  if (!sessionId) return;
+  await fetch(`${API_BASE_URL}/chat/session/${encodeURIComponent(sessionId)}`, {
+    method: "DELETE",
+  }).catch(() => {});
 }
 
 // ── Appointments ──────────────────────────────────────────────────────────
@@ -69,6 +82,64 @@ export async function updateAppointment(id, data) {
     body: JSON.stringify(data),
   });
   if (!res.ok) throw new Error("Failed to update appointment");
+  return res.json();
+}
+
+export async function fetchEmployeeShifts(weekStart) {
+  const res = await fetch(
+    `${API_BASE_URL}/employee-shifts?week_start=${encodeURIComponent(weekStart)}`,
+    { headers: authHeaders() }
+  );
+  if (!res.ok) return readApiError(res, "Failed to fetch employee shifts");
+  return res.json();
+}
+
+export async function saveWeeklyEmployeeShifts({ weekStart, shiftBlocks, shifts, forceConflicts = false }) {
+  const res = await fetch(`${API_BASE_URL}/employee-shifts/week`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify({
+      week_start: weekStart,
+      shift_blocks: shiftBlocks || shifts || [],
+      force_conflicts: forceConflicts,
+    }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    const detail = data.detail || {};
+    const message = typeof detail === "string" ? detail : detail.message;
+    const error = new Error(message || "Failed to save employee shifts");
+    error.status = res.status;
+    error.conflicts = Array.isArray(detail.conflicts) ? detail.conflicts : [];
+    throw error;
+  }
+  return res.json();
+}
+
+export async function fetchEmployees({ includeInactive = false } = {}) {
+  const query = includeInactive ? "?include_inactive=true" : "";
+  const res = await fetch(`${API_BASE_URL}/employees${query}`, { headers: authHeaders() });
+  if (!res.ok) return readApiError(res, "Failed to fetch employees");
+  return res.json();
+}
+
+export async function createEmployee(data) {
+  const res = await fetch(`${API_BASE_URL}/employees`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) return readApiError(res, "Failed to create employee");
+  return res.json();
+}
+
+export async function updateEmployee(id, data) {
+  const res = await fetch(`${API_BASE_URL}/employees/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...authHeaders() },
+    body: JSON.stringify(data),
+  });
+  if (!res.ok) return readApiError(res, "Failed to update employee");
   return res.json();
 }
 

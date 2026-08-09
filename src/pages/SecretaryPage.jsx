@@ -1,6 +1,6 @@
 import { createElement, useState, useEffect, useRef } from "react";
 import { addContactInquiryFeedback, CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
-import { fetchAppointments, createAppointment, deleteAppointment, updateAppointment } from "../api/medayApi";
+import { fetchAppointments, createAppointment, deleteAppointment, updateAppointment, fetchEmployeeShifts } from "../api/medayApi";
 import {
   ChevronLeft, ChevronRight, Trash2, Plus, Sparkles, User, Phone, CalendarDays, Clock, X, LayoutGrid, MessageCircle, Settings, CheckCircle2, Home,
 } from "lucide-react";
@@ -349,16 +349,6 @@ function isTreatmentAvailableAt(categoryName, date, startTime, endTime) {
     timeToMinutes(startTime) >= timeToMinutes(rule.start) &&
     timeToMinutes(endTime) <= timeToMinutes(rule.end)
   );
-}
-
-function isEmployeeAvailableAt(employeeName, categoryName, date, startTime, endTime) {
-  if (!employeeName || !categoryName || !date || !startTime || !endTime) return false;
-  const dayIndex = new Date(`${date}T00:00:00`).getDay();
-  return getEmployeeAvailabilityRules(employeeName, categoryName).some((rule) => (
-    rule.days.includes(dayIndex) &&
-    timeToMinutes(startTime) >= timeToMinutes(rule.start) &&
-    timeToMinutes(endTime) <= timeToMinutes(rule.end)
-  ));
 }
 
 function getBusinessNowParts() {
@@ -853,6 +843,7 @@ export default function SecretaryPage() {
 
   const [weekStart, setWeekStart] = useState(() => getWeekStart(new Date()));
   const [pastLabelVisible, setPastLabelVisible] = useState(true);
+  const [employeeShiftBlocks, setEmployeeShiftBlocks] = useState([]);
 
   const [drag, setDrag] = useState(null);
   const isDragging = drag !== null;
@@ -1014,6 +1005,15 @@ export default function SecretaryPage() {
   useEffect(() => { setPastLabelVisible(true); }, [weekStart]);
 
   useEffect(() => {
+    fetchEmployeeShifts(toISO(weekStart))
+      .then((result) => setEmployeeShiftBlocks(result.shift_blocks || result.shifts || []))
+      .catch((err) => {
+        console.error(err);
+        setEmployeeShiftBlocks([]);
+      });
+  }, [weekStart]);
+
+  useEffect(() => {
     if (form.time && form.end_time && form.time < form.end_time) {
       setFieldErrors((prev) => ({ ...prev, time: false, end_time: false, time_order: false }));
       setFieldFlash((prev) => ({ ...prev, time: false, end_time: false }));
@@ -1029,6 +1029,18 @@ export default function SecretaryPage() {
 
   function load() {
     fetchAppointments().then(setAppointments).catch(console.error);
+  }
+
+  // Employee availability comes only from saved shift blocks for the exact date;
+  // an employee with no block that day/category has no available window.
+  function isEmployeeAvailableAt(employeeName, categoryName, date, startTime, endTime) {
+    if (!employeeName || !categoryName || !date || !startTime || !endTime) return false;
+    return employeeShiftBlocks.some((block) => (
+      block.employee_name === employeeName &&
+      block.shift_date === date &&
+      timeToMinutes(startTime) >= timeToMinutes(block.start_time) &&
+      timeToMinutes(endTime) <= timeToMinutes(block.end_time)
+    ));
   }
 
   const selectedCategoryStructure = getCategoryStructure(treatments, selectedTreatmentCategory);
@@ -2261,7 +2273,6 @@ export default function SecretaryPage() {
                   style={{ background: "#FFFDF9", borderBottom: "1px solid #eadfd5" }}>
                   <div className="flex flex-wrap items-center gap-1.5 mb-1 text-[10px]" style={{ color: "#6b4f35" }}>
                     <span className="font-bold">{activeCategory}</span>
-                    <span>זמינות: {formatAvailability(activeCategory)}</span>
                     {activeCategoryEmployees.length > 1 && (
                       <span className="font-bold text-[#2F8F5B]">סינון לפי עובד/ת:</span>
                     )}
