@@ -77,7 +77,12 @@ def _call_gemini(system: str, user_prompt: str, key: Optional[str] = None,
             "responseMimeType": "application/json",
             # gemini-flash-latest is a "thinking" model; without this it can spend the
             # whole token budget on internal thoughts and return empty content.
-            "thinkingConfig": {"thinkingBudget": 0},
+            # NOTE: thinkingBudget:0 is no longer accepted by the model version
+            # currently behind this alias (gemini-3.6-flash) and returns HTTP 400
+            # "Request contains an invalid argument" — which every caller here
+            # (including the API-key validation ping) then misreports as an
+            # invalid key. thinkingLevel:"minimal" is the current equivalent.
+            "thinkingConfig": {"thinkingLevel": "minimal"},
         },
     }
     # Retry transient Google failures (timeouts, connection drops, 500/502/503).
@@ -550,6 +555,8 @@ def _should_clarify_before_treatment(message: str, locked_treatment: Optional[di
     compact = re.sub(r"\s+", " ", text.lower().strip(" \t\r\n?!.,;:"))
     if compact in {"מה", "what"}:
         return True
+    if _is_greeting(text) or _is_acknowledgment(text):
+        return False
     if not re.search(r"[A-Za-z\u0590-\u05ff\u0600-\u06ff]", text):
         return True
     if locked_treatment and (isTreatmentFollowUp(text) or _is_short_treatment_followup(text)):
