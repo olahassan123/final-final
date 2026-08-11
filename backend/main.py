@@ -18,6 +18,7 @@ from google.auth.transport import requests as google_requests
 from chatbot_config import MAX_CHAT_MESSAGE_CHARS
 import psycopg
 from psycopg.rows import dict_row
+from db_compat import connect_postgres
 
 load_dotenv()
 
@@ -491,6 +492,9 @@ APPOINTMENTS_DB = EXCEL_DIR / "appointments.db"
 
 
 def get_db():
+    if DATABASE_URL:
+        return connect_postgres(DATABASE_URL)
+
     conn = sqlite3.connect(str(APPOINTMENTS_DB))
     conn.row_factory = sqlite3.Row
     return conn
@@ -503,8 +507,42 @@ def get_postgres_db():
         DATABASE_URL,
         row_factory=dict_row,
     )
-
 def init_db():
+    if DATABASE_URL:
+        from postgres_schema import init_postgres_schema
+
+        init_postgres_schema()
+
+        conn = get_db()
+
+        for employee in DEFAULT_EMPLOYEES:
+            conn.execute(
+                "INSERT OR IGNORE INTO employees (full_name, phone, is_active) VALUES (?, '', 1)",
+                (employee["full_name"],),
+            )
+
+            row = conn.execute(
+                "SELECT id FROM employees WHERE full_name = ?",
+                (employee["full_name"],),
+            ).fetchone()
+
+            if row:
+                for specialty in employee["specialties"]:
+                    conn.execute(
+                        "INSERT OR IGNORE INTO employee_specialties (employee_id, specialty) VALUES (?, ?)",
+                        (row["id"], specialty),
+                    )
+
+        for key, value in DEFAULT_SYSTEM_SETTINGS.items():
+            conn.execute(
+                "INSERT OR IGNORE INTO system_settings (key, value) VALUES (?, ?)",
+                (key, value),
+            )
+
+        conn.commit()
+        conn.close()
+        return
+
     conn = get_db()
     conn.execute("""
         CREATE TABLE IF NOT EXISTS treatments_db (
