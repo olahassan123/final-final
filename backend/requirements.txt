@@ -2,7 +2,6 @@ fastapi
 uvicorn
 pandas
 openpyxl
-groq
 python-dotenv
 requests
 google-auth

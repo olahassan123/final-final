@@ -1,10 +1,18 @@
 import { useRef, useState, useEffect, forwardRef } from "react";
 import ReactMarkdown from "react-markdown";
-import { sendChat } from "../api/medayApi";
+import { useNavigate } from "react-router-dom";
+import { sendChat, getChatCategories, clearChatSession } from "../api/medayApi";
 import { MessageCircle, X, Send, RotateCcw, Sparkles } from "lucide-react";
 import { cn } from "../lib/utils";
+import { openAppointmentWhatsApp } from "../lib/booking";
+import { serviceCatalog, getCategoryTreatments } from "../data/serviceCatalog";
 
 const SESSION_KEY = "meday_chat_session_id";
+const MAX_MESSAGE_CHARS = 1000;
+const LONG_MESSAGE_TEXT = "ההודעה ארוכה מדי. נסי לקצר אותה.";
+const RATE_LIMIT_TEXT = "נשלחו יותר מדי הודעות בזמן קצר. נסי שוב בעוד רגע.";
+const CONNECTION_ERROR_TEXT = "מצטערת, יש כרגע תקלה בחיבור. אפשר לנסות שוב בעוד רגע.";
+const DISCLAIMER_TEXT = "המידע בצ׳אט נועד להכוונה כללית בלבד ואינו מחליף ייעוץ מקצועי מהקליניקה.";
 
 function getOrCreateSessionId() {
   let id = localStorage.getItem(SESSION_KEY);
@@ -15,18 +23,68 @@ function getOrCreateSessionId() {
   return id;
 }
 
+// Category options shown on the welcome screen. Clicking one sends the category
+// name → the bot replies with that category's description. Mirrors the
+// Categories sheet; kept in sync dynamically on open (see fetch in the widget).
+const WELCOME_CATEGORIES = [
+  "מניקור ופדיקור",
+  "עיצוב שיער",
+  "טיפולי קוסמטיקה",
+  "טיפולי גוף",
+  "הסרת שיער",
+  "איפור מקצועי",
+  "איפור קבוע ועיצוב גבות",
+  "סטיילינג אישי",
+  "טיפולי אסתטיקה",
+];
+
 const WELCOME_MSG = {
   from: "bot",
-  text: "היי! אני העוזרת האישית של MeDay 💬\nאיך אני יכולה לעזור לך היום?",
+  text: "היי, אני העוזרת האישית של MeDay ✨\nאשמח לעזור לך למצוא את הטיפול שהכי מתאים למה שאת/ה מחפש/ת.",
+  suggestions: WELCOME_CATEGORIES,
 };
 
+function normalizeLabel(value) {
+  return (value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function getTreatmentRoute(treatment) {
+  const targetName = normalizeLabel(treatment?.name);
+  if (!targetName) return null;
+
+  for (const category of serviceCatalog) {
+    const match = getCategoryTreatments(category).find(
+      (item) => normalizeLabel(item.name) === targetName
+    );
+    if (match) {
+      return `/categories/${category.slug}/${match.slug}`;
+    }
+  }
+  return null;
+}
+
 export default function ChatWidget() {
+  const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState([WELCOME_MSG]);
   const [loading, setLoading] = useState(false);
   const [sessionId, setSessionId] = useState(getOrCreateSessionId);
+  const [selectedTreatment, setSelectedTreatment] = useState(null);
+  const selectedTreatmentRef = useRef(null);
+  const inFlightRequestRef = useRef(false);
   const scrollRef = useRef(null);
   const inputRef = useRef(null);
+
+  useEffect(() => {
+    selectedTreatmentRef.current = selectedTreatment;
+  }, [selectedTreatment]);
+
+  useEffect(() => {
+    if (window.__medaySelectedTreatment) {
+      setSelectedTreatment(window.__medaySelectedTreatment);
+      selectedTreatmentRef.current = window.__medaySelectedTreatment;
+    }
+  }, []);
 
   // Auto-scroll to bottom
   useEffect(() => {
@@ -40,49 +98,99 @@ export default function ChatWidget() {
     if (open) setTimeout(() => inputRef.current?.focus(), 150);
   }, [open]);
 
+  // Sync welcome category chips with the backend (falls back to hardcoded list)
+  useEffect(() => {
+    getChatCategories()
+      .then((cats) => {
+        if (cats?.length) {
+          setMessages((m) =>
+            m.length && m[0].from === "bot"
+              ? [{ ...m[0], suggestions: cats }, ...m.slice(1)]
+              : m
+          );
+        }
+      })
+      .catch(() => {});
+  }, []);
+
   // Listen for external "open chat" events (from treatment pages etc.)
   useEffect(() => {
     const handleOpen = () => setOpen(true);
+    const handleTreatmentSelected = (e) => {
+      if (!e.detail) return;
+      setSelectedTreatment({
+        id: e.detail.id || null,
+        name: e.detail.name || null,
+      });
+      selectedTreatmentRef.current = {
+        id: e.detail.id || null,
+        name: e.detail.name || null,
+      };
+    };
     const handleOpenWithQuestion = (e) => {
       setOpen(true);
       if (e.detail) _send(e.detail, null, null);
     };
     window.addEventListener("openChatbot", handleOpen);
+    window.addEventListener("treatmentSelected", handleTreatmentSelected);
     window.addEventListener("openChatWithQuestion", handleOpenWithQuestion);
     return () => {
       window.removeEventListener("openChatbot", handleOpen);
+      window.removeEventListener("treatmentSelected", handleTreatmentSelected);
       window.removeEventListener("openChatWithQuestion", handleOpenWithQuestion);
     };
   }, []);
 
-  async function _send(message, buttonValue, questionId) {
-    if (loading) return;
+  async function _send(message, buttonValue, questionId, selectedTreatmentOverride = null) {
+    if (loading || inFlightRequestRef.current) return;
     if (!message && !buttonValue) return;
+    if (message && message.length > MAX_MESSAGE_CHARS) {
+      setMessages((m) => [...m, { from: "bot", text: LONG_MESSAGE_TEXT }]);
+      return;
+    }
 
     if (message) {
       setMessages((m) => [...m, { from: "user", text: message }]);
     }
+    inFlightRequestRef.current = true;
     setLoading(true);
 
     try {
-      const resp = await sendChat(sessionId, message, buttonValue, questionId);
+      const resp = await sendChat(
+        sessionId,
+        message,
+        buttonValue,
+        questionId,
+        selectedTreatmentOverride || selectedTreatmentRef.current
+      );
       if (!resp?.reply) return;
 
       const botMsg = {
         from: "bot",
         text: resp.reply,
         buttons: resp.buttons || null,
+        suggestions: resp.suggestions || null,
+        treatments: resp.treatments || null,
         offerContinue: resp.offer_continue || null,
         questionProgress: resp.question_progress || null,
         mode: resp.mode,
       };
       setMessages((m) => [...m, botMsg]);
-    } catch {
+    } catch (error) {
       setMessages((m) => [
         ...m,
-        { from: "bot", text: "מצטערת, יש תקלה קטנה בחיבור. אנא נסי שוב." },
+        {
+          from: "bot",
+          text:
+            error?.status === 429
+              ? RATE_LIMIT_TEXT
+              : error?.status === 413
+                ? LONG_MESSAGE_TEXT
+                : CONNECTION_ERROR_TEXT,
+        },
       ]);
     } finally {
+      inFlightRequestRef.current = false;
       setLoading(false);
     }
   }
@@ -94,8 +202,31 @@ export default function ChatWidget() {
 
   function handleButton(btn) {
     if (loading) return;
+    if (btn.action === "open_booking_whatsapp" || btn.value === "__open_booking_whatsapp__") {
+      openAppointmentWhatsApp();
+      return;
+    }
+    if (btn.action === "open_contact" || btn.value === "__open_contact__") {
+      setOpen(false);
+      navigate("/#contact");
+      return;
+    }
+    if (btn.action === "call_clinic" || btn.value === "__call_clinic__") {
+      window.location.href = "tel:*3691";
+      return;
+    }
     setMessages((m) => [...m, { from: "user", text: btn.label }]);
     _send(null, btn.value, btn.question_id || null);
+  }
+
+  function handleTreatmentQuestion(treatment) {
+    if (loading || !treatment?.id || !treatment?.name) return;
+    const context = { id: treatment.id, name: treatment.name };
+    setSelectedTreatment(context);
+    selectedTreatmentRef.current = context;
+    window.__medaySelectedTreatment = context;
+    setMessages((m) => [...m, { from: "user", text: `יש לי שאלה על טיפול ${treatment.name}` }]);
+    _send(null, `__ask_treatment__:${treatment.id}`, null, context);
   }
 
   function handleContinue(catId) {
@@ -110,13 +241,26 @@ export default function ChatWidget() {
     _send(null, "__restart__", null);
   }
 
-  function resetChat() {
+  async function resetChat() {
+    const oldSessionId = sessionId;
     localStorage.removeItem(SESSION_KEY);
     const newId = crypto.randomUUID();
     localStorage.setItem(SESSION_KEY, newId);
     setSessionId(newId);
+    setSelectedTreatment(null);
+    selectedTreatmentRef.current = null;
+    inFlightRequestRef.current = false;
+    window.__medaySelectedTreatment = null;
     setMessages([WELCOME_MSG]);
     setLoading(false);
+    await clearChatSession(oldSessionId);
+  }
+
+  function openTreatmentDetails(treatment) {
+    const route = treatment?.route || getTreatmentRoute(treatment);
+    if (!route) return;
+    setOpen(false);
+    navigate(route);
   }
 
   return (
@@ -124,6 +268,7 @@ export default function ChatWidget() {
       {/* Floating button */}
       <button
         onClick={() => setOpen((v) => !v)}
+        aria-label={open ? "סגירת הצ׳אט" : "פתיחת הצ׳אט"}
         className={cn(
           "w-16 h-16 rounded-full flex items-center justify-center shadow-2xl transition-all duration-300 transform hover:scale-110",
           open ? "bg-gray-100 text-gray-600" : "bg-primary text-white"
@@ -147,6 +292,7 @@ export default function ChatWidget() {
             </div>
             <button
               onClick={resetChat}
+              aria-label="שיחה חדשה"
               className="p-2 hover:bg-white/20 rounded-full transition-colors"
               title="שיחה חדשה"
             >
@@ -213,6 +359,64 @@ export default function ChatWidget() {
                   </div>
                 )}
 
+                {/* Soft suggestion chips — send free text, non-binding guidance */}
+                {m.from === "bot" && m.suggestions && idx === messages.length - 1 && (
+                  <div className="mt-2 flex flex-wrap gap-2 max-w-[88%]">
+                    {m.suggestions.map((text) => (
+                      <button
+                        key={text}
+                        onClick={() => handleTextSend(text)}
+                        disabled={loading}
+                        className={cn(
+                          "px-3 py-1.5 rounded-full text-xs font-medium border border-dashed transition-all",
+                          "border-gray-300 text-gray-500 bg-white hover:border-primary/50 hover:text-primary hover:bg-pink-50/60",
+                          loading && "opacity-40 cursor-not-allowed"
+                        )}
+                      >
+                        {text}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
+                {m.from === "bot" && m.treatments && idx === messages.length - 1 && (
+                  <div className="mt-3 grid w-full max-w-[88%] gap-2">
+                    {m.treatments
+                      .map((treatment) => ({ ...treatment, route: treatment.route || getTreatmentRoute(treatment) }))
+                      .slice(0, 3)
+                      .map((treatment) => (
+                        <div
+                          key={`${treatment.id}-${treatment.name}`}
+                          className="rounded-2xl border border-pink-100 bg-white p-3 text-right shadow-sm"
+                        >
+                          <p className="text-sm font-bold text-gray-800">{treatment.name}</p>
+                          {treatment.reason && (
+                            <p className="mt-1 text-xs leading-relaxed text-gray-600">{treatment.reason}</p>
+                          )}
+                          <div className="mt-2 flex flex-wrap gap-2">
+                            {treatment.route && (
+                              <button
+                                type="button"
+                                onClick={() => openTreatmentDetails(treatment)}
+                                className="px-3 py-1.5 rounded-full text-xs font-medium border border-primary/40 text-primary bg-white hover:bg-pink-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                              >
+                                לפרטי הטיפול
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleTreatmentQuestion(treatment)}
+                              disabled={loading}
+                              className="px-3 py-1.5 rounded-full text-xs font-medium border border-gray-300 text-gray-500 bg-white hover:border-primary/50 hover:text-primary hover:bg-pink-50/60 transition-all disabled:opacity-40"
+                            >
+                              יש לי שאלה
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                  </div>
+                )}
+
                 {/* Continue / Restart / Not now offer */}
                 {m.from === "bot" && m.offerContinue && idx === messages.length - 1 && (
                   <div className="mt-3 max-w-[88%] bg-pink-50 border border-pink-200 rounded-2xl p-3 space-y-2">
@@ -262,6 +466,9 @@ export default function ChatWidget() {
 
           {/* Input */}
           <div className="p-4 bg-white border-t border-gray-100">
+            <p className="mb-2 text-[11px] leading-relaxed text-gray-500">
+              {DISCLAIMER_TEXT}
+            </p>
             <ChatInput ref={inputRef} onSend={handleTextSend} disabled={loading} />
           </div>
         </div>
@@ -281,19 +488,26 @@ const ChatInput = forwardRef(function ChatInput({ onSend, disabled }, ref) {
 
   return (
     <div className="relative flex items-center">
-      <input
+      <textarea
         ref={ref}
-        type="text"
         value={val}
         onChange={(e) => setVal(e.target.value)}
-        onKeyDown={(e) => e.key === "Enter" && submit()}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            submit();
+          }
+        }}
         placeholder="כתבי לנו כאן..."
         disabled={disabled}
-        className="w-full bg-gray-100 border-none rounded-2xl py-3 pr-4 pl-12 focus:ring-2 focus:ring-primary/20 text-sm"
+        rows={1}
+        aria-label="כתיבת הודעה לצ׳אט"
+        className="min-h-[46px] max-h-28 w-full resize-none bg-gray-100 border-none rounded-2xl py-3 pr-4 pl-12 focus:ring-2 focus:ring-primary/20 focus:outline-none text-sm"
       />
       <button
         onClick={submit}
         disabled={disabled || !val.trim()}
+        aria-label="שליחת הודעה"
         className="absolute left-2 p-2 text-primary hover:text-pink-600 disabled:text-gray-300 transition-colors"
       >
         <Send size={20} className="rotate-180" />

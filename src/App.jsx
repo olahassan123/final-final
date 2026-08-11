@@ -14,6 +14,8 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminStaffManagement from "./pages/AdminStaffManagement";
 import AdminCustomerManagement from "./pages/AdminCustomerManagement";
 import AdminAuditLog from "./pages/AdminAuditLog";
+import AdminEmployeeShifts from "./pages/AdminEmployeeShifts";
+import AdminEmployees from "./pages/AdminEmployees";
 import AccountSettings from "./pages/AccountSettings";
 import StaffLogin from "./pages/StaffLogin";
 import ServiceCategoryPage from "./pages/ServiceCategoryPage";
@@ -175,6 +177,22 @@ function AppContent() {
             element={
               <ProtectedRoute allowedRoles={["admin"]} redirectTo="/staff-login">
                 <AdminAuditLog />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/employee-shifts"
+            element={
+              <ProtectedRoute allowedRoles={["admin"]} redirectTo="/staff-login">
+                <AdminEmployeeShifts />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/employees"
+            element={
+              <ProtectedRoute allowedRoles={["admin"]} redirectTo="/staff-login">
+                <AdminEmployees />
               </ProtectedRoute>
             }
           />

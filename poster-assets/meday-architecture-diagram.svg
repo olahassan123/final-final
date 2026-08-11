@@ -1,0 +1,258 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1050" viewBox="0 0 1600 1050" role="img" aria-labelledby="title desc">
+  <title id="title">MeDay Smart Platform Architecture Diagram</title>
+  <desc id="desc">Academic poster architecture diagram showing users, React frontend, FastAPI backend, SQLite database, AI services, and admin management modules.</desc>
+  <defs>
+    <linearGradient id="headerGradient" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#173B67"/>
+      <stop offset="0.56" stop-color="#22B8CF"/>
+      <stop offset="1" stop-color="#8B7DDA"/>
+    </linearGradient>
+    <linearGradient id="softPanel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#F7FCFF"/>
+      <stop offset="1" stop-color="#F6F3FF"/>
+    </linearGradient>
+    <filter id="softShadow" x="-10%" y="-10%" width="120%" height="130%">
+      <feDropShadow dx="0" dy="12" stdDeviation="12" flood-color="#173B67" flood-opacity="0.13"/>
+    </filter>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#173B67"/>
+    </marker>
+    <marker id="arrowTeal" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#22B8CF"/>
+    </marker>
+    <marker id="arrowPurple" viewBox="0 0 10 10" refX="8.6" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8B7DDA"/>
+    </marker>
+    <style>
+      .bg { fill: #ffffff; }
+      .title { font: 800 40px Aptos, Inter, Arial, sans-serif; fill: #173B67; letter-spacing: 0; }
+      .subtitle { font: 500 19px Aptos, Inter, Arial, sans-serif; fill: #637083; }
+      .section-label { font: 800 17px Aptos, Inter, Arial, sans-serif; fill: #173B67; text-transform: uppercase; letter-spacing: 1.4px; }
+      .box-title { font: 800 23px Aptos, Inter, Arial, sans-serif; fill: #173B67; }
+      .box-subtitle { font: 500 15px Aptos, Inter, Arial, sans-serif; fill: #637083; }
+      .module-title { font: 800 17px Aptos, Inter, Arial, sans-serif; fill: #173B67; }
+      .module-text { font: 500 13px Aptos, Inter, Arial, sans-serif; fill: #637083; }
+      .small-title { font: 800 15px Aptos, Inter, Arial, sans-serif; fill: #173B67; }
+      .small-text { font: 500 12px Aptos, Inter, Arial, sans-serif; fill: #637083; }
+      .tag { font: 800 12px Aptos, Inter, Arial, sans-serif; fill: #ffffff; }
+      .callout { font: 700 14px Aptos, Inter, Arial, sans-serif; fill: #334155; }
+      .panel { fill: #ffffff; stroke: #DCE7F7; stroke-width: 2; rx: 22; filter: url(#softShadow); }
+      .soft { fill: url(#softPanel); stroke: #DCE7F7; stroke-width: 2; rx: 18; }
+      .frontend { fill: #EFFBFC; stroke: #9DE4EA; stroke-width: 2.5; rx: 18; }
+      .backend { fill: #F3F8FF; stroke: #B7CBE8; stroke-width: 2.5; rx: 18; }
+      .ai { fill: #F6F2FF; stroke: #D6C9FA; stroke-width: 2.5; rx: 18; }
+      .data { fill: #F8FAFC; stroke: #CBD5E1; stroke-width: 2.5; rx: 18; }
+      .admin { fill: #F7F4FF; stroke: #CFC5F7; stroke-width: 2.5; rx: 18; }
+      .chip-blue { fill: #173B67; }
+      .chip-teal { fill: #22B8CF; }
+      .chip-purple { fill: #8B7DDA; }
+      .line-blue { fill: none; stroke: #173B67; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowBlue); }
+      .line-teal { fill: none; stroke: #22B8CF; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowTeal); }
+      .line-purple { fill: none; stroke: #8B7DDA; stroke-width: 3.2; stroke-linecap: round; stroke-linejoin: round; marker-end: url(#arrowPurple); }
+      .thin { stroke-width: 2.4; stroke-dasharray: 8 8; }
+      .icon-stroke { fill: none; stroke: currentColor; stroke-width: 2.7; stroke-linecap: round; stroke-linejoin: round; }
+      .icon-blue { color: #173B67; }
+      .icon-teal { color: #22B8CF; }
+      .icon-purple { color: #8B7DDA; }
+      .icon-white { color: #ffffff; }
+    </style>
+  </defs>
+
+  <rect class="bg" width="1600" height="1050"/>
+  <rect x="42" y="38" width="1516" height="974" rx="34" fill="#FFFFFF" stroke="#E5EEF8" stroke-width="2"/>
+  <rect x="42" y="38" width="1516" height="13" rx="6.5" fill="url(#headerGradient)"/>
+
+  <text x="84" y="105" class="title">MeDay Smart Platform - System Architecture</text>
+  <text x="86" y="139" class="subtitle">React/Vite client experience connected to FastAPI services, SQLite data storage, and OpenAI-powered recommendation workflows</text>
+
+  <g transform="translate(1308 82)">
+    <rect x="0" y="0" width="194" height="38" rx="19" class="chip-blue"/>
+    <text x="97" y="25" text-anchor="middle" class="tag">Academic Poster Diagram</text>
+  </g>
+
+  <!-- Users -->
+  <g id="users-layer">
+    <rect x="616" y="182" width="368" height="94" rx="22" class="panel"/>
+    <g transform="translate(650 207)" class="icon-blue">
+      <circle cx="22" cy="16" r="12" class="icon-stroke"/>
+      <path d="M3 55c4-19 34-19 38 0" class="icon-stroke"/>
+      <circle cx="62" cy="18" r="10" class="icon-stroke"/>
+      <path d="M48 55c4-15 26-15 30 0" class="icon-stroke"/>
+    </g>
+    <text x="747" y="224" class="box-title">Users</text>
+    <text x="747" y="249" class="box-subtitle">Clients, administrators, secretaries, clinic staff</text>
+  </g>
+
+  <!-- Main flow arrows -->
+  <path d="M800 278 L800 338" class="line-blue"/>
+  <path d="M800 552 L800 615" class="line-blue"/>
+  <path d="M800 785 L800 842" class="line-blue"/>
+
+  <!-- Frontend -->
+  <g id="frontend-layer">
+    <rect x="188" y="344" width="1224" height="208" rx="26" class="frontend" filter="url(#softShadow)"/>
+    <text x="218" y="385" class="section-label">Presentation Layer</text>
+    <g transform="translate(218 409)" class="icon-teal">
+      <rect x="0" y="0" width="42" height="30" rx="4" class="icon-stroke"/>
+      <path d="M6 39h30M16 30v9M26 30v9" class="icon-stroke"/>
+    </g>
+    <text x="278" y="430" class="box-title">React Frontend</text>
+    <text x="278" y="456" class="box-subtitle">Vite + Tailwind CSS single-page application</text>
+
+    <g transform="translate(218 478)">
+      <rect x="0" y="0" width="178" height="48" rx="14" fill="#FFFFFF" stroke="#BDEFF2" stroke-width="2"/>
+      <text x="89" y="30" text-anchor="middle" class="small-title">Client Website</text>
+    </g>
+    <g transform="translate(420 478)">
+      <rect x="0" y="0" width="178" height="48" rx="14" fill="#FFFFFF" stroke="#BDEFF2" stroke-width="2"/>
+      <text x="89" y="30" text-anchor="middle" class="small-title">Treatment Catalog</text>
+    </g>
+    <g transform="translate(622 478)">
+      <rect x="0" y="0" width="178" height="48" rx="14" fill="#FFFFFF" stroke="#D6C9FA" stroke-width="2"/>
+      <text x="89" y="30" text-anchor="middle" class="small-title">AI Assistant</text>
+    </g>
+    <g transform="translate(824 478)">
+      <rect x="0" y="0" width="178" height="48" rx="14" fill="#FFFFFF" stroke="#D6C9FA" stroke-width="2"/>
+      <text x="89" y="30" text-anchor="middle" class="small-title">Admin Dashboard</text>
+    </g>
+    <g transform="translate(1026 478)">
+      <rect x="0" y="0" width="178" height="48" rx="14" fill="#FFFFFF" stroke="#B7CBE8" stroke-width="2"/>
+      <text x="89" y="30" text-anchor="middle" class="small-title">Secretary Mgmt.</text>
+    </g>
+    <g transform="translate(1228 478)">
+      <rect x="0" y="0" width="154" height="48" rx="14" fill="#FFFFFF" stroke="#B7CBE8" stroke-width="2"/>
+      <text x="77" y="30" text-anchor="middle" class="small-title">Client Area</text>
+    </g>
+  </g>
+
+  <!-- Backend -->
+  <g id="backend-layer">
+    <rect x="430" y="622" width="740" height="163" rx="26" class="backend" filter="url(#softShadow)"/>
+    <text x="460" y="663" class="section-label">Application &amp; API Layer</text>
+    <g transform="translate(460 687)" class="icon-blue">
+      <rect x="0" y="4" width="48" height="34" rx="6" class="icon-stroke"/>
+      <path d="M10 15h28M10 27h28M54 13h20M54 29h20" class="icon-stroke"/>
+    </g>
+    <text x="550" y="704" class="box-title">FastAPI Backend</text>
+    <text x="550" y="731" class="box-subtitle">Auth, appointments, treatments,</text>
+    <text x="550" y="753" class="box-subtitle">analytics and AI orchestration</text>
+
+    <g transform="translate(760 675)">
+      <rect x="0" y="0" width="122" height="52" rx="14" fill="#FFFFFF" stroke="#B7CBE8" stroke-width="2"/>
+      <text x="61" y="23" text-anchor="middle" class="small-title">REST APIs</text>
+      <text x="61" y="40" text-anchor="middle" class="small-text">JSON endpoints</text>
+    </g>
+    <g transform="translate(902 675)">
+      <rect x="0" y="0" width="122" height="52" rx="14" fill="#FFFFFF" stroke="#B7CBE8" stroke-width="2"/>
+      <text x="61" y="23" text-anchor="middle" class="small-title">Auth &amp; Roles</text>
+      <text x="61" y="40" text-anchor="middle" class="small-text">Admin / staff</text>
+    </g>
+    <g transform="translate(1044 675)">
+      <rect x="0" y="0" width="102" height="52" rx="14" fill="#FFFFFF" stroke="#B7CBE8" stroke-width="2"/>
+      <text x="51" y="23" text-anchor="middle" class="small-title">Logic</text>
+      <text x="51" y="40" text-anchor="middle" class="small-text">Scheduling</text>
+    </g>
+  </g>
+
+  <!-- Database -->
+  <g id="database-layer">
+    <rect x="548" y="850" width="504" height="106" rx="26" class="data" filter="url(#softShadow)"/>
+    <g transform="translate(594 879)" class="icon-blue">
+      <ellipse cx="30" cy="10" rx="28" ry="10" class="icon-stroke"/>
+      <path d="M2 10v38c0 6 13 10 28 10s28-4 28-10V10" class="icon-stroke"/>
+      <path d="M2 29c0 6 13 10 28 10s28-4 28-10" class="icon-stroke"/>
+    </g>
+    <text x="686" y="893" class="box-title">SQLite Database</text>
+    <text x="686" y="919" class="box-subtitle">Users, appointments, treatments, customers, staff, analytics data</text>
+  </g>
+
+  <!-- AI sidecar -->
+  <g id="ai-layer">
+    <rect x="76" y="602" width="282" height="363" rx="26" class="ai" filter="url(#softShadow)"/>
+    <text x="106" y="642" class="section-label">AI Layer</text>
+    <g transform="translate(106 666)" class="icon-purple">
+      <path d="M26 6c-10 0-18 8-18 18 0 4 1 7 3 10-5 2-8 7-8 13 0 8 6 14 14 14h24c8 0 14-6 14-14 0-6-3-11-8-13 2-3 3-6 3-10 0-10-8-18-18-18h-6z" class="icon-stroke"/>
+      <path d="M22 22h16M20 38h20M28 22v28" class="icon-stroke"/>
+    </g>
+    <text x="178" y="690" class="box-title">AI Assistant</text>
+    <text x="106" y="725" class="box-subtitle">Conversational guidance and</text>
+    <text x="106" y="746" class="box-subtitle">personalized recommendations</text>
+
+    <g transform="translate(106 772)">
+      <rect x="0" y="0" width="222" height="48" rx="14" fill="#FFFFFF" stroke="#D6C9FA" stroke-width="2"/>
+      <text x="111" y="30" text-anchor="middle" class="small-title">OpenAI API</text>
+    </g>
+    <g transform="translate(106 840)">
+      <rect x="0" y="0" width="222" height="48" rx="14" fill="#FFFFFF" stroke="#D6C9FA" stroke-width="2"/>
+      <text x="111" y="30" text-anchor="middle" class="small-title">Recommendation Engine</text>
+    </g>
+    <g transform="translate(106 908)">
+      <rect x="0" y="0" width="222" height="48" rx="14" fill="#FFFFFF" stroke="#D6C9FA" stroke-width="2"/>
+      <text x="111" y="30" text-anchor="middle" class="small-title">FAQ Knowledge Base</text>
+    </g>
+  </g>
+
+  <!-- Admin sidecar -->
+  <g id="admin-layer">
+    <rect x="1242" y="602" width="282" height="363" rx="26" class="admin" filter="url(#softShadow)"/>
+    <text x="1272" y="642" class="section-label">Management Layer</text>
+    <g transform="translate(1272 666)" class="icon-purple">
+      <rect x="2" y="8" width="52" height="38" rx="6" class="icon-stroke"/>
+      <path d="M12 34l9-9 8 6 13-16M12 56h32" class="icon-stroke"/>
+    </g>
+    <text x="1344" y="690" class="box-title">Admin Dashboard</text>
+    <text x="1272" y="725" class="box-subtitle">Operational control, clinic insights,</text>
+    <text x="1272" y="746" class="box-subtitle">and staff workflow supervision</text>
+
+    <g transform="translate(1272 772)">
+      <rect x="0" y="0" width="222" height="48" rx="14" fill="#FFFFFF" stroke="#D6C9FA" stroke-width="2"/>
+      <text x="111" y="30" text-anchor="middle" class="small-title">Analytics Engine</text>
+    </g>
+    <g transform="translate(1272 840)">
+      <rect x="0" y="0" width="222" height="48" rx="14" fill="#FFFFFF" stroke="#D6C9FA" stroke-width="2"/>
+      <text x="111" y="30" text-anchor="middle" class="small-title">Appointment System</text>
+    </g>
+    <g transform="translate(1272 908)">
+      <rect x="0" y="0" width="222" height="48" rx="14" fill="#FFFFFF" stroke="#D6C9FA" stroke-width="2"/>
+      <text x="111" y="30" text-anchor="middle" class="small-title">Client Data</text>
+    </g>
+  </g>
+
+  <!-- Cross-layer connections -->
+  <path d="M711 526 C600 570 440 590 315 738" class="line-purple thin"/>
+  <path d="M792 526 C676 600 462 696 330 797" class="line-purple thin"/>
+  <path d="M711 526 C520 635 415 820 330 933" class="line-purple thin"/>
+
+  <path d="M913 526 C1018 588 1170 612 1272 796" class="line-purple thin"/>
+  <path d="M913 526 C1047 641 1175 748 1272 864" class="line-purple thin"/>
+  <path d="M913 526 C1064 696 1188 850 1272 932" class="line-purple thin"/>
+
+  <path d="M358 763 C438 738 488 733 550 733" class="line-teal thin"/>
+  <path d="M1242 863 C1130 844 1035 811 953 785" class="line-teal thin"/>
+  <path d="M1383 932 C1294 978 1107 977 946 932" class="line-teal thin"/>
+
+  <!-- Labels on connectors -->
+  <g transform="translate(724 301)">
+    <rect x="0" y="0" width="152" height="31" rx="15.5" fill="#FFFFFF" stroke="#DCE7F7" stroke-width="1.5"/>
+    <text x="76" y="21" text-anchor="middle" class="callout">User requests</text>
+  </g>
+  <g transform="translate(710 573)">
+    <rect x="0" y="0" width="180" height="31" rx="15.5" fill="#FFFFFF" stroke="#DCE7F7" stroke-width="1.5"/>
+    <text x="90" y="21" text-anchor="middle" class="callout">REST API calls</text>
+  </g>
+  <g transform="translate(705 807)">
+    <rect x="0" y="0" width="190" height="31" rx="15.5" fill="#FFFFFF" stroke="#DCE7F7" stroke-width="1.5"/>
+    <text x="95" y="21" text-anchor="middle" class="callout">Persistent storage</text>
+  </g>
+
+  <!-- Legend -->
+  <g id="legend" transform="translate(84 994)">
+    <rect x="0" y="-24" width="462" height="44" rx="22" fill="#F8FAFC" stroke="#E5EEF8" stroke-width="1.5"/>
+    <circle cx="28" cy="-2" r="7" fill="#22B8CF"/>
+    <text x="44" y="3" class="small-text">Main application flow</text>
+    <circle cx="184" cy="-2" r="7" fill="#8B7DDA"/>
+    <text x="200" y="3" class="small-text">AI / management dependencies</text>
+    <circle cx="392" cy="-2" r="7" fill="#173B67"/>
+    <text x="408" y="3" class="small-text">Core services</text>
+  </g>
+</svg>

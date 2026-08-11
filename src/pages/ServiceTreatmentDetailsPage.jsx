@@ -10,18 +10,18 @@ import { getTreatmentBySlugs } from "../data/serviceCatalog";
 
 /* ── category meta ────────────────────────────────────────────── */
 const CATEGORY_META = {
-  "manicure-pedicure":      { gradient: "from-[#f9a8d4] to-[#ec4899]", accent: "#ec4899", light: "#fdf2f8" },
-  "hair-design":            { gradient: "from-[#c4b5fd] to-[#7c3aed]", accent: "#7c3aed", light: "#f5f3ff" },
-  "body-treatments":        { gradient: "from-[#6ee7b7] to-[#059669]", accent: "#059669", light: "#ecfdf5" },
-  "cosmetology":            { gradient: "from-[#fca5a5] to-[#dc2626]", accent: "#dc2626", light: "#fef2f2" },
-  "hair-removal":           { gradient: "from-[#93c5fd] to-[#2563eb]", accent: "#2563eb", light: "#eff6ff" },
-  "professional-makeup":    { gradient: "from-[#fcd34d] to-[#d97706]", accent: "#d97706", light: "#fffbeb" },
-  "permanent-makeup-brows": { gradient: "from-[#a5b4fc] to-[#4f46e5]", accent: "#4f46e5", light: "#eef2ff" },
-  "personal-styling":       { gradient: "from-[#f0abfc] to-[#a21caf]", accent: "#a21caf", light: "#fdf4ff" },
-  "aesthetic-treatments":   { gradient: "from-[#fde68a] to-[#b45309]", accent: "#b45309", light: "#fffbeb" },
+  "manicure-pedicure":      { accent: "#C4795A", secondary: "#E8A5B5", light: "#FFF7F2" },
+  "hair-design":            { accent: "#9B5C38", secondary: "#E8A5B5", light: "#FDF8F4" },
+  "body-treatments":        { accent: "#4A9BA8", secondary: "#C4795A", light: "#EDF5F6" },
+  "cosmetology":            { accent: "#C4795A", secondary: "#4A9BA8", light: "#FFF7F2" },
+  "hair-removal":           { accent: "#4A9BA8", secondary: "#E8A5B5", light: "#EDF5F6" },
+  "professional-makeup":    { accent: "#C4795A", secondary: "#E8C97A", light: "#FFFBEB" },
+  "permanent-makeup-brows": { accent: "#9B5C38", secondary: "#E8A5B5", light: "#FDF8F4" },
+  "personal-styling":       { accent: "#C4795A", secondary: "#4A9BA8", light: "#FFF7F2" },
+  "aesthetic-treatments":   { accent: "#9B5C38", secondary: "#E8C97A", light: "#FFFBEB" },
 };
 function getMeta(slug) {
-  return CATEGORY_META[slug] || { gradient: "from-[#C4795A] to-[#9B5C38]", accent: "#9B5C38", light: "#FAF0E6" };
+  return CATEGORY_META[slug] || { accent: "#C4795A", secondary: "#E8A5B5", light: "#FAF0E6" };
 }
 
 /* ── info row ─────────────────────────────────────────────────── */
@@ -80,7 +80,7 @@ function VariantCard({ variant, treatmentName, index, accent, light }) {
       />
 
       {/* accent top bar */}
-      <div className={`absolute top-0 left-0 right-0 h-1 bg-gradient-to-l ${accent === "#ec4899" ? "from-[#f9a8d4] to-[#ec4899]" : ""} opacity-0 group-hover:opacity-100 transition-opacity duration-300`}
+      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-l opacity-0 group-hover:opacity-100 transition-opacity duration-300"
         style={{ background: `linear-gradient(to left, ${accent}cc, ${accent}44)` }}
       />
 
@@ -165,22 +165,23 @@ function RevealSection({ children, delay = 0 }) {
 export default function ServiceTreatmentDetailsPage() {
   const { categorySlug, treatmentSlug } = useParams();
   const { category, treatment } = getTreatmentBySlugs(categorySlug, treatmentSlug);
-  const { gradient, accent, light } = getMeta(categorySlug);
+  const { accent, secondary, light } = getMeta(categorySlug);
 
   useEffect(() => {
     if (!treatment) return;
+    window.__medaySelectedTreatment = { id: `${categorySlug}:${treatment.slug}`, name: treatment.name };
     window.dispatchEvent(new CustomEvent("treatmentSelected", {
-      detail: { id: `${categorySlug}:${treatment.slug}`, name: treatment.name },
+      detail: window.__medaySelectedTreatment,
     }));
   }, [categorySlug, treatment?.name, treatment?.slug]);
 
   if (!category || !treatment) {
     return (
-      <div className="min-h-screen bg-[#fdf8ff] px-6 py-16" dir="rtl">
-        <div className="mx-auto max-w-4xl rounded-3xl bg-white p-10 text-center shadow-sm border border-red-100">
+      <div className="min-h-screen bg-[#FAF5F0] px-6 py-16" dir="rtl">
+        <div className="mx-auto max-w-4xl rounded-3xl bg-white/85 p-10 text-center shadow-sm border border-[#E8C4A0]/40">
           <h1 className="text-3xl font-bold text-gray-900">דף הטיפול לא נמצא</h1>
           <p className="mt-4 text-gray-500">אפשר לחזור לקטגוריה ולבחור טיפול אחר.</p>
-          <Link to="/categories" className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#e8a5b5] px-6 py-3 font-bold text-white">
+          <Link to="/categories" className="mt-8 inline-flex items-center gap-2 rounded-full bg-[#C4795A] px-6 py-3 font-bold text-white transition hover:bg-[#9B5C38]">
             <ArrowRight size={18} /> חזרה לקטגוריות
           </Link>
         </div>
@@ -195,12 +196,11 @@ export default function ServiceTreatmentDetailsPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#fdf8ff]" dir="rtl">
+    <div className="min-h-screen bg-[#FAF5F0]" dir="rtl">
 
       {/* ══ HERO HEADER ══ */}
       <section className="relative overflow-hidden pb-20 pt-20 px-6">
-        {/* dark base */}
-        <div className="absolute inset-0 bg-gradient-to-b from-[#12090f] via-[#1e0d28] to-[#fdf8ff]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#FDF8F4] via-[#FAF0E6] to-[#FAF5F0]" />
 
         {/* category-colored glow */}
         <div className="absolute top-0 right-1/4 w-[550px] h-[400px] rounded-full blur-[130px] pointer-events-none"
@@ -211,7 +211,7 @@ export default function ServiceTreatmentDetailsPage() {
         {/* micro stars */}
         {[...Array(10)].map((_, i) => (
           <motion.div key={i}
-            className="absolute w-1 h-1 rounded-full bg-white/35"
+            className="absolute w-1 h-1 rounded-full bg-[#C4795A]/25"
             style={{ top: `${10 + Math.random() * 65}%`, left: `${Math.random() * 100}%` }}
             animate={{ opacity: [0.15, 0.85, 0.15] }}
             transition={{ duration: 2.5 + Math.random() * 2, repeat: Infinity, delay: Math.random() * 2 }}
@@ -224,13 +224,13 @@ export default function ServiceTreatmentDetailsPage() {
             initial={{ opacity: 0, x: 15 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.45 }}
-            className="flex items-center gap-2 text-sm text-white/40 mb-8"
+            className="flex items-center gap-2 text-sm text-[#6F625A]/70 mb-8"
           >
-            <Link to="/categories" className="hover:text-white/70 transition-colors">כל הקטגוריות</Link>
+            <Link to="/categories" className="hover:text-[#9B5C38] transition-colors">כל הקטגוריות</Link>
             <ChevronRight size={14} />
-            <Link to={`/categories/${category.slug}`} className="hover:text-white/70 transition-colors">{category.name}</Link>
+            <Link to={`/categories/${category.slug}`} className="hover:text-[#9B5C38] transition-colors">{category.name}</Link>
             <ChevronRight size={14} />
-            <span className="text-white/70">{treatment.name}</span>
+            <span className="text-[#2B211C]">{treatment.name}</span>
           </motion.div>
 
           {/* category badge */}
@@ -238,9 +238,9 @@ export default function ServiceTreatmentDetailsPage() {
             initial={{ opacity: 0, y: -12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.08 }}
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/20 text-white/80 text-sm font-bold mb-5"
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-white/80 backdrop-blur-sm border border-[#E8C4A0]/60 text-[#9B5C38] text-sm font-bold mb-5 shadow-sm"
           >
-            <Sparkles size={13} style={{ color: accent }} />
+            <Sparkles size={13} style={{ color: secondary }} />
             {category.name}
           </motion.div>
 
@@ -249,7 +249,7 @@ export default function ServiceTreatmentDetailsPage() {
             initial={{ opacity: 0, y: 28 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.75, delay: 0.15, ease: [0.22, 1, 0.36, 1] }}
-            className="text-4xl md:text-6xl font-black text-white leading-tight mb-5"
+            className="text-4xl md:text-6xl font-black text-[#2B211C] leading-tight mb-5"
           >
             {treatment.name}
           </motion.h1>
@@ -258,7 +258,7 @@ export default function ServiceTreatmentDetailsPage() {
             initial={{ opacity: 0, y: 18 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.28 }}
-            className="text-white/50 max-w-2xl leading-relaxed text-base"
+            className="text-[#6F625A] max-w-2xl leading-relaxed text-base"
           >
             {treatment.summary || treatment.description}
           </motion.p>
@@ -274,7 +274,7 @@ export default function ServiceTreatmentDetailsPage() {
 
             {/* About */}
             <RevealSection>
-              <div className="rounded-3xl bg-white/80 backdrop-blur-xl border border-white/70 shadow-xl p-8 text-right">
+              <div className="rounded-3xl bg-white/85 backdrop-blur-xl border border-[#E8C4A0]/40 shadow-xl p-8 text-right">
                 <h2 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-3 justify-end">
                   על הטיפול
                   <div className="w-8 h-8 rounded-xl flex items-center justify-center"
@@ -310,7 +310,7 @@ export default function ServiceTreatmentDetailsPage() {
             {/* Variants */}
             {treatment.variants?.length > 0 && (
               <RevealSection delay={0.1}>
-                <div className="rounded-3xl bg-white/60 backdrop-blur-sm border border-white/60 p-7 text-right">
+                <div className="rounded-3xl bg-[#FFF7F2]/80 backdrop-blur-sm border border-[#E8C4A0]/40 p-7 text-right">
                   <h2 className="text-2xl font-bold text-gray-900 mb-2">סוגי הטיפול</h2>
                   <p className="text-sm text-gray-400 mb-7">
                     כל האפשרויות של {treatment.name} מרוכזות כאן
@@ -343,8 +343,8 @@ export default function ServiceTreatmentDetailsPage() {
             {/* Booking card */}
             <RevealSection delay={0.2}>
               <div
-                className="relative rounded-3xl overflow-hidden p-7 text-white text-right shadow-2xl"
-                style={{ background: `linear-gradient(135deg, #12090f 0%, #1e0d28 100%)` }}
+                className="relative rounded-3xl overflow-hidden p-7 text-[#2B211C] text-right shadow-xl border border-[#E8C4A0]/40"
+                style={{ background: "linear-gradient(135deg, #FFF7F2 0%, #FDF8F4 58%, #FAF0E6 100%)" }}
               >
                 {/* glow inside */}
                 <div className="absolute top-0 left-0 right-0 h-32 rounded-t-3xl"
@@ -357,7 +357,7 @@ export default function ServiceTreatmentDetailsPage() {
                   </div>
 
                   <h3 className="text-xl font-bold mb-2">MeDay Tip</h3>
-                  <p className="text-sm leading-7 text-white/60 mb-6">
+                  <p className="text-sm leading-7 text-[#6F625A] mb-6">
                     {treatment.consultation ||
                       "לייעוץ מותאם אישית ותיאום מועד הטיפול המושלם עבורך — אנחנו כאן."}
                   </p>
@@ -374,8 +374,8 @@ export default function ServiceTreatmentDetailsPage() {
 
                     <button
                       onClick={openChat}
-                      className="w-full flex items-center justify-center gap-2 rounded-full border py-3.5 font-bold text-white/80 text-sm hover:bg-white/10 transition-colors"
-                      style={{ borderColor: "rgba(255,255,255,0.15)" }}
+                      className="w-full flex items-center justify-center gap-2 rounded-full border py-3.5 font-bold text-[#9B5C38] text-sm hover:bg-white/70 transition-colors"
+                      style={{ borderColor: `${accent}35` }}
                     >
                       <MessageCircle size={17} />
                       שאלי את ה-AI על הטיפול
@@ -387,7 +387,7 @@ export default function ServiceTreatmentDetailsPage() {
 
             {/* FAQ */}
             <RevealSection delay={0.3}>
-              <div className="rounded-3xl bg-white/80 backdrop-blur-xl border border-white/70 shadow-xl p-7 text-right">
+              <div className="rounded-3xl bg-white/85 backdrop-blur-xl border border-[#E8C4A0]/40 shadow-xl p-7 text-right">
                 <h3 className="text-lg font-bold text-gray-900 mb-4">שאלות נפוצות</h3>
 
                 {treatment.faq?.length > 0 ? (

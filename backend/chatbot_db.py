@@ -1,7 +1,8 @@
 import sqlite3
 import json
+from datetime import datetime, timedelta, timezone
 from typing import Optional, List, Dict
-from chatbot_config import CHATBOT_DB_PATH
+from chatbot_config import CHATBOT_DB_PATH, CHAT_SESSION_EXPIRY_DAYS
 
 
 def get_chatbot_db() -> sqlite3.Connection:
@@ -17,7 +18,8 @@ def init_chatbot_db():
             category_id TEXT PRIMARY KEY,
             category_name TEXT NOT NULL,
             has_recommendation INTEGER DEFAULT 0,
-            recommendation_intro TEXT
+            recommendation_intro TEXT,
+            short_description TEXT
         )
     """)
     conn.execute("""
@@ -33,7 +35,14 @@ def init_chatbot_db():
             duration_notes TEXT,
             aliases TEXT,
             canonical_id TEXT,
-            source TEXT
+            source TEXT,
+            preparation TEXT,
+            aftercare TEXT,
+            downtime TEXT,
+            pain_level TEXT,
+            sessions_recommended TEXT,
+            results_longevity TEXT,
+            what_to_expect TEXT
         )
     """)
     conn.execute("""
@@ -81,22 +90,75 @@ def init_chatbot_db():
         CREATE TABLE IF NOT EXISTS cb_sessions (
             session_id TEXT PRIMARY KEY,
             mode TEXT NOT NULL DEFAULT 'general',
+            conversation_state TEXT DEFAULT 'GENERAL_CHAT',
             flow_category_id TEXT,
             flow_question_index INTEGER DEFAULT 0,
             flow_scores TEXT DEFAULT '{}',
             flow_answers TEXT DEFAULT '[]',
             recent_context TEXT DEFAULT '[]',
             last_treatment_id TEXT,
+            answered_fields TEXT DEFAULT '[]',
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cb_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+        )
+    """)
+    _migrate_treatment_columns(conn)
+    _cleanup_expired_sessions(conn)
     conn.commit()
     conn.close()
+
+
+# ── Key/value settings (LLM API key, enabled flag, …) ─────────────────────────
+
+def get_setting(key: str, default=None):
+    conn = get_chatbot_db()
+    row = conn.execute("SELECT value FROM cb_settings WHERE key = ?", (key,)).fetchone()
+    conn.close()
+    return row["value"] if row else default
+
+
+def set_setting(key: str, value):
+    conn = get_chatbot_db()
+    conn.execute(
+        "INSERT OR REPLACE INTO cb_settings (key, value) VALUES (?, ?)",
+        (key, "" if value is None else str(value)),
+    )
+    conn.commit()
+    conn.close()
+
+
+# New attribute columns added after the initial schema shipped. ALTER them in
+# so an existing chatbot.db picks them up without a full rebuild.
+_TREATMENT_EXTRA_COLS = [
+    "preparation", "aftercare", "downtime", "pain_level",
+    "sessions_recommended", "results_longevity", "what_to_expect",
+]
+
+
+def _migrate_treatment_columns(conn: sqlite3.Connection):
+    existing = {r["name"] for r in conn.execute("PRAGMA table_info(cb_treatments)").fetchall()}
+    for col in _TREATMENT_EXTRA_COLS:
+        if col not in existing:
+            conn.execute(f"ALTER TABLE cb_treatments ADD COLUMN {col} TEXT")
+    cat_cols = {r["name"] for r in conn.execute("PRAGMA table_info(cb_categories)").fetchall()}
+    if "short_description" not in cat_cols:
+        conn.execute("ALTER TABLE cb_categories ADD COLUMN short_description TEXT")
+    sess_cols = {r["name"] for r in conn.execute("PRAGMA table_info(cb_sessions)").fetchall()}
+    if "conversation_state" not in sess_cols:
+        conn.execute("ALTER TABLE cb_sessions ADD COLUMN conversation_state TEXT DEFAULT 'GENERAL_CHAT'")
+    if "answered_fields" not in sess_cols:
+        conn.execute("ALTER TABLE cb_sessions ADD COLUMN answered_fields TEXT DEFAULT '[]'")
 
 
 # ── Session management ────────────────────────────────────────────────────
 
 def get_session(session_id: str) -> dict:
+    cleanup_expired_sessions()
     conn = get_chatbot_db()
     row = conn.execute(
         "SELECT * FROM cb_sessions WHERE session_id = ?", (session_id,)
@@ -108,6 +170,7 @@ def get_session(session_id: str) -> dict:
     d["flow_scores"] = json.loads(d.get("flow_scores") or "{}")
     d["flow_answers"] = json.loads(d.get("flow_answers") or "[]")
     d["recent_context"] = json.loads(d.get("recent_context") or "[]")
+    d["answered_fields"] = json.loads(d.get("answered_fields") or "[]")
     return d
 
 
@@ -115,19 +178,44 @@ def save_session(session_id: str, state: dict):
     conn = get_chatbot_db()
     conn.execute("""
         INSERT OR REPLACE INTO cb_sessions
-        (session_id, mode, flow_category_id, flow_question_index,
-         flow_scores, flow_answers, recent_context, last_treatment_id, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        (session_id, mode, conversation_state, flow_category_id, flow_question_index,
+         flow_scores, flow_answers, recent_context, last_treatment_id,
+         answered_fields, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     """, (
         session_id,
         state.get("mode", "general"),
+        state.get("conversation_state", "GENERAL_CHAT"),
         state.get("flow_category_id"),
         state.get("flow_question_index", 0),
         json.dumps(state.get("flow_scores", {}), ensure_ascii=False),
         json.dumps(state.get("flow_answers", []), ensure_ascii=False),
         json.dumps(state.get("recent_context", []), ensure_ascii=False),
         state.get("last_treatment_id"),
+        json.dumps(state.get("answered_fields", []), ensure_ascii=False),
     ))
+    conn.commit()
+    conn.close()
+
+
+def delete_session(session_id: str):
+    conn = get_chatbot_db()
+    conn.execute("DELETE FROM cb_sessions WHERE session_id = ?", (session_id,))
+    conn.commit()
+    conn.close()
+
+
+def _cleanup_expired_sessions(conn: sqlite3.Connection):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=CHAT_SESSION_EXPIRY_DAYS)
+    conn.execute(
+        "DELETE FROM cb_sessions WHERE datetime(updated_at) < datetime(?)",
+        (cutoff.isoformat(),),
+    )
+
+
+def cleanup_expired_sessions():
+    conn = get_chatbot_db()
+    _cleanup_expired_sessions(conn)
     conn.commit()
     conn.close()
 
@@ -136,12 +224,14 @@ def _default_session(session_id: str) -> dict:
     return {
         "session_id": session_id,
         "mode": "general",
+        "conversation_state": "GENERAL_CHAT",
         "flow_category_id": None,
         "flow_question_index": 0,
         "flow_scores": {},
         "flow_answers": [],
         "recent_context": [],
         "last_treatment_id": None,
+        "answered_fields": [],
     }
 
 
@@ -206,6 +296,29 @@ def get_treatment_by_id(treatment_id: str) -> Optional[Dict]:
     row = conn.execute(
         "SELECT * FROM cb_treatments WHERE treatment_id = ?", (treatment_id,)
     ).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def get_treatment_by_name(treatment_name: str) -> Optional[Dict]:
+    name = (treatment_name or "").strip()
+    if not name:
+        return None
+    conn = get_chatbot_db()
+    row = conn.execute(
+        "SELECT * FROM cb_treatments WHERE treatment_name = ? COLLATE NOCASE LIMIT 1",
+        (name,),
+    ).fetchone()
+    if not row:
+        row = conn.execute(
+            """
+            SELECT * FROM cb_treatments
+            WHERE aliases LIKE ?
+            ORDER BY length(treatment_name) ASC
+            LIMIT 1
+            """,
+            (f"%{name}%",),
+        ).fetchone()
     conn.close()
     return dict(row) if row else None
 

@@ -1,17 +1,11 @@
-from fastapi import FastAPI, HTTPException, Header, Depends, UploadFile, File, Form, Query
+from fastapi import FastAPI, HTTPException, Header, Depends, Query
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
-import pandas as pd
 from typing import Optional, List, Dict
-from pydantic import BaseModel, Field
-from groq import Groq
+from pydantic import BaseModel
 import os
-import shutil
 import sqlite3
 import json
 import re
-import time
-import requests as http_requests
 from pathlib import Path
 from dotenv import load_dotenv
 from datetime import datetime, timedelta, timezone
@@ -21,13 +15,9 @@ import hmac
 import secrets
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+from chatbot_config import MAX_CHAT_MESSAGE_CHARS
 
-BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
-
-from chatbot_db import init_chatbot_db
-from chatbot_router import handle_message as handle_branch_chatbot_message
-from import_meday_data import import_all as import_branch_chatbot_data
+load_dotenv()
 
 # ------------------------------------------------------------
 # Auth config
@@ -37,22 +27,44 @@ JWT_ALGORITHM = "HS256"
 JWT_EXPIRE_DAYS = 30
 GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID", "")
 
-
 STAFF_ROLES = {"secretary", "admin"}
 ADMIN_ROLES = {"admin"}
 CUSTOMER_ROLE = "customer"
 DEFAULT_SYSTEM_SETTINGS = {
     "business_name": "MeDay Beauty Center",
     "phone": "*3691",
-    "whatsapp": "04-8306544",
-    "email": "Ranin.meday@gmail.com",
-    "address": "שד׳ הנשיא 99, חיפה",
-    "opening_hours": "ראשון-חמישי 08:30-20:00, שישי 08:30-15:00, שבת סגור",
+    "whatsapp": "",
+    "email": "admin@meday.local",
+    "address": "",
+    "opening_hours": "",
 }
 DEFAULT_BOOTSTRAP_ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin").strip() or "admin"
 DEFAULT_BOOTSTRAP_ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "Admin123!")
 DEFAULT_BOOTSTRAP_ADMIN_FULL_NAME = os.getenv("ADMIN_FULL_NAME", "System Admin").strip() or "System Admin"
 DEFAULT_BOOTSTRAP_ADMIN_EMAIL = os.getenv("ADMIN_EMAIL", "admin@meday.local").strip()
+TREATMENT_CATEGORIES = [
+    "מניקור ופדיקור",
+    "עיצוב שיער",
+    "טיפולי קוסמטיקה",
+    "טיפולי גוף",
+    "הסרת שיער",
+    "איפור מקצועי",
+    "איפור קבוע ועיצוב גבות",
+    "סטיילינג אישי",
+    "טיפולי אסתטיקה",
+]
+DEFAULT_EMPLOYEES = [
+    {"full_name": "Ranin", "specialties": ["טיפולי קוסמטיקה", "טיפולי אסתטיקה"]},
+    {"full_name": "Regev", "specialties": ["עיצוב שיער"]},
+    {"full_name": "Irit", "specialties": ["עיצוב שיער"]},
+    {"full_name": "Ira", "specialties": ["מניקור ופדיקור"]},
+    {"full_name": "Dana", "specialties": ["איפור מקצועי"]},
+    {"full_name": "Maya", "specialties": ["סטיילינג אישי"]},
+    {"full_name": "Adele", "specialties": ["טיפולי גוף", "הסרת שיער"]},
+    {"full_name": "Miri", "specialties": ["איפור קבוע ועיצוב גבות"]},
+    {"full_name": "Amjad", "specialties": ["טיפולי אסתטיקה"]},
+]
+TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 def normalize_role(role: str) -> str:
@@ -146,9 +158,6 @@ def verify_password(password: str, stored_hash: str) -> bool:
 def verify_or_migrate_password(conn: sqlite3.Connection, table: str, user_id: int, password: str, stored_password: str) -> bool:
     if verify_password(password, stored_password):
         return True
-
-    # Development migration for old rows that accidentally stored plain text.
-    # The table names are controlled by server code, not user input.
     if "$" not in (stored_password or "") and hmac.compare_digest(password, stored_password or ""):
         conn.execute(
             f"UPDATE {table} SET password_hash = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
@@ -156,7 +165,6 @@ def verify_or_migrate_password(conn: sqlite3.Connection, table: str, user_id: in
         )
         conn.commit()
         return True
-
     return False
 
 
@@ -193,7 +201,6 @@ def validate_settings_phone(phone: Optional[str], required: bool = False) -> str
 
 
 def normalize_phone_for_match(phone: Optional[str]) -> str:
-    # Phone matching ignores formatting differences such as spaces and hyphens.
     return re.sub(r"\D", "", phone or "")
 
 
@@ -205,7 +212,6 @@ def validate_password_strength(password: str):
 
 
 def validate_customer_password_strength(password: str):
-    # Customer passwords need a clear strength policy, while still using the existing hash_password storage.
     validate_password_strength(password)
     missing = []
     if not re.search(r"[A-Z]", password):
@@ -300,21 +306,6 @@ def verify_google_token(credential: str) -> dict:
 # ------------------------------------------------------------
 app = FastAPI(title="MeDay Backend")
 
-
-def initialize_integrated_chatbot() -> None:
-    """Load Safa's branch Excel as the authoritative chatbot data source."""
-    init_chatbot_db()
-    # Reimport on every backend start so updates in the branch Excel are never
-    # hidden by an older local chatbot.db. Sessions are preserved by the importer.
-    import_branch_chatbot_data()
-
-
-try:
-    initialize_integrated_chatbot()
-except Exception as error:
-    # Keep the rest of MeDay available and surface a clear error when chat is used.
-    print(f"[Integrated chatbot initialization error] {error}")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -323,2518 +314,170 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ------------------------------------------------------------
-# LLM provider setup
-# ------------------------------------------------------------
-OLLAMA_ENABLED = os.getenv("OLLAMA_ENABLED", "true").strip().lower() in {"1", "true", "yes", "on"}
-OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434").rstrip("/")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "qwen3:4b-instruct").strip() or "qwen3:4b-instruct"
-OLLAMA_TIMEOUT_SECONDS = float(os.getenv("OLLAMA_TIMEOUT_SECONDS", "120"))
-_ollama_disabled_until = 0.0
-_ollama_last_error = ""
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
-OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-5.6-terra").strip() or "gpt-5.6-terra"
-OPENAI_REASONING_EFFORT = os.getenv("OPENAI_REASONING_EFFORT", "low").strip() or "low"
-OPENAI_INCLUDE_TEMPERATURE = os.getenv("OPENAI_INCLUDE_TEMPERATURE", "false").strip().lower() == "true"
-OPENAI_TIMEOUT_SECONDS = float(os.getenv("OPENAI_TIMEOUT_SECONDS", "8"))
-_openai_disabled_until = 0.0
-_openai_last_error = ""
-
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-20b").strip() or "openai/gpt-oss-20b"
-GROQ_TIMEOUT_SECONDS = float(os.getenv("GROQ_TIMEOUT_SECONDS", "6"))
-groq_client = Groq(api_key=GROQ_API_KEY, timeout=GROQ_TIMEOUT_SECONDS, max_retries=0)
-_groq_disabled_until = 0.0
-_groq_last_error = ""
-
-
-def ollama_is_available() -> bool:
-    return OLLAMA_ENABLED and time.time() >= _ollama_disabled_until
-
-
-def mark_ollama_failure(error: Exception) -> None:
-    global _ollama_disabled_until, _ollama_last_error
-    _ollama_last_error = str(error)[:300]
-    _ollama_disabled_until = time.time() + 15
-
-
-def mark_ollama_success() -> None:
-    global _ollama_disabled_until, _ollama_last_error
-    _ollama_disabled_until = 0.0
-    _ollama_last_error = ""
-
-
-def _ollama_chat_completion(
-    messages: List[Dict],
-    temperature: float = 0.4,
-    max_tokens: Optional[int] = None,
-    response_format: Optional[Dict] = None,
-) -> str:
-    payload = {
-        "model": OLLAMA_MODEL,
-        "messages": messages,
-        "stream": False,
-        "options": {"temperature": temperature},
-    }
-    if max_tokens:
-        payload["options"]["num_predict"] = max_tokens
-    if response_format and response_format.get("type") == "json_object":
-        payload["format"] = "json"
-
-    response = http_requests.post(
-        f"{OLLAMA_BASE_URL}/api/chat",
-        json=payload,
-        timeout=OLLAMA_TIMEOUT_SECONDS,
-    )
-    if response.status_code >= 400:
-        raise RuntimeError(f"Ollama API error {response.status_code}: {response.text[:500]}")
-
-    content = response.json().get("message", {}).get("content", "").strip()
-    if not content:
-        raise RuntimeError("Ollama response did not include text output")
-    return content
-
-
-def openai_is_configured() -> bool:
-    key = (OPENAI_API_KEY or "").strip()
-    return bool(key and key.startswith(("sk-", "sk-proj-")) and key != "your_api_key_here")
-
-
-def openai_is_available() -> bool:
-    return openai_is_configured() and time.time() >= _openai_disabled_until
-
-
-def mark_openai_failure(error: Exception) -> None:
-    global _openai_disabled_until, _openai_last_error
-    message = str(error)
-    _openai_last_error = message[:300]
-    cooldown_seconds = 300 if any(token in message.lower() for token in ("401", "invalid api key", "unauthorized")) else 45
-    _openai_disabled_until = time.time() + cooldown_seconds
-
-
-def mark_openai_success() -> None:
-    global _openai_disabled_until, _openai_last_error
-    _openai_disabled_until = 0.0
-    _openai_last_error = ""
-
-
-def groq_is_configured() -> bool:
-    key = (GROQ_API_KEY or "").strip()
-    return bool(key and key.startswith("gsk_") and key != "your_api_key_here")
-
-
-def groq_is_available() -> bool:
-    return groq_is_configured() and time.time() >= _groq_disabled_until
-
-
-def mark_groq_failure(error: Exception) -> None:
-    global _groq_disabled_until, _groq_last_error
-    message = str(error)
-    _groq_last_error = message[:300]
-    cooldown_seconds = 300 if any(token in message.lower() for token in ("401", "invalid api key", "unauthorized")) else 45
-    _groq_disabled_until = time.time() + cooldown_seconds
-
-
-def mark_groq_success() -> None:
-    global _groq_disabled_until, _groq_last_error
-    _groq_disabled_until = 0.0
-    _groq_last_error = ""
-
-
-def llm_is_available() -> bool:
-    return ollama_is_available() or openai_is_available() or groq_is_available()
-
-
-def _openai_input_from_messages(messages: List[Dict]) -> tuple[str, List[Dict]]:
-    instructions_parts: List[str] = []
-    input_items: List[Dict] = []
-
-    for msg in messages:
-        role = msg.get("role", "user")
-        content = (msg.get("content") or "").strip()
-        if not content:
-            continue
-
-        if role in ("system", "developer"):
-            instructions_parts.append(content)
-            continue
-
-        input_items.append({
-            "role": "assistant" if role == "assistant" else "user",
-            "content": content,
-        })
-
-    return "\n\n".join(instructions_parts), input_items
-
-
-def _extract_openai_response_text(data: Dict) -> str:
-    output_text = data.get("output_text")
-    if isinstance(output_text, str) and output_text.strip():
-        return output_text.strip()
-
-    parts: List[str] = []
-    for item in data.get("output", []):
-        if not isinstance(item, dict):
-            continue
-        for content in item.get("content", []):
-            if isinstance(content, str):
-                parts.append(content)
-                continue
-            if not isinstance(content, dict):
-                continue
-            text = content.get("text") or content.get("content") or content.get("refusal")
-            if isinstance(text, str) and text.strip():
-                parts.append(text.strip())
-
-    if parts:
-        return "\n".join(parts).strip()
-
-    choices = data.get("choices") or []
-    if choices:
-        message = choices[0].get("message", {})
-        content = message.get("content", "")
-        if isinstance(content, str) and content.strip():
-            return content.strip()
-
-    raise RuntimeError("OpenAI response did not include text output")
-
-
-def _openai_response_completion(
-    messages: List[Dict],
-    temperature: float = 0.4,
-    max_tokens: Optional[int] = None,
-    response_format: Optional[Dict] = None,
-) -> str:
-    instructions, input_items = _openai_input_from_messages(messages)
-    payload = {
-        "model": OPENAI_MODEL,
-        "input": input_items,
-        "store": False,
-    }
-    if OPENAI_INCLUDE_TEMPERATURE:
-        payload["temperature"] = temperature
-    if instructions:
-        payload["instructions"] = instructions
-    if max_tokens:
-        payload["max_output_tokens"] = max_tokens
-    if response_format:
-        payload["text"] = {"format": response_format}
-    if OPENAI_REASONING_EFFORT.lower() != "none" and OPENAI_MODEL.startswith(("gpt-5", "o")):
-        payload["reasoning"] = {"effort": OPENAI_REASONING_EFFORT}
-
-    response = http_requests.post(
-        "https://api.openai.com/v1/responses",
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}",
-            "Content-Type": "application/json",
-        },
-        json=payload,
-        timeout=OPENAI_TIMEOUT_SECONDS,
-    )
-    if response.status_code >= 400:
-        raise RuntimeError(f"OpenAI API error {response.status_code}: {response.text[:500]}")
-
-    data = response.json()
-    return _extract_openai_response_text(data)
-
-
-def run_llm_chat(
-    messages: List[Dict],
-    temperature: float = 0.4,
-    max_tokens: Optional[int] = None,
-    response_format: Optional[Dict] = None,
-) -> str:
-    last_error: Optional[Exception] = None
-
-    if ollama_is_available():
-        try:
-            reply = _ollama_chat_completion(
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                response_format=response_format,
-            )
-            mark_ollama_success()
-            return reply
-        except Exception as e:
-            print(f"[Ollama chat error] {e}")
-            mark_ollama_failure(e)
-            last_error = e
-
-    if openai_is_available():
-        try:
-            reply = _openai_response_completion(
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                response_format=response_format,
-            )
-            mark_openai_success()
-            return reply
-        except Exception as e:
-            print(f"[OpenAI chat error] {e}")
-            mark_openai_failure(e)
-            last_error = e
-
-    if groq_is_available():
-        try:
-            kwargs = {
-                "model": GROQ_MODEL,
-                "messages": messages,
-                "temperature": temperature,
-            }
-            if max_tokens:
-                kwargs["max_tokens"] = max_tokens
-            if response_format:
-                kwargs["response_format"] = response_format
-
-            resp = groq_client.chat.completions.create(**kwargs)
-            mark_groq_success()
-            return resp.choices[0].message.content.strip()
-        except Exception as e:
-            print(f"[Groq chat error] {e}")
-            mark_groq_failure(e)
-            last_error = e
-
-    raise last_error or RuntimeError("No LLM provider is configured")
-
-# ------------------------------------------------------------
-# Load Excel data once on startup
-# ------------------------------------------------------------
 EXCEL_DIR = Path(__file__).parent
 
+# ------------------------------------------------------------
+# Chatbot
+# ------------------------------------------------------------
+from chatbot_db import init_chatbot_db
+from chatbot_router import handle_message as _chatbot_handle
 
-def to_text(x):
-    if x is None:
-        return ""
-    s = str(x).strip()
-    return "" if s.lower() == "nan" else s
+init_chatbot_db()
 
-
-def _default_chatbot_settings() -> List[Dict]:
-    return [
-        {"topic": "מחירים ועלויות",    "keywords": ["מחיר", "עולה", "עלות", "תשלום", "מבצע", "הנחה", "כמה עולה"], "redirect_message": "", "active": True},
-        {"topic": "זמינות תורים",       "keywords": ["פנוי", "תור", "זמין", "ביומן", "מתי אפשר", "לקבוע"],         "redirect_message": "", "active": True},
-        {"topic": "פרטי עובדות",        "keywords": ["מטפלת", "עובדת", "צוות", "מי עושה", "מי נותנת"],             "redirect_message": "", "active": True},
-        {"topic": "מדיניות ביטולים",   "keywords": ["ביטול", "החזר", "בטל", "שינוי תור", "לבטל"],                 "redirect_message": "", "active": True},
-        {"topic": "אבחון רפואי",        "keywords": ["אבחנה", "מחלה", "רופא", "מה יש לי", "לאבחן"],                "redirect_message": "", "active": True},
-        {"topic": "מתחרים",             "keywords": ["מתחרה", "אחרים", "מקום אחר", "השוואה", "עדיף"],              "redirect_message": "", "active": True},
-    ]
-
-
-def load_chatbot_settings() -> List[Dict]:
-    path = EXCEL_DIR / "chatbot_settings.xlsx"
-    if not path.exists():
-        return _default_chatbot_settings()
-    try:
-        df = pd.read_excel(path).fillna("")
-        settings = []
-        for _, row in df.iterrows():
-            topic = to_text(row.get("נושא", ""))
-            if not topic:
-                continue
-            active_val = to_text(row.get("פעיל", "כן")).strip().lower()
-            settings.append({
-                "topic": topic,
-                "keywords": [k.strip() for k in to_text(row.get("מילות_מפתח", "")).split(",") if k.strip()],
-                "redirect_message": to_text(row.get("הודעת_הפניה", "")),
-                "active": active_val in ("כן", "yes", "true", "1"),
-            })
-        return settings or _default_chatbot_settings()
-    except Exception as e:
-        print(f"[Chatbot settings load error] {e}")
-        return _default_chatbot_settings()
-
-
-def _ensure_default_chatbot_settings():
-    path = EXCEL_DIR / "chatbot_settings.xlsx"
-    if path.exists():
-        return
-    defaults = _default_chatbot_settings()
-    df = pd.DataFrame({
-        "נושא":          [s["topic"] for s in defaults],
-        "מילות_מפתח":   [",".join(s["keywords"]) for s in defaults],
-        "הודעת_הפניה":  [s["redirect_message"] for s in defaults],
-        "פעיל":          ["כן" for _ in defaults],
-    })
-    df.to_excel(path, index=False)
-    print("[Chatbot settings] Created default chatbot_settings.xlsx")
-
-
-def _build_blocked_topics_prompt(settings: List[Dict]) -> str:
-    active = [s for s in settings if s.get("active")]
-    if not active:
-        return ""
-    topic_lines = []
-    for s in active:
-        kw_hint = f" (לדוגמה: {', '.join(s['keywords'][:4])})" if s.get("keywords") else ""
-        topic_lines.append(f"- {s['topic']}{kw_hint}")
-    topics_block = "\n".join(topic_lines)
-    default_redirect = (
-        '"לגבי [נושא השאלה], הכי טוב לדבר ישירות עם הצוות שלנו 😊 '
-        'ניתן ליצור קשר בטלפון או בוואטסאפ ונשמח לעזור!"'
-    )
-    custom_lines = [
-        f"  עבור '{s['topic']}': {s['redirect_message']}"
-        for s in active if s.get("redirect_message")
-    ]
-    custom_block = ("\nהודעות הפניה מותאמות:\n" + "\n".join(custom_lines)) if custom_lines else ""
-    return (
-        f"נושאים שאסור לך לענות עליהם — הפני תמיד לצוות:\n{topics_block}\n\n"
-        f"כאשר נשאלת על אחד מהנושאים האסורים, השב:\n{default_redirect}{custom_block}\n\n"
-    )
-
-
-def load_treatments() -> List[Dict]:
-    treatments_df = pd.read_excel(EXCEL_DIR / "Treatments.xlsx")
-    faq_df = pd.read_excel(EXCEL_DIR / "questions.xlsx")
-
-    treatments = []
-    for i, row in treatments_df.iterrows():
-        name = to_text(row.get("שם_הטיפול", ""))
-        if not name:
-            continue
-
-        tid = f"t_{i}"
-
-        # Match FAQs by treatment name
-        faqs = {}
-        mask = (
-            faq_df["שם_הטיפול"].astype(str).str.strip().str.lower()
-            == name.strip().lower()
-        )
-        for _, frow in faq_df[mask].iterrows():
-            q = to_text(frow.get("שאלה", ""))
-            a = to_text(frow.get("תשובה", ""))
-            if q and a:
-                faqs[q] = a
-
-        treatments.append({
-            "id": tid,
-            "name": name,
-            "class_name": to_text(row.get("קטגוריה ראשית", "")),
-            "category": to_text(row.get("תת_קטגוריה", "")),
-            "keywords": to_text(row.get("הערות_כלליות", "")),
-            "suitable_for_all_skins": to_text(row.get("למי_מתאים", "")),
-            "ages": "",
-            "results_timing": to_text(row.get("תוצאות", "")),
-            "complementary_products": "",
-            "aftercare": to_text(row.get("תיאור_הטיפול", "")),
-            "consultation_required": "",
-            "recommended_frequency": to_text(row.get("מספר_טיפולים_מומלץ", "")),
-            "pregnancy_breastfeeding": to_text(row.get("הריון_והנקה", "")),
-            "medical_limitations": to_text(row.get("למי_לא_מתאים", "")),
-            "faq": faqs,
-        })
-
-    return treatments
-
-
-def load_category_fields():
-    path = EXCEL_DIR / "category_questions.xlsx"
-    if not path.exists():
-        return {}, {}
-    df = pd.read_excel(path).fillna("").sort_values(["קטגוריה", "סדר"])
-    category_fields: Dict[str, List[Dict]] = {}
-    minimum_fields: Dict[str, List[str]] = {}
-    for _, row in df.iterrows():
-        cat = to_text(row.get("קטגוריה", ""))
-        field = to_text(row.get("שדה", ""))
-        if not cat or not field:
-            continue
-        opts_raw = to_text(row.get("אפשרויות", ""))
-        guidance_raw = to_text(row.get("הנחיה", ""))
-        is_min = to_text(row.get("מינימום_נדרש", "לא")).strip() in ("כן", "yes", "true", "1")
-        category_fields.setdefault(cat, []).append({
-            "field": field,
-            "priority": to_text(row.get("עדיפות", "medium")) or "medium",
-            "question": to_text(row.get("שאלה", "")),
-            "options": [o.strip() for o in opts_raw.split(",") if o.strip()],
-            "guidance": guidance_raw or None,
-        })
-        if is_min:
-            minimum_fields.setdefault(cat, [])
-            if field not in minimum_fields[cat]:
-                minimum_fields[cat].append(field)
-    if "_default" not in category_fields:
-        category_fields["_default"] = [
-            {"field": "goal", "priority": "high", "question": "מה המטרה שלך?", "options": [], "guidance": None},
-            {"field": "pregnant", "priority": "critical", "question": "את בהריון או מניקה?", "options": ["כן", "לא"], "guidance": None},
-        ]
-        minimum_fields["_default"] = ["goal"]
-    return category_fields, minimum_fields
-
-
-_ensure_default_chatbot_settings()
-CHATBOT_SETTINGS = load_chatbot_settings()
-TREATMENTS = load_treatments()
-
-# ── Hardcoded extra categories not yet in the Excel ──────────
-_EXTRA_TREATMENTS = [
-    {"id": "manicure_1", "name": "מניקור",                               "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_2", "name": "לק גל",                                "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_3", "name": "עיצוב ופיסול ציפורן",                  "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_4", "name": "פדיקור אסתטי+ לק גל",                 "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "manicure_5", "name": "פדיקור טיפולי+ לק\\לק גל",            "class_name": "מניקור ופדיקור", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_1", "name": "עיסוי שוודי", "class_name": "טיפולי גוף", "category": "עיסוי גוף", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_2", "name": "עיסוי באבנים חמות", "class_name": "טיפולי גוף", "category": "עיסוי גוף", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_3", "name": "שיאצו", "class_name": "טיפולי גוף", "category": "עיסוי גוף", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_4", "name": "עיסוי תאילנדי", "class_name": "טיפולי גוף", "category": "עיסוי גוף", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_5", "name": "עיסוי רקמות עמוק", "class_name": "טיפולי גוף", "category": "עיסוי גוף", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_6", "name": "עיסוי קצוות", "class_name": "טיפולי גוף", "category": "עיסוי גוף", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_7", "name": "עיסוי כתפיים, גב וצוואר", "class_name": "טיפולי גוף", "category": "עיסוי ממוקד", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_8", "name": "עיסוי פנים וקרקפת", "class_name": "טיפולי גוף", "category": "עיסוי ממוקד", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_9", "name": "עיסוי כפות רגליים", "class_name": "טיפולי גוף", "category": "עיסוי ממוקד", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_10", "name": "עיסוי ספורטאים", "class_name": "טיפולי גוף", "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_11", "name": "עיסוי לנשים בהריון", "class_name": "טיפולי גוף", "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_12", "name": "עיסוי משולב", "class_name": "טיפולי גוף", "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "body_13", "name": "רפלקסולוגיה", "class_name": "טיפולי גוף", "category": "עיסויים מיוחדים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "pmu_1", "name": "גבות שיטת השערה", "class_name": "איפור קבוע ועיצוב גבות", "category": "גבות", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "pmu_2", "name": "גבות שיטת הפודרה", "class_name": "איפור קבוע ועיצוב גבות", "category": "גבות", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "pmu_3", "name": "גבות שיטה משולבת", "class_name": "איפור קבוע ועיצוב גבות", "category": "גבות", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "pmu_4", "name": "הדגשת קו ריסים תחתון", "class_name": "איפור קבוע ועיצוב גבות", "category": "תיחום עיניים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "pmu_5", "name": "הדגשת קו ריסים עליון", "class_name": "איפור קבוע ועיצוב גבות", "category": "תיחום עיניים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "pmu_6", "name": "אייליינר עליון", "class_name": "איפור קבוע ועיצוב גבות", "category": "תיחום עיניים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "pmu_7", "name": "תיחום שפתיים בקו טבעי", "class_name": "איפור קבוע ועיצוב גבות", "category": "שפתיים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "pmu_8", "name": "מילוי שפתיים + תיחום", "class_name": "איפור קבוע ועיצוב גבות", "category": "שפתיים", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "pmu_9", "name": "מילוי קרקפת אישה", "class_name": "איפור קבוע ועיצוב גבות", "category": "ראש", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "pmu_10", "name": "מילוי קרקפת גבר", "class_name": "איפור קבוע ועיצוב גבות", "category": "ראש", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "pmu_11", "name": "נקודת חן", "class_name": "איפור קבוע ועיצוב גבות", "category": "ראש", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "styling_1", "name": "מפגש תדמית 2.5 שעות", "class_name": "סטיילינג אישי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "styling_2", "name": "מפגש תדמית 4 שעות", "class_name": "סטיילינג אישי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "hair_1", "name": "טיפול צבע ללא אמוניה", "class_name": "עיצוב שיער", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "hair_2", "name": "בלייאש", "class_name": "עיצוב שיער", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "hair_3", "name": "עיצוב שיער לאירועים", "class_name": "עיצוב שיער", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "hair_4", "name": "תספורות נשים", "class_name": "עיצוב שיער", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "hair_5", "name": "תספורות גברים ועיצוב זקנים", "class_name": "עיצוב שיער", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "makeup_1", "name": "איפור כלות", "class_name": "איפור מקצועי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "makeup_2", "name": "איפור לאירועים", "class_name": "איפור מקצועי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "makeup_3", "name": "איפור בת מצווה", "class_name": "איפור מקצועי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-    {"id": "makeup_4", "name": "שיעור איפור אישי", "class_name": "איפור מקצועי", "category": "", "keywords": "", "suitable_for_all_skins": "", "ages": "", "results_timing": "", "complementary_products": "", "aftercare": "", "consultation_required": "", "recommended_frequency": "", "pregnancy_breastfeeding": "", "medical_limitations": "", "faq": {}},
-]
-
-# Only add if not already present (safe to restart server repeatedly)
-_existing_ids = {t["id"] for t in TREATMENTS}
-for _t in _EXTRA_TREATMENTS:
-    if _t["id"] not in _existing_ids:
-        TREATMENTS.append(_t)
-
-TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
-
-SERVICE_CATEGORY_ORDER = [
-    "מניקור ופדיקור",
-    "עיצוב שיער",
-    "טיפולי קוסמטיקה",
-    "טיפולי גוף",
-    "הסרת שיער",
-    "איפור מקצועי",
-    "איפור קבוע ועיצוב גבות",
-    "סטיילינג אישי",
-    "טיפולי אסתטיקה",
-]
-
-SERVICE_CATEGORY_DESCRIPTIONS = {
-    "מניקור ופדיקור": "טיפולי ידיים וכפות רגליים: מניקור, לק ג'ל, עיצוב ופיסול ציפורן, פדיקור אסתטי ופדיקור טיפולי.",
-    "עיצוב שיער": "שירותי שיער כמו צבע ללא אמוניה, בלייאש, עיצוב שיער לאירועים, תספורות נשים ותספורות גברים ועיצוב זקנים.",
-    "טיפולי קוסמטיקה": "טיפולי פנים וקוסמטיקה כמו ניקוי, אקנה, אנטי אייג'ינג, הבהרה, פילינג וטיפולים טכנולוגיים.",
-    "טיפולי גוף": "עיסויים וטיפולי גוף: עיסוי שוודי, אבנים חמות, שיאצו, תאילנדי, רקמות עמוק, עיסויים ממוקדים ועוד.",
-    "הסרת שיער": "הסרת שיער מקצועית בשיטות מתקדמות. לפרטים מדויקים לפי אזור ושיטה מומלץ ליצור קשר עם הצוות.",
-    "איפור מקצועי": "איפור כלות, איפור לאירועים, איפור בת מצווה ושיעורי איפור אישיים.",
-    "איפור קבוע ועיצוב גבות": "איפור קבוע ועיצוב גבות: שיטת השערה, פודרה, שיטה משולבת, אייליינר, תיחום שפתיים ועוד.",
-    "סטיילינג אישי": "מפגשי תדמית וסטיילינג אישי, כולל מפגש 2.5 שעות ומפגש 4 שעות.",
-    "טיפולי אסתטיקה": "טיפולי אסתטיקה מקצועיים לפנים ולגוף. לפרטי טיפול ספציפיים כדאי לשאול את הצוות או לבחור קטגוריה באתר.",
-}
-
-SERVICE_CATEGORY_ALIASES = {
-    "טיפולי קוסמטיקה": ("קוסמטיקה", "קוסמטי", "טיפולי פנים", "פנים"),
-    "מניקור ופדיקור": ("מניקור", "פדיקור", "לק", "ציפורניים", "ציפורן"),
-    "עיצוב שיער": ("שיער", "תספורת", "תספורות", "בלייאש", "צבע"),
-    "טיפולי גוף": ("גוף", "עיסוי", "עיסויים", "מסאז", "מסאג"),
-    "הסרת שיער": ("הסרת שיער", "לייזר", "שעווה", "אפילציה"),
-    "איפור מקצועי": ("איפור מקצועי", "איפור כלות", "איפור לאירועים", "איפור בת מצווה", "איפור"),
-    "איפור קבוע ועיצוב גבות": ("איפור קבוע", "עיצוב גבות", "גבות", "ריסים", "אייליינר", "שפתיים"),
-    "סטיילינג אישי": ("סטיילינג", "תדמית", "מלתחה", "לבוש"),
-    "טיפולי אסתטיקה": ("אסתטיקה", "אסתטי", "מילוי", "בוטוקס", "סקולפטרה", "פיסול פנים"),
-}
 
 # ------------------------------------------------------------
 # Basic routes
 # ------------------------------------------------------------
-
-
 @app.get("/health")
 def health():
     return {"ok": True}
 
 
-@app.get("/treatments")
-def list_treatments():
-    return TREATMENTS
-
-
-@app.get("/treatments/{treatment_id}")
-def get_treatment(treatment_id: str):
-    t = TREATMENT_MAP.get(treatment_id)
-    if not t:
-        raise HTTPException(status_code=404, detail="Treatment not found")
-    return t
-
-
 # ------------------------------------------------------------
-# Admin – Excel knowledge-base management
+# Chat endpoint (new)
 # ------------------------------------------------------------
-_EXCEL_FILES = {
-    "treatments": "Treatments.xlsx",
-    "questions": "questions.xlsx",
-    "category_questions": "category_questions.xlsx",
-    "chatbot_settings": "chatbot_settings.xlsx",
-}
+class ChatRequest(BaseModel):
+    session_id: str
+    message: Optional[str] = None
+    button_value: Optional[str] = None
+    question_id: Optional[str] = None
+    selected_treatment: Optional[Dict] = None
 
-
-@app.get("/admin/excel/info")
-def admin_excel_info(_: dict = Depends(require_admin)):
-    result = []
-    for file_type, filename in _EXCEL_FILES.items():
-        path = EXCEL_DIR / filename
-        if path.exists():
-            stat = path.stat()
-            try:
-                df = pd.read_excel(path)
-                rows = len(df)
-                columns = list(df.columns)
-            except Exception:
-                rows, columns = 0, []
-            result.append({
-                "file_type": file_type,
-                "filename": filename,
-                "rows": rows,
-                "columns": columns,
-                "last_modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
-                "size_kb": round(stat.st_size / 1024, 1),
-            })
-        else:
-            result.append({
-                "file_type": file_type,
-                "filename": filename,
-                "rows": 0,
-                "columns": [],
-                "last_modified": None,
-                "size_kb": 0,
-            })
+@app.post("/chat")
+def chat(req: ChatRequest):
+    if not req.session_id:
+        raise HTTPException(status_code=400, detail="session_id is required")
+    if req.message and len(req.message) > MAX_CHAT_MESSAGE_CHARS:
+        raise HTTPException(status_code=413, detail="ההודעה ארוכה מדי. נסי לקצר אותה.")
+    result = _chatbot_handle(
+        session_id=req.session_id,
+        message=req.message,
+        button_value=req.button_value,
+        question_id=req.question_id,
+        selected_treatment=req.selected_treatment,
+    )
     return result
 
 
-@app.get("/admin/excel/preview/{file_type}")
-def admin_excel_preview(file_type: str, _: dict = Depends(require_admin)):
-    if file_type not in _EXCEL_FILES:
-        raise HTTPException(status_code=400, detail="Invalid file type")
-    path = EXCEL_DIR / _EXCEL_FILES[file_type]
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    df = pd.read_excel(path).fillna("")
-    return {
-        "columns": list(df.columns),
-        "rows": df.head(20).to_dict(orient="records"),
-        "total_rows": len(df),
-    }
-
-
-@app.post("/admin/excel/upload")
-async def admin_excel_upload(file_type: str = Form(...), file: UploadFile = File(...), _: dict = Depends(require_admin)):
-    global TREATMENTS, TREATMENT_MAP, CATEGORY_FIELDS, MINIMUM_FIELDS, CHATBOT_SETTINGS
-    if file_type not in _EXCEL_FILES:
-        raise HTTPException(status_code=400, detail="Invalid file type")
-    if not (file.filename or "").endswith(".xlsx"):
-        raise HTTPException(status_code=400, detail="Only .xlsx files are accepted")
-    path = EXCEL_DIR / _EXCEL_FILES[file_type]
-    with open(path, "wb") as f:
-        shutil.copyfileobj(file.file, f)
-    if file_type in ("treatments", "questions"):
-        excel_treatments = load_treatments()
-        _seed_treatments_to_db(excel_treatments)
-        _refresh_treatments_from_db()
-    elif file_type == "category_questions":
-        CATEGORY_FIELDS, MINIMUM_FIELDS = load_category_fields()
-    elif file_type == "chatbot_settings":
-        CHATBOT_SETTINGS = load_chatbot_settings()
-    df = pd.read_excel(path)
-    return {"success": True, "rows": len(df), "filename": _EXCEL_FILES[file_type]}
-
-
-@app.get("/admin/excel/download/{file_type}")
-def admin_excel_download(file_type: str, _: dict = Depends(require_admin)):
-    if file_type not in _EXCEL_FILES:
-        raise HTTPException(status_code=400, detail="Invalid file type")
-    path = EXCEL_DIR / _EXCEL_FILES[file_type]
-    if not path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    return FileResponse(
-        path=str(path),
-        filename=_EXCEL_FILES[file_type],
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-
-
-# ------------------------------------------------------------
-# Category field registry
-# ------------------------------------------------------------
-CATEGORY_FIELDS, MINIMUM_FIELDS = load_category_fields()
-
-
-@app.get("/admin/chatbot/config")
-def admin_chatbot_config(_: dict = Depends(require_admin)):
-    """
-    Returns the live chatbot configuration derived from category_questions.xlsx.
-    Used by the admin panel to show which questions are asked per category,
-    their priority, options, and which fields must be collected before recommending.
-    """
-    result = []
-    for cat, fields in CATEGORY_FIELDS.items():
-        if cat == "_default":
-            continue
-        min_fields = MINIMUM_FIELDS.get(cat, [])
-        result.append({
-            "category": cat,
-            "total_fields": len(fields),
-            "minimum_fields": min_fields,
-            "can_recommend_after": len(min_fields),
-            "fields": [
-                {
-                    "field": f["field"],
-                    "priority": f["priority"],
-                    "question": f["question"],
-                    "options": f["options"],
-                    "has_guidance": bool(f.get("guidance")),
-                    "is_minimum": f["field"] in min_fields,
-                }
-                for f in fields
-            ],
-        })
-    # Sort by category name for stable display
-    result.sort(key=lambda x: x["category"])
-    return {
-        "categories": result,
-        "total_categories": len(result),
-        "blocked_topics": [
-            {"topic": s["topic"], "keywords": s["keywords"], "active": s["active"]}
-            for s in CHATBOT_SETTINGS
-        ],
-    }
-
-
-# ------------------------------------------------------------
-# Admin — Treatment CRUD
-# ------------------------------------------------------------
-
-class TreatmentUpsert(BaseModel):
-    name: str
-    class_name: Optional[str] = ""
-    category: Optional[str] = ""
-    keywords: Optional[str] = ""
-    suitable_for_all_skins: Optional[str] = ""
-    results_timing: Optional[str] = ""
-    aftercare: Optional[str] = ""
-    recommended_frequency: Optional[str] = ""
-    pregnancy_breastfeeding: Optional[str] = ""
-    medical_limitations: Optional[str] = ""
-
-
-@app.get("/admin/treatments-db")
-def list_treatments_db(_: dict = Depends(require_admin)):
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM treatments_db ORDER BY class_name, name"
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
-
-
-@app.post("/admin/treatments-db", status_code=201)
-def create_treatment_db(data: TreatmentUpsert, _: dict = Depends(require_admin)):
-    tid = f"admin_{int(datetime.now(timezone.utc).timestamp() * 1000)}"
-    conn = get_db()
-    conn.execute("""
-        INSERT INTO treatments_db
-        (id, name, class_name, category, keywords, suitable_for_all_skins,
-         results_timing, aftercare, recommended_frequency,
-         pregnancy_breastfeeding, medical_limitations, source)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'admin')
-    """, (tid, data.name, data.class_name, data.category, data.keywords,
-          data.suitable_for_all_skins, data.results_timing, data.aftercare,
-          data.recommended_frequency, data.pregnancy_breastfeeding, data.medical_limitations))
-    conn.commit()
-    conn.close()
-    _refresh_treatments_from_db()
-    return {"id": tid, **data.model_dump(), "source": "admin"}
-
-
-@app.put("/admin/treatments-db/{treatment_id}")
-def update_treatment_db(treatment_id: str, data: TreatmentUpsert, _: dict = Depends(require_admin)):
-    conn = get_db()
-    result = conn.execute(
-        "SELECT id FROM treatments_db WHERE id = ?", (treatment_id,)
-    ).fetchone()
-    if not result:
-        conn.close()
-        raise HTTPException(status_code=404, detail="Treatment not found")
-    conn.execute("""
-        UPDATE treatments_db SET
-            name=?, class_name=?, category=?, keywords=?,
-            suitable_for_all_skins=?, results_timing=?, aftercare=?,
-            recommended_frequency=?, pregnancy_breastfeeding=?,
-            medical_limitations=?, updated_at=CURRENT_TIMESTAMP
-        WHERE id=?
-    """, (data.name, data.class_name, data.category, data.keywords,
-          data.suitable_for_all_skins, data.results_timing, data.aftercare,
-          data.recommended_frequency, data.pregnancy_breastfeeding,
-          data.medical_limitations, treatment_id))
-    conn.commit()
-    conn.close()
-    _refresh_treatments_from_db()
-    return {"id": treatment_id, **data.model_dump()}
-
-
-@app.delete("/admin/treatments-db/{treatment_id}")
-def delete_treatment_db(treatment_id: str, _: dict = Depends(require_admin)):
-    conn = get_db()
-    conn.execute("DELETE FROM treatments_db WHERE id = ?", (treatment_id,))
-    conn.commit()
-    conn.close()
-    _refresh_treatments_from_db()
+@app.delete("/chat/session/{session_id}")
+def clear_chat_session(session_id: str):
+    from chatbot_db import delete_session
+    delete_session(session_id)
     return {"ok": True}
 
 
-# ------------------------------------------------------------
-# Helper: field registry utilities
-# ------------------------------------------------------------
-def get_fields_for_category(category: str) -> List[Dict]:
-    return CATEGORY_FIELDS.get(category, CATEGORY_FIELDS["_default"])
+@app.get("/chat/categories")
+def chat_categories():
+    """Category names for the chat welcome chips (kept in sync with the Excel)."""
+    from chatbot_db import get_categories
+    return {"categories": [c["category_name"] for c in get_categories() if c.get("category_name")]}
 
 
-def get_next_field(category: str, profile: Dict) -> Optional[Dict]:
-    """Return the next most important field that hasn't been collected yet."""
-    fields = get_fields_for_category(category)
-    for priority in ("critical", "high", "medium"):
-        for f in fields:
-            if f["priority"] == priority and f["field"] not in profile:
-                return f
-    return None
+@app.get("/chat/treatments/{treatment_id}")
+def chat_treatment_details(treatment_id: str):
+    from chatbot_db import get_category_by_id, get_treatment_by_id
 
-
-def can_recommend(category: str, profile: Dict) -> bool:
-    minimums = MINIMUM_FIELDS.get(category, MINIMUM_FIELDS["_default"])
-    return all(f in profile for f in minimums)
-
-
-def field_chips(field_info: Dict) -> List[str]:
-    chips = list(field_info["options"])
-    if field_info.get("guidance"):
-        chips.append("לא יודעת")
-    return chips
-
-
-def question_progress(category: str, field: Optional[str]) -> Dict:
-    if not field:
-        return {}
-    fields = get_fields_for_category(category)
-    question_fields = [f["field"] for f in fields]
-    if field not in question_fields:
-        return {}
+    treatment = get_treatment_by_id(treatment_id)
+    if not treatment:
+        raise HTTPException(status_code=404, detail="treatment not found")
+    category = get_category_by_id(treatment.get("category_id") or "") or {}
     return {
-        "question_number": question_fields.index(field) + 1,
-        "total_questions": len(question_fields),
+        "id": treatment["treatment_id"],
+        "name": treatment["treatment_name"],
+        "category_id": treatment.get("category_id"),
+        "category": category.get("category_name") or treatment.get("category_id") or "",
+        "summary": treatment.get("short_description") or treatment.get("what_to_expect") or "",
+        "description": treatment.get("short_description") or treatment.get("what_to_expect") or "",
+        "good_for": treatment.get("good_for") or "",
+        "technique_or_equipment": treatment.get("technique_or_equipment") or "",
+        "preparation": treatment.get("preparation") or "",
+        "aftercare": treatment.get("aftercare") or "",
+        "downtime": treatment.get("downtime") or "",
+        "pain_level": treatment.get("pain_level") or "",
+        "sessions_recommended": treatment.get("sessions_recommended") or "",
+        "results_longevity": treatment.get("results_longevity") or "",
+        "what_to_expect": treatment.get("what_to_expect") or "",
     }
 
 
-# ------------------------------------------------------------
-# Local chat fallback
-# Keeps the chatbot usable when Groq is not configured locally.
-# ------------------------------------------------------------
-def detect_category_locally(message: str) -> Optional[str]:
-    text = (message or "").lower()
-    categories = list(SERVICE_CATEGORY_ORDER)
-    for category in sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"])):
-        if category and category not in categories:
-            categories.append(category)
-
-    for category in categories:
-        if category.lower() in text:
-            return category
-
-    def resolve_category(candidate: str) -> Optional[str]:
-        if candidate in categories:
-            return candidate
-        for category in categories:
-            if candidate in category or category in candidate:
-                return category
-        return None
-
-    keyword_groups = [
-        (("אקנה", "פצע", "פצעונים", "עור", "פנים", "טיפול פנים", "קמטים", "פיגמנט", "כתמים", "יובש", "קוסמטיקה"), "טיפולי קוסמטיקה"),
-        (("ציפורן", "ציפורניים", "מניקור", "פדיקור", "לק"), "מניקור ופדיקור"),
-        (("שיער", "פן", "תסרוקת", "החלקה", "צבע"), "עיצוב שיער"),
-        (("איפור", "גבות", "ריסים"), "איפור מקצועי"),
-        (("סטיילינג", "לבוש", "מלתחה", "תדמית"), "סטיילינג אישי"),
-        (("גוף", "עיסוי", "מסאז", "מסאג", "חיטוב"), "טיפולי גוף"),
-        (("לייזר", "הסרת שיער", "שעווה"), "הסרת שיער"),
-        (("אסתטיקה", "אסתטי", "מילוי", "בוטוקס", "סקולפטרה", "פיסול פנים"), "טיפולי אסתטיקה"),
-    ]
-    for keywords, category in keyword_groups:
-        resolved = resolve_category(category)
-        if any(keyword in text for keyword in keywords) and resolved:
-            return resolved
-
-    return None
-
-
-def is_recommendation_request(message: str) -> bool:
-    text = _normalize_query_text(message)
-    if not text:
-        return False
-
-    direct_phrases = (
-        "מה מומלץ",
-        "מה את ממליצה",
-        "מה אתה ממליץ",
-        "איזה טיפול מתאים",
-        "איזה טיפול כדאי",
-        "מה מתאים לי",
-        "תתאימי לי",
-        "תתאים לי",
-        "להתאים לי",
-        "המלצה לטיפול",
-        "המלצות לטיפול",
-        "רוצה המלצה",
-        "צריך טיפול",
-        "צריכה טיפול",
-        "מה לעשות עם",
-        "איך לטפל ב",
-        "איך לטפל ב־",
-        "לטפל ב",
-    )
-    if any(phrase in text for phrase in direct_phrases):
-        return True
-
-    problem_terms = (
-        "יש לי",
-        "סובלת",
-        "סובל",
-        "מפריע לי",
-        "בעיה",
-        "פצע",
-        "פצעונים",
-        "אקנה",
-        "כתמים",
-        "פיגמנט",
-        "קמטים",
-        "יובש",
-        "שומניות",
-        "שיער דליל",
-        "כאבים",
-        "כואב",
-        "עור רגיש",
-        "צלקות",
-        "ציפורן שבורה",
-    )
-    action_terms = (
-        "לטפל",
-        "טיפול",
-        "פתרון",
-        "להעלים",
-        "להפחית",
-        "לשפר",
-        "מתאים",
-        "כדאי",
-        "מומלץ",
-    )
-    return any(term in text for term in problem_terms) and any(term in text for term in action_terms)
-
-
-def is_unanswered_followup(message: str) -> bool:
-    text = re.sub(r"\s+", " ", (message or "").strip().lower())
-    return any(
-        phrase in text
-        for phrase in (
-            "לא ענית",
-            "לא ענית לי",
-            "לא קיבלתי תשובה",
-            "לא הבנתי",
-            "מה התשובה",
-            "אז כמה",
-            "כמה זה",
-        )
-    )
-
-
-def _matches_chatbot_setting(message: str, setting: Dict) -> bool:
-    text = (message or "").lower()
-    return any(keyword and keyword.lower() in text for keyword in setting.get("keywords", []))
-
-
-def _find_guardrail_setting(message: str, history: Optional[List[Dict]]) -> tuple[Optional[Dict], str, bool]:
-    active_settings = [s for s in CHATBOT_SETTINGS if s.get("active")]
-    for setting in active_settings:
-        if _matches_chatbot_setting(message, setting):
-            return setting, message, False
-
-    if not is_unanswered_followup(message):
-        return None, message, False
-
-    for msg in reversed(history or []):
-        if msg.get("from") != "user":
-            continue
-        previous_text = msg.get("text", "")
-        for setting in active_settings:
-            if _matches_chatbot_setting(previous_text, setting):
-                return setting, previous_text, True
-    return None, message, False
-
-
-def _public_contact_line() -> str:
-    settings = dict(DEFAULT_SYSTEM_SETTINGS)
-    try:
-        conn = get_db()
-        settings = _read_system_settings(conn)
-        conn.close()
-    except Exception:
-        pass
-
-    contacts = []
-    if settings.get("phone"):
-        contacts.append(f"טלפון {settings['phone']}")
-    if settings.get("whatsapp"):
-        contacts.append(f"וואטסאפ {settings['whatsapp']}")
-    if contacts:
-        return "אפשר ליצור קשר דרך " + " או ".join(contacts) + "."
-    return "אפשר ליצור קשר עם הצוות דרך פרטי הקשר שמופיעים באתר."
-
-
-def _public_business_settings() -> Dict:
-    settings = dict(DEFAULT_SYSTEM_SETTINGS)
-    try:
-        conn = get_db()
-        settings = _read_system_settings(conn)
-        conn.close()
-    except Exception:
-        pass
-    return settings
-
-
-def _extract_price_subject(message: str) -> str:
-    text = re.sub(r"\s+", " ", (message or "").strip())
-    patterns = [
-        r"כמה\s+עולה\s+(.+)",
-        r"מה\s+המחיר\s+של\s+(.+)",
-        r"מחיר\s+של\s+(.+)",
-        r"עלות\s+של\s+(.+)",
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, text)
-        if match:
-            return match.group(1).strip(" ?!.،,")
-    return ""
-
-
-def is_review_question(message: str) -> bool:
-    text = re.sub(r"\s+", " ", (message or "").strip().lower())
-    direct_terms = (
-        "חוות דעת",
-        "חוות הדעת",
-        "ביקורות",
-        "ביקורת",
-        "דירוג",
-        "דירוגים",
-        "לקוחות ממליצים",
-        "לקוחות מרוצות",
-        "תגובות של לקוחות",
-        "פידבק",
-        "מה אנשים אומרים",
-        "מה לקוחות אומר",
-    )
-    if any(term in text for term in direct_terms):
-        return True
-    return ("לקוחות" in text or "אנשים" in text) and any(
-        term in text for term in ("המליצ", "ממליצ", "מרוצ", "ניסו", "עשו")
-    )
-
-
-def is_business_info_question(message: str) -> bool:
-    text = re.sub(r"\s+", " ", (message or "").strip().lower())
-    business_terms = (
-        "איפה",
-        "היכן",
-        "מיקום",
-        "נמצאת",
-        "נמצא",
-        "כתובת",
-        "להגיע",
-        "מפה",
-        "שעות",
-        "פתיחה",
-        "מתי פתוח",
-        "טלפון",
-        "וואטסאפ",
-        "ווטסאפ",
-        "צור קשר",
-        "יצירת קשר",
-        "אימייל",
-        "מייל",
-        "חניה",
-        "חנייה",
-    )
-    clinic_terms = ("קליניקה", "מרכז", "סניף", "מקום", "אתם", "העסק", "meday", "מידיי")
-    if any(term in text for term in ("כתובת", "מיקום", "שעות", "טלפון", "וואטסאפ", "ווטסאפ", "קשר", "אימייל", "מייל", "חניה", "חנייה")):
-        return True
-    return any(term in text for term in business_terms) and any(term in text for term in clinic_terms)
-
-
-def local_business_info_answer(message: str) -> str:
-    text = re.sub(r"\s+", " ", (message or "").strip().lower())
-    settings = _public_business_settings()
-    address = settings.get("address") or DEFAULT_SYSTEM_SETTINGS["address"]
-    hours = settings.get("opening_hours") or DEFAULT_SYSTEM_SETTINGS["opening_hours"]
-    phone = settings.get("phone") or DEFAULT_SYSTEM_SETTINGS["phone"]
-    whatsapp = settings.get("whatsapp") or DEFAULT_SYSTEM_SETTINGS["whatsapp"]
-    email = settings.get("email") or "Ranin.meday@gmail.com"
-
-    if "חניה" in text or "חנייה" in text:
-        return (
-            f"הקליניקה נמצאת ב{address}. "
-            "אין לי מידע שמור לגבי חניה, לכן כדאי לוודא זאת מול הצוות לפני ההגעה. "
-            f"אפשר ליצור קשר בטלפון {phone} או בוואטסאפ {whatsapp}."
-        )
-
-    asks_hours = any(term in text for term in ("שעות", "פתיחה", "מתי פתוח"))
-    asks_contact = any(term in text for term in ("טלפון", "וואטסאפ", "ווטסאפ", "קשר", "ליצור קשר", "צור קשר", "יצירת קשר", "אימייל", "מייל"))
-    asks_address = any(term in text for term in ("איפה", "היכן", "מיקום", "נמצאת", "נמצא", "כתובת", "להגיע", "מפה"))
-
-    parts = []
-    if asks_address or not (asks_hours or asks_contact):
-        parts.append(f"הקליניקה נמצאת ב{address}.")
-    if asks_hours:
-        parts.append(f"שעות הפתיחה: {hours}.")
-    if asks_contact:
-        parts.append(f"טלפון: {phone}. וואטסאפ: {whatsapp}. מייל: {email}.")
-    if not asks_contact:
-        parts.append(f"לתיאום או בירור נוסף אפשר ליצור קשר בטלפון {phone}.")
-    return " ".join(parts)
-
-
-def local_review_answer() -> str:
-    contact = _public_contact_line()
-    return (
-        "כרגע אין לי מאגר חוות דעת או ביקורות של לקוחות שמחובר לצ'אט, "
-        "ולכן אני לא יכולה להציג או לצטט חוות דעת אמיתיות על הטיפולים. "
-        "אפשר לבדוק בעמודי הטיפולים אם מופיעות המלצות באתר, או לדבר עם הצוות כדי לשמוע מה מתאים ומבוקש בפועל. "
-        f"{contact}"
-    )
-
-
-def _contains_catalog_value(text: str, value: str) -> bool:
-    value = (value or "").strip().lower()
-    if len(value) >= 3 and value in text:
-        return True
-    for part in re.split(r"[,;/|()\n]+", value):
-        part = part.strip()
-        if len(part) >= 3 and part in text:
-            return True
-    return False
-
-
-def _normalize_query_text(value: str) -> str:
-    value = (value or "").strip().lower()
-    value = re.sub(r"[\u200f\u200e]", "", value)
-    value = re.sub(r"\s+", " ", value)
-    return value
-
-
-def _compact_query_text(value: str) -> str:
-    return re.sub(r"[^0-9a-zA-Zא-ת]+", "", _normalize_query_text(value))
-
-
-def _dedupe_keep_order(values: List[str]) -> List[str]:
-    seen = set()
-    result = []
-    for value in values:
-        clean = _normalize_query_text(value).strip(" -–—:;,.!?()[]{}")
-        if not clean or clean in seen:
-            continue
-        seen.add(clean)
-        result.append(clean)
-    return result
-
-
-def _treatment_aliases(treatment: Dict) -> List[str]:
-    name = _normalize_query_text(treatment.get("name", ""))
-    aliases = [name]
-
-    # Split names such as "מידיי CLEAR SKIN + ניקוי העור פלוס" into natural search phrases.
-    aliases.extend(re.split(r"[+\\/|()]+", name))
-
-    hebrew_only = re.sub(r"[a-zA-Z0-9]+", " ", name)
-    english_only = " ".join(re.findall(r"[a-zA-Z][a-zA-Z0-9]*(?:\s+[a-zA-Z0-9]+)*", name))
-    aliases.extend([hebrew_only, english_only])
-
-    if name.startswith("מידיי "):
-        aliases.append(name.replace("מידיי ", "", 1))
-
-    blacklist = {"מידיי", "טיפול", "טיפולים", "פלוס", "plus", "pro", "new", "skin", "לק"}
-    return [
-        alias
-        for alias in _dedupe_keep_order(aliases)
-        if len(_compact_query_text(alias)) >= 4 and alias not in blacklist
-    ]
-
-
-def find_matching_treatments(message: str) -> List[Dict]:
-    text = _normalize_query_text(message)
-    compact_text = _compact_query_text(text)
-    matches = []
-
-    for treatment in TREATMENTS:
-        aliases = _treatment_aliases(treatment)
-        if any(alias in text or _compact_query_text(alias) in compact_text for alias in aliases):
-            matches.append(treatment)
-
-    if matches:
-        return matches
-
-    concern_terms = {
-        "אקנה": ("אקנה", "פצע", "פצעונים", "צלק"),
-        "אנטי אייג": ("אנטי", "אייג", "קמט", "קולגן", "הצער", "ליפט", "מזו"),
-        "ניקוי והבהרה": ("ניקוי", "הבהרה", "כתם", "פיגמנט", "פילינג", "שחור"),
-        "טיפולי פנים": ("פנים", "זוהר", "רענון", "קלאסי", "מסיבה"),
-        "טיפולים מעצבים": ("עיסוי", "פיסול", "חיטוב", "עיצוב פנים"),
-        "מניקור ופדיקור": ("מניקור", "פדיקור", "ציפורן", "ציפורניים", "לק"),
-    }
-    active_groups = [
-        group
-        for group, terms in concern_terms.items()
-        if any(term in text for term in terms)
-    ]
-    if not active_groups:
-        return []
-
-    for treatment in TREATMENTS:
-        haystack = _normalize_query_text(
-            " ".join(
-                str(treatment.get(key, ""))
-                for key in ("name", "class_name", "category", "keywords", "aftercare", "results_timing", "suitable_for_all_skins")
-            )
-        )
-        if any(group in haystack for group in active_groups) or any(term in haystack for group in active_groups for term in concern_terms[group]):
-            matches.append(treatment)
-
-    return matches[:6]
-
-
-def _format_treatment_list_item(treatment: Dict) -> str:
-    name = treatment.get("name", "")
-    subcategory = treatment.get("category", "")
-    return f"{name} ({subcategory})" if subcategory else name
-
-
-def _public_treatment_text(value: str) -> str:
-    return str(value or "").replace("צללקות", "צלקות").strip()
-
-
-def _full_treatment_catalog_lines() -> List[str]:
-    grouped: Dict[str, List[Dict]] = {}
-    for treatment in TREATMENTS:
-        category = (treatment.get("class_name") or "טיפולים").strip()
-        grouped.setdefault(category, []).append(treatment)
-
-    lines = []
-    for category, treatments in grouped.items():
-        lines.append(f"**{category}**")
-        for treatment in treatments:
-            lines.append(f"- {_format_treatment_list_item(treatment)}")
-    return lines
-
-
-def _treatments_for_service_category(category: str) -> List[Dict]:
-    direct = [t for t in TREATMENTS if (t.get("class_name") or "").strip() == category]
-    if direct:
-        return direct
-
-    # The Excel sometimes calls this category simply "קוסמטיקה".
-    if category == "טיפולי קוסמטיקה":
-        return [t for t in TREATMENTS if (t.get("class_name") or "").strip() in {"קוסמטיקה", "טיפולי קוסמטיקה"}]
-    return []
-
-
-def _service_category_catalog_lines(category: str) -> List[str]:
-    treatments = _treatments_for_service_category(category)
-    if not treatments:
-        return []
-
-    grouped: Dict[str, List[str]] = {}
-    for treatment in treatments:
-        subcategory = (treatment.get("category") or "טיפולים").strip() or "טיפולים"
-        name = (treatment.get("name") or "").strip()
-        if not name:
-            continue
-        grouped.setdefault(subcategory, [])
-        if name not in grouped[subcategory]:
-            grouped[subcategory].append(name)
-
-    if not grouped:
-        return []
-
-    lines = []
-    for subcategory, names in grouped.items():
-        if subcategory == "טיפולים":
-            lines.extend(f"- {name}" for name in names)
-        else:
-            lines.append(f"**{subcategory}**")
-            lines.extend(f"- {name}" for name in names)
-    return lines
-
-
-def find_service_category(message: str) -> Optional[str]:
-    text = _normalize_query_text(message)
-    if not text:
-        return None
-
-    for category in SERVICE_CATEGORY_ORDER:
-        if category in text:
-            return category
-
-    for category, aliases in SERVICE_CATEGORY_ALIASES.items():
-        if any(alias in text for alias in aliases):
-            return category
-
-    return None
-
-
-def is_service_category_detail_question(message: str) -> bool:
-    text = _normalize_query_text(message)
-    if not text:
-        return False
-    detail_terms = ("מה", "איזה", "אילו", "יש", "כולל", "פירוט", "רשימה", "סוגי", "סוגים", "שירותים")
-    return any(term in text for term in detail_terms)
-
-
-def service_category_answer(category: str) -> str:
-    lines = [f"בטח. **{category}** היא קטגוריית טיפולים באתר MeDay."]
-    description = SERVICE_CATEGORY_DESCRIPTIONS.get(category)
-    if description:
-        lines.append(description)
-
-    detail_lines = _service_category_catalog_lines(category)
-    if detail_lines:
-        lines.append("")
-        lines.append("הטיפולים שמופיעים תחת הקטגוריה:")
-        lines.extend(detail_lines)
-
-    lines.append("אם תרצי התאמה אישית, כתבי לי מה המטרה שלך או מה מפריע לך.")
-    return "\n".join(lines)
-
-
-def treatment_detail_answer(treatment: Dict) -> str:
-    lines = [f"בטח. **{treatment.get('name', 'הטיפול')}** הוא טיפול בקטגוריית {treatment.get('class_name') or 'MeDay'}."]
-
-    if treatment.get("category"):
-        lines.append(f"- תחום: {_public_treatment_text(treatment['category'])}")
-    if treatment.get("aftercare"):
-        lines.append(f"- מה זה: {_public_treatment_text(treatment['aftercare'])}")
-    if treatment.get("suitable_for_all_skins"):
-        lines.append(f"- למי מתאים: {_public_treatment_text(treatment['suitable_for_all_skins'])}")
-    if treatment.get("results_timing"):
-        lines.append(f"- תוצאות צפויות: {_public_treatment_text(treatment['results_timing'])}")
-    if treatment.get("recommended_frequency"):
-        lines.append(f"- מספר טיפולים מומלץ: {_public_treatment_text(treatment['recommended_frequency'])}")
-    if treatment.get("pregnancy_breastfeeding"):
-        lines.append(f"- הריון והנקה: {_public_treatment_text(treatment['pregnancy_breastfeeding'])}")
-    if treatment.get("medical_limitations"):
-        lines.append(f"- לא מתאים במקרים של: {_public_treatment_text(treatment['medical_limitations'])}")
-
-    lines.append("אם תרצי התאמה אישית, כתבי לי מה המטרה שלך ומה מצב העור או הציפורניים.")
-    return "\n".join(lines)
-
-
-def local_treatment_info_answer(message: str) -> Optional[str]:
-    if is_treatment_catalog_question(message):
-        return None
-
-    matches = find_matching_treatments(message)
-    if not matches:
-        return None
-
-    if len(matches) == 1:
-        return treatment_detail_answer(matches[0])
-
-    lines = ["מצאתי כמה טיפולים שיכולים להיות קשורים למה ששאלת:"]
-    for treatment in matches:
-        lines.append(f"- {_format_treatment_list_item(treatment)}")
-    lines.append("אם תרצי, כתבי שם של טיפול אחד או תארי לי את המטרה שלך ואדייק לך את התשובה.")
-    return "\n".join(lines)
-
-
-def is_clinic_related_question(message: str, selected: Optional[Dict] = None) -> bool:
-    text = re.sub(r"\s+", " ", (message or "").strip().lower())
-    if not text:
-        return True
-
-    if is_business_info_question(message) or is_review_question(message) or is_treatment_catalog_question(message):
-        return True
-
-    setting, _, _ = _find_guardrail_setting(message, [])
-    if setting:
-        return True
-
-    if find_matching_treatments(message):
-        return True
-
-    if detect_category_locally(message):
-        return True
-
-    selected_followup_terms = (
-        "הטיפול",
-        "הזה",
-        "אותו",
-        "אותה",
-        "כואב",
-        "כאב",
-        "כמה זמן",
-        "משך",
-        "תוצאות",
-        "תוצאה",
-        "החלמה",
-        "לפני",
-        "אחרי",
-        "תופעות",
-        "סיכון",
-        "סיכונים",
-        "מתאים",
-        "מתאימה",
-        "מותר",
-        "אסור",
-        "הריון",
-        "הנקה",
-        "תדירות",
-        "עובד",
-        "עובדת",
-    )
-    if selected and any(term in text for term in selected_followup_terms):
-        return True
-
-    clinic_terms = (
-        "meday",
-        "me day",
-        "מידיי",
-        "מי דיי",
-        "קליניקה",
-        "קלינקה",
-        "מרכז יופי",
-        "טיפול",
-        "טיפולים",
-        "קוסמט",
-        "אסתט",
-        "עור",
-        "פנים",
-        "אקנה",
-        "פיגמנט",
-        "כתמים",
-        "קמטים",
-        "נקבוביות",
-        "שחורים",
-        "שומני",
-        "יבש",
-        "יובש",
-        "ipl",
-        "לייזר",
-        "מיקרונידלינג",
-        "פילינג",
-        "חומצה",
-        "שיער",
-        "הסרת שיער",
-        "ציפורניים",
-        "מניקור",
-        "פדיקור",
-        "גבות",
-        "ריסים",
-        "שעווה",
-        "עיסוי",
-        "מילוי",
-        "בוטוקס",
-        "היאלורונית",
-    )
-    if any(term in text for term in clinic_terms):
-        return True
-
-    for treatment in TREATMENTS:
-        for key in ("name", "class_name", "category", "keywords"):
-            if _contains_catalog_value(text, treatment.get(key, "")):
-                return True
-
-    return False
-
-
-def is_assistant_help_question(message: str) -> bool:
-    text = re.sub(r"\s+", " ", (message or "").strip().lower())
-    if not text:
-        return False
-
-    direct_phrases = (
-        "את יכולה לענות",
-        "אתה יכול לענות",
-        "אפשר שתעני",
-        "אפשר שתענה",
-        "יש אפשרות שתעני",
-        "יש אפשרות שתענה",
-        "תעני לי על השאלות",
-        "תענה לי על השאלות",
-        "תעני על השאלות",
-        "תענה על השאלות",
-        "איזה שאלות אפשר",
-        "אילו שאלות אפשר",
-        "מה אפשר לשאול",
-        "על מה אפשר לשאול",
-        "איך להשתמש בצאט",
-        "איך להשתמש בצ'אט",
-        "מה את יודעת",
-        "מה אתה יודע",
-        "במה את יכולה לעזור",
-        "במה אתה יכול לעזור",
-    )
-    if any(phrase in text for phrase in direct_phrases):
-        return True
-
-    return ("שאלות" in text or "שאלה" in text) and any(
-        term in text for term in ("לענות", "תעני", "תענה", "אפשר", "יכולה", "יכול", "עוזר", "עזרה")
-    )
-
-
-def local_assistant_help_answer(message: str = "") -> Optional[str]:
-    if not is_assistant_help_question(message):
-        return None
-
-    return (
-        "כן, בטח. אפשר לשאול אותי שאלות על MeDay ואני אענה לפי המידע שיש באתר ובמערכת.\n"
-        "אפשר לשאול למשל:\n"
-        "- מה סוגי הטיפולים?\n"
-        "- איזה טיפולי גוף יש?\n"
-        "- מה יש במניקור ופדיקור?\n"
-        "- איפה הקליניקה ומה שעות הפתיחה?\n"
-        "- איזה טיפול יכול להתאים לאקנה / כתמים / ציפורניים / עיסוי?\n"
-        "אם השאלה לא קשורה לקליניקה, אוכל לענות בצורה חכמה יותר כשמחובר מודל AI חיצוני כמו OpenAI."
-    )
-
-
-def local_unrelated_answer(message: str = "") -> str:
-    text = re.sub(r"\s+", " ", (message or "").strip().lower())
-    clean = text.strip(" ?!.،,")
-
-    greeting_terms = {
-        "היי",
-        "הי",
-        "שלום",
-        "אהלן",
-        "הלן",
-        "בוקר טוב",
-        "צהריים טובים",
-        "ערב טוב",
-        "לילה טוב",
-    }
-    if clean in greeting_terms or clean.startswith(("היי ", "הי ", "שלום ", "אהלן ")):
-        return (
-            "היי, שמחה שאת כאן. איך אפשר לעזור? "
-            "אפשר לשאול אותי על טיפולי MeDay, התאמה אישית, כתובת, שעות פתיחה או יצירת קשר."
-        )
-
-    if any(term in text for term in ("מה נשמע", "מה קורה", "איך את", "הכל טוב")):
-        return (
-            "הכל טוב, תודה. אני כאן כדי לעזור לך עם מידע על MeDay או לכוון אותך לטיפול מתאים. "
-            "מה תרצי לבדוק?"
-        )
-
-    if any(term in text for term in ("תודה", "תודה רבה", "מעולה", "סבבה")):
-        return "בשמחה. אם תרצי לבדוק טיפול, שעות פתיחה, כתובת או יצירת קשר - אני כאן."
-
-    capability_reply = local_assistant_help_answer(message)
-    if capability_reply:
-        return capability_reply
-
-    if any(term in text for term in ("לא שאלה", "לא ענית", "לא עונה", "לא הגיוני", "לא קשור", "סתם כתבתי")):
-        return (
-            "צודקת, סליחה. הודעה כמו זו לא צריכה לקבל תשובה כאילו שאלת על טיפול. "
-            "אני אמורה לענות טבעי לשיחה רגילה, ועל שאלות של הקליניקה לענות לפי המידע של MeDay בלבד."
-        )
-
-    return (
-        "אני יכולה לעזור בעיקר עם מידע על MeDay: סוגי טיפולים, פירוט טיפולים, התאמה אישית, כתובת, שעות פתיחה ויצירת קשר. "
-        "אם זו שאלה כללית שלא קשורה לקליניקה, אענה בצורה חכמה יותר כשמחובר מודל AI חיצוני כמו OpenAI."
-    )
-
-
-def external_general_answer(message: str, history: List[Dict]) -> str:
-    if not llm_is_available():
-        return local_unrelated_answer(message)
-
-    system = (
-        "את עוזרת כללית בתוך אתר של MeDay. עני בעברית קצרה, ברורה ונעימה.\n"
-        "לשאלות כלליות שאינן קשורות לקליניקה, עני כמו צ'אט חכם רגיל.\n"
-        "אם המשתמשת שואלת על MeDay, טיפולים, מחירים, תורים, אבחון רפואי, צוות, כתובת או שעות - "
-        "אל תמציאי פרטים. כתבי שהמידע הרשמי של הקליניקה נענה רק מתוך מערכת MeDay.\n"
-        "אין לך חיפוש אינטרנט חי מתוך האתר, לכן אל תציגי מידע עדכני כאילו בדקת אותו עכשיו."
-    )
-    messages = [{"role": "system", "content": system}]
-    for msg in history[-4:]:
-        role = "user" if msg.get("from") == "user" else "assistant"
-        messages.append({"role": role, "content": msg.get("text", "")})
-    messages.append({"role": "user", "content": message})
-
-    try:
-        return run_llm_chat(
-            messages=messages,
-            temperature=0.5,
-            max_tokens=300,
-        )
-    except Exception as e:
-        print(f"[External general answer error] {e}")
-        return local_unrelated_answer(message)
-
-
-def _clinic_ai_context(selected: Optional[Dict] = None) -> str:
-    settings = _public_business_settings()
-    lines = [
-        "מידע רשמי על MeDay:",
-        f"- שם העסק: {settings.get('business_name') or DEFAULT_SYSTEM_SETTINGS['business_name']}",
-        f"- כתובת: {settings.get('address') or DEFAULT_SYSTEM_SETTINGS['address']}",
-        f"- שעות פתיחה: {settings.get('opening_hours') or DEFAULT_SYSTEM_SETTINGS['opening_hours']}",
-        f"- טלפון: {settings.get('phone') or DEFAULT_SYSTEM_SETTINGS['phone']}",
-        f"- וואטסאפ: {settings.get('whatsapp') or DEFAULT_SYSTEM_SETTINGS['whatsapp']}",
-        f"- מייל: {settings.get('email') or DEFAULT_SYSTEM_SETTINGS['email']}",
-        "",
-        "קטגוריות השירות באתר:",
-    ]
-    for category in SERVICE_CATEGORY_ORDER:
-        description = SERVICE_CATEGORY_DESCRIPTIONS.get(category, "")
-        lines.append(f"- {category}: {description}")
-
-    if selected:
-        faq_text = "\n".join(
-            [f"ש: {q}\nת: {a}" for q, a in selected.get("faq", {}).items()]
-        )
-        lines.extend([
-            "",
-            "המשתמשת נמצאת בעמוד טיפול ספציפי:",
-            f"- שם: {selected.get('name', '')}",
-            f"- קטגוריה: {selected.get('class_name', '')} / {selected.get('category', '')}",
-            f"- תיאור/הנחיות: {selected.get('aftercare', '')}",
-            f"- למי מתאים: {selected.get('suitable_for_all_skins', '')}",
-            f"- תוצאות: {selected.get('results_timing', '')}",
-            f"- תדירות מומלצת: {selected.get('recommended_frequency', '')}",
-            f"- מגבלות רפואיות: {selected.get('medical_limitations', '')}",
-            f"- הריון והנקה: {selected.get('pregnancy_breastfeeding', '')}",
-            f"- שאלות נפוצות: {faq_text or 'אין מידע נוסף.'}",
-        ])
+# ── AI assistant settings (admin) ─────────────────────────────────────────────
+class AiSettingsUpdate(BaseModel):
+    api_key: Optional[str] = None   # None = leave unchanged; "" = clear
+    enabled: Optional[bool] = None
+
+
+def _mask_key(k: str) -> str:
+    k = (k or "").strip()
+    if not k:
+        return ""
+    return (k[:4] + "…" + k[-4:]) if len(k) > 10 else "****"
+
+
+@app.get("/chat/ai-settings")
+def get_ai_settings(_: dict = Depends(require_staff)):
+    """Status of the optional AI layer for the admin panel."""
+    from chatbot_db import get_setting
+    from chatbot_config import GEMINI_KEY_URL
+    key = (get_setting("llm_api_key") or "").strip()
+    env_key = bool(os.getenv("GEMINI_API_KEY"))
+    enabled = get_setting("llm_enabled", "1") != "0"
+    has_key = bool(key or env_key)
+    last = (get_setting("llm_last_status") or "").strip()
+    if not enabled:
+        status = "off"
+    elif not has_key:
+        status = "no_key"
+    elif last == "rate_limited":
+        status = "limited"     # free daily quota used up
+    elif last == "invalid_key":
+        status = "invalid"     # key no longer valid
+    elif last == "error":
+        status = "error"       # transient connection issue
     else:
-        lines.extend([
-            "",
-            "קטלוג טיפולים ושירותים שמופיעים במערכת:",
-            *(_full_treatment_catalog_lines()[:220]),
-        ])
-
-    return "\n".join(str(line) for line in lines if line is not None)
-
-
-def smart_ai_answer(message: str, history: List[Dict], selected: Optional[Dict] = None) -> str:
-    if not llm_is_available():
-        if is_clinic_related_question(message, selected):
-            return local_general_answer(message, selected, history)
-        return local_unrelated_answer(message)
-
-    system = (
-        "את צ'אטבוט חכם ונעים באתר MeDay. עני בעברית טבעית, קצרה וברורה.\n"
-        "התפקיד שלך הוא לענות טוב, לא לדחוף שאלון התאמה בכל שאלה.\n\n"
-        "כללים חשובים:\n"
-        "1. אם השאלה קשורה ל-MeDay, לטיפולים, כתובת, שעות, קשר, מחירים, תורים או צוות - "
-        "עני רק לפי ההקשר הרשמי שמופיע למטה. אל תמציאי פרטים.\n"
-        "2. אם חסר מידע רשמי, אמרי שאין לך מידע מדויק במערכת והפני לטלפון/וואטסאפ.\n"
-        "3. אם השאלה כללית ולא קשורה לקליניקה, אפשר לענות כמו צ'אט כללי רגיל, בקצרה ובצורה הגיונית.\n"
-        "4. אם המשתמשת רק שואלת מה אפשר לשאול או האם את יכולה לענות - עני בהסבר פשוט, לא כ'שאלה לא רלוונטית'.\n"
-        "5. אל תאבחני מצב רפואי ואל תבטיחי תוצאה רפואית. אפשר להציע ייעוץ עם הצוות או רופא במקרה רפואי.\n"
-        "6. כששואלים על סוגי טיפולים, רשמי את הקטגוריות והשירותים מההקשר, לא ניסוח כללי.\n\n"
-        + _build_blocked_topics_prompt(CHATBOT_SETTINGS)
-        + "\n\n"
-        + _clinic_ai_context(selected)
-    )
-
-    messages = [{"role": "system", "content": system}]
-    for msg in history[-6:]:
-        role = "user" if msg.get("from") == "user" else "assistant"
-        text = (msg.get("text") or "").strip()
-        if text:
-            messages.append({"role": role, "content": text})
-    messages.append({"role": "user", "content": message})
-
-    try:
-        return run_llm_chat(
-            messages=messages,
-            temperature=0.35,
-            max_tokens=520,
-        )
-    except Exception as e:
-        print(f"[Smart AI answer error] {e}")
-        if is_clinic_related_question(message, selected):
-            return local_general_answer(message, selected, history)
-        return local_unrelated_answer(message)
-
-
-def local_guardrail_answer(
-    message: str,
-    history: Optional[List[Dict]] = None,
-    selected: Optional[Dict] = None,
-) -> Optional[str]:
-    setting, matched_message, from_followup = _find_guardrail_setting(message, history)
-    if not setting:
-        return None
-
-    apology = "נכון, סליחה - " if from_followup else ""
-    if setting.get("redirect_message"):
-        return apology + setting["redirect_message"]
-
-    topic = setting.get("topic", "")
-    contact = _public_contact_line()
-
-    if topic == "מחירים ועלויות":
-        subject = _extract_price_subject(matched_message) or (selected.get("name") if selected else "הטיפול")
-        return (
-            f"{apology}אין לי מחיר מדויק במערכת עבור {subject}. "
-            "המחיר יכול להשתנות לפי סוג הטיפול וההתאמה האישית, ולכן עדיף לוודא מול הצוות לפני קביעת תור. "
-            f"{contact}"
-        )
-
-    if topic == "זמינות תורים":
-        return (
-            f"{apology}אין לי גישה ליומן התורים בזמן אמת, ולכן אני לא יכולה לאשר זמינות מכאן. "
-            f"{contact}"
-        )
-
-    if topic == "פרטי עובדות":
-        return (
-            f"{apology}אין לי מידע עדכני על שיוך מטפלות לטיפולים ספציפיים. "
-            f"{contact}"
-        )
-
-    if topic == "מדיניות ביטולים":
-        return (
-            f"{apology}לשינוי או ביטול תור כדאי לדבר ישירות עם הצוות כדי לוודא את המדיניות והאפשרויות שלך. "
-            f"{contact}"
-        )
-
-    if topic == "אבחון רפואי":
-        return (
-            f"{apology}אני יכולה לתת מידע כללי על טיפולי היופי שלנו, אבל לא לאבחן מצב רפואי. "
-            "במקרה של כאב, תגובה חריגה או חשש רפואי חשוב לפנות לרופא/ה. "
-            f"{contact}"
-        )
-
-    if topic == "מתחרים":
-        return (
-            f"{apology}אני יכולה לעזור עם מידע על השירותים של MeDay, אבל לא להשוות למקומות אחרים בלי מידע בדוק. "
-            f"{contact}"
-        )
-
-    return f"{apology}לגבי {topic}, הכי נכון לדבר ישירות עם הצוות. {contact}"
-
-
-def local_general_answer(
-    message: str,
-    selected: Optional[Dict] = None,
-    history: Optional[List[Dict]] = None,
-) -> str:
-    catalog_reply = local_treatment_catalog_answer(message)
-    if catalog_reply:
-        return catalog_reply
-
-    treatment_reply = local_treatment_info_answer(message)
-    if treatment_reply:
-        return treatment_reply
-
-    if selected:
-        return (
-            f"בטח. לגבי {selected['name']}: "
-            f"{selected.get('aftercare') or selected.get('suitable_for_all_skins') or 'יש לנו מידע על הטיפול הזה במערכת.'} "
-            "אם תרצי, כתבי לי מה חשוב לך לדעת ואכוון אותך."
-        )
-
-    return (
-        "אני כאן כדי לעזור לבחור טיפול מתאים או לענות על שאלה כללית. "
-        "אפשר לבחור קטגוריה כמו " + ", ".join(SERVICE_CATEGORY_ORDER[:5]) + ", "
-        "או לכתוב לי מה מפריע לך ומה המטרה שלך."
-    )
-
-
-def is_treatment_catalog_question(message: str) -> bool:
-    text = re.sub(r"\s+", " ", (message or "").strip().lower())
-    if not text:
-        return False
-
-    catalog_phrases = (
-        "סוגי הטיפולים",
-        "סוגי טיפולים",
-        "סוגי טיפול",
-        "איזה טיפולים",
-        "אילו טיפולים",
-        "מה הטיפולים",
-        "מה סוגי הטיפולים",
-        "מה השירותים",
-        "איזה שירותים",
-        "אילו שירותים",
-        "מה יש לכם",
-        "מה יש בקליניקה",
-        "מה אתם מציעים",
-        "מה אפשר לעשות אצלכם",
-        "כל הטיפולים",
-        "כל השירותים",
-        "רשימת הטיפולים",
-        "רשימת שירותים",
-        "תפריט טיפולים",
-        "טיפולים יש",
-        "השירותים שלכם",
-    )
-    if any(phrase in text for phrase in catalog_phrases):
-        return True
-
-    return ("טיפולים" in text or "שירותים" in text) and any(
-        term in text for term in ("מה", "איזה", "אילו", "סוג", "סוגים", "רשימה")
-    )
-
-
-def treatment_catalog_answer() -> str:
-    lines = ["בטח. אלו **סוגי הטיפולים** שמופיעים באתר MeDay:"]
-    lines.extend(f"- {category}" for category in SERVICE_CATEGORY_ORDER)
-    lines.append("אם תרצי פירוט, כתבי למשל: \"איזה טיפולי גוף יש?\" או \"מה יש במניקור ופדיקור?\".")
-    return "\n".join(lines)
-
-
-def local_treatment_catalog_answer(message: str) -> Optional[str]:
-    category = find_service_category(message)
-    if category and is_service_category_detail_question(message):
-        return service_category_answer(category)
-
-    if is_treatment_catalog_question(message):
-        return treatment_catalog_answer()
-    return None
-
-
-def local_guided_conversation(profile: Dict, next_field_info: Optional[Dict]) -> Dict:
-    if not next_field_info:
-        return {
-            "reply": "יש לי מספיק פרטים כדי להציע כיוון מתאים.",
-            "profile_update": {},
-            "ready_to_recommend": True,
-        }
+        status = "active"
     return {
-        "reply": next_field_info["question"],
-        "profile_update": {},
-        "ready_to_recommend": False,
+        "enabled": enabled,
+        "key_set": has_key,
+        "key_masked": _mask_key(key) if key else ("(from environment)" if env_key else ""),
+        "status": status,
+        "last_status_at": get_setting("llm_last_status_at", ""),
+        "provider": "Google Gemini",
+        "get_key_url": GEMINI_KEY_URL,
     }
 
 
-def local_recommendation(profile: Dict, category: str) -> Dict:
-    category_treatments = [t for t in TREATMENTS if t.get("class_name") == category]
-    if not category_treatments:
-        category_treatments = TREATMENTS[:3]
-
-    suggested = [
-        {"id": t["id"], "name": t["name"], "category": t.get("category", "")}
-        for t in category_treatments[:3]
-    ]
-    names = ", ".join(t["name"] for t in category_treatments[:3])
-    reply = (
-        "לפי הפרטים שנתת, אלו הטיפולים שהכי כדאי לבדוק: "
-        f"{names}. "
-        "כדאי לבחור טיפול ולקרוא את הפרטים, או לפנות לצוות כדי לוודא התאמה אישית מלאה."
-    )
-    return {"reply": reply, "suggested_treatments": suggested}
-
-
-def quick_local_chat_answer(
-    message: str,
-    history: Optional[List[Dict]] = None,
-    selected: Optional[Dict] = None,
-) -> Optional[str]:
-    text = re.sub(r"\s+", " ", (message or "").strip().lower())
-    clean = text.strip(" ?!.،,")
-    if not clean:
-        return None
-
-    if clean == "שאלה כללית":
-        return "בשמחה. כתבי לי את השאלה שלך, ואענה לפי המידע של MeDay כשזה קשור לקליניקה."
-
-    if clean in {"היי", "הי", "שלום", "אהלן", "הלן"}:
-        return "היי, שמחה שאת כאן. איך אפשר לעזור?"
-
-    help_reply = local_assistant_help_answer(message)
-    if help_reply:
-        return help_reply
-
-    if any(term in text for term in ("תודה", "תודה רבה", "מעולה", "סבבה")):
-        return "בשמחה. אני כאן אם תרצי לבדוק טיפול, כתובת, שעות פתיחה או יצירת קשר."
-
-    catalog_reply = local_treatment_catalog_answer(message)
-    if catalog_reply:
-        return catalog_reply
-
-    if is_review_question(message):
-        return local_review_answer()
-
-    guardrail_reply = local_guardrail_answer(message, history, selected)
-    if guardrail_reply:
-        return guardrail_reply
-
-    treatment_reply = local_treatment_info_answer(message)
-    if treatment_reply:
-        return treatment_reply
-
-    return None
-
-
-# ------------------------------------------------------------
-# LLM helpers
-# ------------------------------------------------------------
-
-def classify_intent(message: str, history: List[Dict]) -> Dict:
-    """
-    Call 1 — Intent Router.
-    Returns {"intent": "general"|"recommendation", "category": str|None}
-    """
-    local_category = detect_category_locally(message)
-    if local_category:
-        return {
-            "intent": "recommendation" if is_recommendation_request(message) else "general",
-            "category": local_category,
-        }
-
-    if not llm_is_available():
-        return {
-            "intent": "general",
-            "category": None,
-        }
-
-    categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
-
-    history_text = ""
-    for msg in history[-4:]:
-        role = "User" if msg.get("from") == "user" else "Assistant"
-        history_text += f"{role}: {msg.get('text', '')}\n"
-
-    system = f"""You are a classifier for MeDay, an Israeli beauty clinic chatbot.
-
-Classify the user's latest message as:
-- "general": general question, logistics (hours/prices/location), small talk, question about a specific treatment they already know about
-- "recommendation": user has a beauty/skin/hair problem to solve, wants treatment advice, mentions a concern or symptom, asks "מה מומלץ"
-
-Do NOT classify a message as recommendation just because it mentions a category.
-Questions like "מה יש בטיפולי גוף", "מה סוגי הטיפולים", "מה זה מניקור", or "איזה שירותים יש" are general.
-
-Available treatment categories: {', '.join(categories)}
-
-If intent is "recommendation", also pick the single most relevant category from the list above. If unclear, set category to null.
-
-Respond ONLY with valid JSON on one line, no explanation:
-{{"intent": "general", "category": null}}"""
-
-    try:
-        content = run_llm_chat(
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": f"Conversation:\n{history_text}Latest message: {message}"},
-            ],
-            temperature=0,
-            response_format={"type": "json_object"},
-            max_tokens=60,
-        )
-        result = json.loads(content)
-        return {
-            "intent": result.get("intent", "general"),
-            "category": result.get("category"),
-        }
-    except Exception as e:
-        print(f"[Intent router error] {e}")
-        return {"intent": "general", "category": None}
-
-
-def general_answer(message: str, history: List[Dict], selected: Optional[Dict]) -> str:
-    """
-    Call 2A — Pure conversation, no flow logic.
-    Handles general questions and treatment-specific questions.
-    """
-    local_reply = local_treatment_catalog_answer(message) or local_treatment_info_answer(message)
-    if local_reply:
-        return local_reply
-
-    if not llm_is_available():
-        return local_general_answer(message, selected)
-
-    if selected:
-        faq_text = "\n".join(
-            [f"ש: {q}\nת: {a}" for q, a in selected.get("faq", {}).items()]
-        )
-        context = (
-            f"המשתמשת צופה בטיפול: {selected['name']}\n\n"
-            f"פרטי הטיפול:\n"
-            f"- קטגוריה: {selected['class_name']} / {selected['category']}\n"
-            f"- תיאור: {selected['aftercare']}\n"
-            f"- תוצאות: {selected['results_timing']}\n"
-            f"- למי מתאים: {selected['suitable_for_all_skins']}\n"
-            f"- למי לא מתאים: {selected['medical_limitations']}\n"
-            f"- הריון והנקה: {selected['pregnancy_breastfeeding']}\n"
-            f"- תדירות מומלצת: {selected['recommended_frequency']}\n"
-            f"- הערות: {selected['keywords']}\n\n"
-            f"שאלות ותשובות נפוצות:\n{faq_text or 'אין.'}"
-        )
-    else:
-        context = "רשימת הטיפולים והשירותים בקליניקה:\n" + "\n".join(_full_treatment_catalog_lines())
-
-    system = (
-        "את עוזרת AI של MeDay - קליניקת יופי וטיפולים קוסמטיים.\n"
-        "ענה תמיד בעברית בצורה חמה, מקצועית ומזמינה.\n"
-        "בסס את תשובותיך אך ורק על המידע שנמסר לך להלן. אל תמציאי מידע שאינו בהקשר.\n\n"
-        + _build_blocked_topics_prompt(CHATBOT_SETTINGS)
-        + context
-    )
-
-    messages = [{"role": "system", "content": system}]
-    for msg in history[-8:]:
-        role = "user" if msg.get("from") == "user" else "assistant"
-        messages.append({"role": role, "content": msg.get("text", "")})
-    messages.append({"role": "user", "content": message})
-
-    try:
-        return run_llm_chat(
-            messages=messages,
-            temperature=0.7,
-        )
-    except Exception as e:
-        print(f"[General answer error] {e}")
-        return local_general_answer(message, selected)
-
-
-def guided_conversation(
-    message: str,
-    history: List[Dict],
-    profile: Dict,
-    category: str,
-    next_field_info: Optional[Dict],
-) -> Dict:
-    """
-    Call 2B — Guided recommendation flow with free-text input.
-    Returns {"reply", "profile_update", "ready_to_recommend", "is_general_question", "switch_category"}
-
-    is_general_question: True when user asks something off-topic (hours, prices, etc.)
-      → backend answers without advancing or resetting the flow.
-    switch_category: non-null when user clearly wants a different service category
-      → backend resets flow to the new category.
-    ready_to_recommend: True when user explicitly asks for recommendations early,
-      or when the LLM determines enough data has been collected.
-    """
-    if not llm_is_available():
-        return local_guided_conversation(profile, next_field_info)
-
-    known = "\n".join([f"- {k}: {v}" for k, v in profile.items()]) or "עדיין לא נאסף מידע"
-    all_categories = sorted(set(t["class_name"] for t in TREATMENTS if t["class_name"]))
-
-    if next_field_info:
-        next_instruction = (
-            f"השאלה הבאה שצריך לשאול (אם עוד לא נענתה): {next_field_info['question']}\n"
-            f"אפשרויות לשדה זה: {', '.join(next_field_info['options']) if next_field_info['options'] else 'תשובה חופשית'}"
-        )
-        ready_instruction = "קבע ready_to_recommend: false אלא אם כן הלקוחה ביקשה המלצה עכשיו."
-    else:
-        next_instruction = "נאסף מספיק מידע. אין צורך לשאול שאלות נוספות."
-        ready_instruction = "קבע ready_to_recommend: true."
-
-    system = f"""אתה יועצת יופי חכמה של MeDay בקטגוריה: {category}.
-מנהלת שיחה אישית עם לקוחה כדי להמליץ על הטיפול הכי מתאים לה.
-
-מידע שכבר ידוע:
-{known}
-
-{next_instruction}
-
-כללים — חשוב מאוד:
-1. ענה בעברית חמה ואישית
-2. אם הלקוחה ענתה על שאלה קודמת — חלצי את הערך המדויק ל-profile_update
-3. אם הלקוחה שאלה שאלה כללית על הקליניקה (שעות, מחירים, כתובת, חנייה) — ענה בקצרה ב-reply, הגדר is_general_question: true, ואל תמלאי profile_update
-4. אם הלקוחה ביקשה "תמליצי לי עכשיו" / "מספיק שאלות" / "מה מתאים לי" — הגדר ready_to_recommend: true
-5. אם הלקוחה רוצה לעבור לקטגוריה אחרת (למשל מציפורניים לשיער) — הגדר switch_category לשם הקטגוריה המדויק מהרשימה
-6. {ready_instruction}
-7. אל תמציאי מידע רפואי שאינו מוצג לך
-
-קטגוריות שירות זמינות: {', '.join(all_categories)}
-
-החזירי ONLY valid JSON (כל שדות חייבים להיות נוכחים):
-{{"reply": "...", "profile_update": {{}}, "ready_to_recommend": false, "is_general_question": false, "switch_category": null}}"""
-
-    messages = [{"role": "system", "content": system}]
-    for msg in history[-6:]:
-        role = "user" if msg.get("from") == "user" else "assistant"
-        messages.append({"role": role, "content": msg.get("text", "")})
-    messages.append({"role": "user", "content": message})
-
-    try:
-        content = run_llm_chat(
-            messages=messages,
-            temperature=0.7,
-            response_format={"type": "json_object"},
-            max_tokens=400,
-        )
-        result = json.loads(content)
-        return {
-            "reply": result.get("reply", ""),
-            "profile_update": result.get("profile_update", {}),
-            "ready_to_recommend": bool(result.get("ready_to_recommend", False)),
-            "is_general_question": bool(result.get("is_general_question", False)),
-            "switch_category": result.get("switch_category") or None,
-        }
-    except Exception as e:
-        print(f"[Guided conversation error] {e}")
-        return local_guided_conversation(profile, next_field_info)
-
-
-def sub_discovery(
-    message: str,
-    field: str,
-    category: str,
-    history: List[Dict],
-) -> str:
-    """
-    Sub-discovery call — helps the client figure out an answer they don't know.
-    When resolved, the reply contains [RESOLVED: value] which the backend strips.
-    """
-    if not llm_is_available():
-        return "אין בעיה. נסי לתאר לי במילים שלך מה את מרגישה או מה המטרה שלך, ואני אמשיך לכוון אותך."
-
-    fields = get_fields_for_category(category)
-    field_info = next((f for f in fields if f["field"] == field), None)
-    guidance = field_info["guidance"] if field_info else None
-    options = field_info["options"] if field_info else []
-
-    system = (
-        f"אתה יועצת יופי של MeDay המנסה לעזור ללקוחה להבין מה ה-{field} שלה.\n\n"
-        + (f"הנחיה לאבחון: {guidance}\n" if guidance else "")
-        + (f"האפשרויות הסופיות: {', '.join(options)}\n" if options else "")
-        + "\nשאלי שאלות אבחון פשוטות, חמות ומובנות. "
-        "ברגע שאת בטוחה מה התשובה, ציני בסוף התשובה: [RESOLVED: הערך]\n"
-        "לדוגמה: 'מעולה! נראה שיש לך עור שמן 😊 [RESOLVED: שמן]'\n"
-        "אל תכתבי [RESOLVED:] עד שאת בטוחה לגמרי."
-    )
-
-    messages = [{"role": "system", "content": system}]
-    for msg in history[-6:]:
-        role = "user" if msg.get("from") == "user" else "assistant"
-        messages.append({"role": role, "content": msg.get("text", "")})
-    messages.append({"role": "user", "content": message})
-
-    try:
-        return run_llm_chat(
-            messages=messages,
-            temperature=0.7,
-        )
-    except Exception as e:
-        print(f"[Sub-discovery error] {e}")
-        return f"מצטערת, יש לי תקלה. נסי לתאר את ה-{field} שלך בכמה מילים."
-
-
-def build_recommendation(profile: Dict, category: str, history: List[Dict]) -> Dict:
-    """
-    Final recommendation call — filters treatments to category, picks best matches.
-    Returns {"reply": str, "suggested_treatments": list}
-    """
-    if not llm_is_available():
-        return local_recommendation(profile, category)
-
-    category_treatments = [t for t in TREATMENTS if t.get("class_name") == category]
-    if not category_treatments:
-        category_treatments = TREATMENTS[:10]
-
-    treatments_text = "\n".join([
-        f"- {t['name']}: {(t['suitable_for_all_skins'] or t['aftercare'])[:120]}"
-        f" | מגבלות: {t['medical_limitations'][:80]}"
-        f" | הריון/הנקה: {t['pregnancy_breastfeeding'][:60]}"
-        for t in category_treatments
-    ])
-
-    profile_text = "\n".join([f"- {k}: {v}" for k, v in profile.items()])
-
-    system = (
-        f"אתה יועצת יופי מומחית של MeDay בקטגוריה: {category}.\n\n"
-        f"פרופיל הלקוחה:\n{profile_text}\n\n"
-        f"טיפולים זמינים:\n{treatments_text}\n\n"
-        "המלץ על 1-3 הטיפולים הכי מתאימים.\n"
-        "הסבירי בחמימות למה כל טיפול מתאים לפרופיל הספציפי הזה.\n"
-        "ציין את שמות הטיפולים בדיוק כפי שהם מופיעים ברשימה.\n"
-        "ענה בעברית חמה ומקצועית."
-    )
-
-    messages = [{"role": "system", "content": system}]
-    for msg in history[-4:]:
-        role = "user" if msg.get("from") == "user" else "assistant"
-        messages.append({"role": role, "content": msg.get("text", "")})
-    messages.append({"role": "user", "content": "על סמך כל מה שסיפרתי, מה הטיפולים המומלצים לי?"})
-
-    try:
-        reply = run_llm_chat(
-            messages=messages,
-            temperature=0.7,
-        )
-    except Exception as e:
-        print(f"[Recommendation error] {e}")
-        return local_recommendation(profile, category)
-
-    suggested = []
-    for t in category_treatments:
-        if t["name"] in reply:
-            suggested.append({"id": t["id"], "name": t["name"], "category": t["category"]})
-    suggested = suggested[:3]
-
-    return {"reply": reply, "suggested_treatments": suggested}
-
-
-# ------------------------------------------------------------
-# Chat schemas
-# ------------------------------------------------------------
-
-class ChatRequest(BaseModel):
-    message: Optional[str] = None
-    # Integrated chatbot session protocol used by ChatWidget.
-    session_id: Optional[str] = None
-    button_value: Optional[str] = None
-    question_id: Optional[str] = None
-    history: Optional[List[Dict]] = None
-    selected_treatment_id: Optional[str] = None
-    # Flow state (persisted by frontend, sent each turn)
-    profile: Optional[Dict] = None
-    mode: Optional[str] = "idle"       # idle | questioning | sub_discovery | recommending
-    category: Optional[str] = None
-    current_field: Optional[str] = None
-    # Chip tap signals
-    chip_field: Optional[str] = None
-    chip_value: Optional[str] = None   # "dont_know" or the actual answer
-
-
-class ChatResponse(BaseModel):
-    reply: str
-    mode: str
-    profile: Dict = Field(default_factory=dict)
-    category: Optional[str] = None
-    current_field: Optional[str] = None
-    quick_replies: Optional[List[str]] = None
-    question_number: Optional[int] = None
-    total_questions: Optional[int] = None
-    suggested_treatments: Optional[List[Dict]] = None
-    buttons: Optional[List[Dict]] = None
-    offer_continue: Optional[Dict] = None
-    question_progress: Optional[Dict] = None
-
-
-class SkinAnalysisRequest(BaseModel):
-    image_base64: str
-    mime_type: Optional[str] = "image/jpeg"
-
-
-# ------------------------------------------------------------
-# Chat endpoint
-# ------------------------------------------------------------
-
-@app.post("/chat", response_model=ChatResponse)
-def chat(req: ChatRequest):
-    # Safa's session-based recommendation flow is the primary website chatbot.
-    # The legacy fields below remain supported for older callers/admin tools.
-    if req.session_id:
-        try:
-            result = handle_branch_chatbot_message(
-                session_id=req.session_id,
-                message=req.message,
-                button_value=req.button_value,
-                question_id=req.question_id,
-            )
-        except sqlite3.OperationalError:
-            initialize_integrated_chatbot()
-            result = handle_branch_chatbot_message(
-                session_id=req.session_id,
-                message=req.message,
-                button_value=req.button_value,
-                question_id=req.question_id,
-            )
-        return ChatResponse(
-            reply=result.get("reply", ""),
-            mode=result.get("mode", "general"),
-            buttons=result.get("buttons"),
-            offer_continue=result.get("offer_continue"),
-            question_progress=result.get("question_progress"),
-        )
-
-    if not req.message:
-        raise HTTPException(status_code=400, detail="message or session_id action is required")
-
-    profile = dict(req.profile or {})
-    mode = req.mode or "idle"
-    category = req.category
-    history = req.history or []
-    current_field = req.current_field
-
-    # ── 0. Treatment-page context (existing behavior, unchanged) ──
-    selected = TREATMENT_MAP.get(req.selected_treatment_id) if req.selected_treatment_id else None
-    if is_business_info_question(req.message):
-        return ChatResponse(
-            reply=local_business_info_answer(req.message),
-            mode="idle",
-            profile=profile,
-            category=None,
-        )
-
-    quick_reply = quick_local_chat_answer(req.message, history, selected)
-    if quick_reply:
-        return ChatResponse(
-            reply=quick_reply,
-            mode="idle",
-            profile=profile,
-            category=category,
-        )
-
-    if mode == "idle" and not category and not is_recommendation_request(req.message):
-        return ChatResponse(
-            reply=smart_ai_answer(req.message, history, selected),
-            mode="idle",
-            profile=profile,
-            category=None,
-        )
-
-    if selected:
-        reply = smart_ai_answer(req.message, history, selected)
-        return ChatResponse(reply=reply, mode="idle", profile=profile)
-
-    # ── 1. Chip tap: real answer (no LLM needed) ──────────────────
-    if req.chip_value and req.chip_field and req.chip_value != "dont_know":
-        profile[req.chip_field] = req.chip_value
-
-        if can_recommend(category, profile):
-            next_field = get_next_field(category, profile)
-            if next_field is None:
-                rec = build_recommendation(profile, category, history)
-                return ChatResponse(
-                    reply=rec["reply"],
-                    mode="recommending",
-                    profile=profile,
-                    category=category,
-                    suggested_treatments=rec["suggested_treatments"] or None,
+@app.post("/chat/ai-settings")
+def update_ai_settings(body: AiSettingsUpdate, _: dict = Depends(require_admin)):
+    """Save a pasted API key (validated first) and/or the on/off flag."""
+    from chatbot_db import set_setting
+    from chatbot_router import _test_llm_key
+    out = {"ok": True}
+    if body.api_key is not None:
+        key = body.api_key.strip()
+        if key:
+            accepted, status = _test_llm_key(key)
+            if not accepted:
+                if status == "no_quota":
+                    detail = ("המפתח תקין, אך לחשבון Google הזה אין מכסת שימוש חינמית ל-Gemini (limit: 0). "
+                              "כדי להפעיל את ה-AI יש להפעיל חיוב (billing) בפרויקט ב-Google Cloud, "
+                              "או ליצור מפתח בחשבון Google אחר שיש בו מכסה חינמית. "
+                              "הצ׳אט ממשיך לעבוד מצוין גם בלי מפתח.")
+                elif status == "invalid_key":
+                    detail = "המפתח לא תקין"
+                else:
+                    detail = "שגיאת חיבור ל-Google, נסי שוב"
+                raise HTTPException(status_code=400, detail=detail)
+            out["tested"] = True
+            set_setting("llm_last_status", status)  # 'ok' or 'rate_limited'
+            if status == "rate_limited":
+                out["warning"] = (
+                    "המפתח תקין ונשמר, אך כרגע הגיע למגבלת הקצב החינמית. "
+                    "הצ׳אט ישתמש בו אוטומטית ברגע שהמכסה תתאפס (בדרך כלל תוך דקה או ביום העוקב)."
                 )
-
-        next_field = get_next_field(category, profile)
-        if next_field is None:
-            rec = build_recommendation(profile, category, history)
-            return ChatResponse(
-                reply=rec["reply"],
-                mode="recommending",
-                profile=profile,
-                category=category,
-                suggested_treatments=rec["suggested_treatments"] or None,
-            )
-
-        return ChatResponse(
-            reply=next_field["question"],
-            mode="questioning",
-            profile=profile,
-            category=category,
-            current_field=next_field["field"],
-            quick_replies=field_chips(next_field),
-            **question_progress(category, next_field["field"]),
-        )
-
-    # ── 4. Chip tap: "I don't know" → sub-discovery ───────────────
-    if req.chip_value == "dont_know" and req.chip_field:
-        reply = sub_discovery(req.message, req.chip_field, category, history)
-        resolved = re.search(r'\[RESOLVED:\s*(.+?)\]', reply)
-        clean_reply = re.sub(r'\[RESOLVED:\s*.+?\]', '', reply).strip()
-
-        if resolved:
-            profile[req.chip_field] = resolved.group(1).strip()
-            next_field = get_next_field(category, profile)
-            if next_field is None or can_recommend(category, profile):
-                rec = build_recommendation(profile, category, history)
-                return ChatResponse(
-                    reply=clean_reply + "\n\n" + rec["reply"],
-                    mode="recommending",
-                    profile=profile,
-                    category=category,
-                    suggested_treatments=rec["suggested_treatments"] or None,
-                )
-            return ChatResponse(
-                reply=clean_reply,
-                mode="questioning",
-                profile=profile,
-                category=category,
-                current_field=next_field["field"],
-                quick_replies=field_chips(next_field),
-                **question_progress(category, next_field["field"]),
-            )
-
-        return ChatResponse(
-            reply=clean_reply,
-            mode="sub_discovery",
-            profile=profile,
-            category=category,
-            current_field=req.chip_field,
-            **question_progress(category, req.chip_field),
-        )
-
-    # ── 5. Continuing sub-discovery with free text ────────────────
-    if mode == "sub_discovery" and current_field:
-        reply = sub_discovery(req.message, current_field, category, history)
-        resolved = re.search(r'\[RESOLVED:\s*(.+?)\]', reply)
-        clean_reply = re.sub(r'\[RESOLVED:\s*.+?\]', '', reply).strip()
-
-        if resolved:
-            profile[current_field] = resolved.group(1).strip()
-            next_field = get_next_field(category, profile)
-            if next_field is None or can_recommend(category, profile):
-                rec = build_recommendation(profile, category, history)
-                return ChatResponse(
-                    reply=clean_reply + "\n\n" + rec["reply"],
-                    mode="recommending",
-                    profile=profile,
-                    category=category,
-                    suggested_treatments=rec["suggested_treatments"] or None,
-                )
-            return ChatResponse(
-                reply=clean_reply,
-                mode="questioning",
-                profile=profile,
-                category=category,
-                current_field=next_field["field"],
-                quick_replies=field_chips(next_field),
-                **question_progress(category, next_field["field"]),
-            )
-
-        return ChatResponse(
-            reply=clean_reply,
-            mode="sub_discovery",
-            profile=profile,
-            category=category,
-            current_field=current_field,
-            **question_progress(category, current_field),
-        )
-
-    # ── 6. Intent classification (only when category not yet detected) ──
-    if not category:
-        classification = classify_intent(req.message, history)
-        if classification["intent"] == "recommendation" and classification.get("category"):
-            category = classification["category"]
-            mode = "questioning"
-
-    # ── 7. General answer (no recommendation intent) ──────────────
-    if mode == "idle" or not category:
-        reply = smart_ai_answer(req.message, history, None)
-        return ChatResponse(reply=reply, mode="idle", profile=profile, category=category)
-
-    # ── 8. Guided conversation (free text in recommendation flow) ──
-    next_field = get_next_field(category, profile)
-    result = guided_conversation(req.message, history, profile, category, next_field)
-
-    # 6a. General question mid-flow — answer without changing mode or field
-    if result.get("is_general_question"):
-        reask_field = get_next_field(category, profile)
-        return ChatResponse(
-            reply=result["reply"],
-            mode="questioning",
-            profile=profile,
-            category=category,
-            current_field=current_field,
-            quick_replies=field_chips(reask_field) if reask_field else None,
-            **question_progress(category, current_field),
-        )
-
-    # 6b. Category pivot — user wants to switch service area
-    switch_cat = result.get("switch_category")
-    if switch_cat and switch_cat in CATEGORY_FIELDS:
-        profile = {}
-        category = switch_cat
-        pivot_field = get_next_field(category, profile)
-        if pivot_field:
-            return ChatResponse(
-                reply=result["reply"],
-                mode="questioning",
-                profile=profile,
-                category=category,
-                current_field=pivot_field["field"],
-                quick_replies=field_chips(pivot_field),
-                **question_progress(category, pivot_field["field"]),
-            )
-
-    profile.update(result.get("profile_update", {}))
-
-    # Re-evaluate after profile update
-    next_field = get_next_field(category, profile)
-
-    # Allow early recommendation when user explicitly requests it and we have something
-    user_wants_now = result.get("ready_to_recommend", False)
-    ready = can_recommend(category, profile) or (user_wants_now and len(profile) > 0)
-
-    if (user_wants_now or next_field is None) and ready:
-        rec = build_recommendation(profile, category, history)
-        rec_reply = rec["reply"]
-        # Only prepend guided reply if it adds context (not if it would duplicate)
-        combined = (result["reply"] + "\n\n" + rec_reply) if result["reply"] and not user_wants_now else rec_reply
-        return ChatResponse(
-            reply=combined,
-            mode="recommending",
-            profile=profile,
-            category=category,
-            suggested_treatments=rec["suggested_treatments"] or None,
-        )
-
-    return ChatResponse(
-        reply=result["reply"],
-        mode="questioning",
-        profile=profile,
-        category=category,
-        current_field=next_field["field"] if next_field else None,
-        quick_replies=field_chips(next_field) if next_field else None,
-        **question_progress(category, next_field["field"] if next_field else None),
-    )
-
-
-@app.post("/analyze-skin")
-def analyze_skin(req: SkinAnalysisRequest):
-    if not req.image_base64:
-        raise HTTPException(status_code=400, detail="Image data is required")
-
-    return {
-        "skin_type": "combination",
-        "summary": (
-            "The image was received successfully. This preliminary analysis "
-            "suggests a balanced routine with hydration, gentle cleansing, "
-            "and SPF. A clinic consultation is recommended for a precise plan."
-        ),
-        "concerns": [
-            {"label": "Hydration", "severity": "mild"},
-            {"label": "Texture", "severity": "moderate"},
-        ],
-        "recommended_treatments": [
-            {
-                "slug": "classic-meday",
-                "name": "MeDay Classic",
-                "desc": "A gentle facial for cleansing, hydration, and maintenance.",
-            },
-            {
-                "slug": "skin-booster",
-                "name": "Skin Booster",
-                "desc": "A technology treatment focused on glow and skin vitality.",
-            },
-            {
-                "slug": "clear-skin-plus",
-                "name": "Clear Skin Plus",
-                "desc": "A supportive option for visible texture and congestion.",
-            },
-        ],
-    }
+        set_setting("llm_api_key", key)
+    if body.enabled is not None:
+        set_setting("llm_enabled", "1" if body.enabled else "0")
+    return out
 
 
 # ------------------------------------------------------------
@@ -2886,6 +529,60 @@ def init_db():
             notes TEXT,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS employee_shifts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_name TEXT NOT NULL,
+            shift_date TEXT NOT NULL,
+            start_time TEXT,
+            end_time TEXT,
+            is_working INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(employee_name, shift_date)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_employee_shifts_date
+        ON employee_shifts(shift_date)
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS employees (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            full_name TEXT NOT NULL UNIQUE,
+            phone TEXT DEFAULT '',
+            is_active INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS employee_specialties (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            specialty TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(employee_id, specialty),
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS employee_shift_blocks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            employee_id INTEGER NOT NULL,
+            shift_date TEXT NOT NULL,
+            start_time TEXT NOT NULL,
+            end_time TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(employee_id, shift_date, start_time, end_time),
+            FOREIGN KEY (employee_id) REFERENCES employees(id)
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_employee_shift_blocks_date
+        ON employee_shift_blocks(shift_date)
     """)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
@@ -2997,6 +694,41 @@ def init_db():
             conn.execute(ddl)
         except Exception:
             pass
+    for employee in DEFAULT_EMPLOYEES:
+        conn.execute(
+            "INSERT OR IGNORE INTO employees (full_name, phone, is_active) VALUES (?, '', 1)",
+            (employee["full_name"],),
+        )
+        row = conn.execute("SELECT id FROM employees WHERE full_name = ?", (employee["full_name"],)).fetchone()
+        if row:
+            for specialty in employee["specialties"]:
+                conn.execute(
+                    "INSERT OR IGNORE INTO employee_specialties (employee_id, specialty) VALUES (?, ?)",
+                    (row["id"], specialty),
+                )
+
+    # Migrate the previous one-shift-per-day table into split shift blocks once, preserving old data.
+    try:
+        old_rows = conn.execute(
+            """SELECT employee_name, shift_date, start_time, end_time
+               FROM employee_shifts
+               WHERE is_working = 1 AND start_time IS NOT NULL AND end_time IS NOT NULL"""
+        ).fetchall()
+        for old in old_rows:
+            employee = conn.execute(
+                "SELECT id FROM employees WHERE full_name = ?",
+                (old["employee_name"],),
+            ).fetchone()
+            if not employee:
+                continue
+            conn.execute(
+                """INSERT OR IGNORE INTO employee_shift_blocks
+                   (employee_id, shift_date, start_time, end_time)
+                   VALUES (?, ?, ?, ?)""",
+                (employee["id"], old["shift_date"], old["start_time"], old["end_time"]),
+            )
+    except Exception:
+        pass
     for key, value in DEFAULT_SYSTEM_SETTINGS.items():
         conn.execute(
             "INSERT OR IGNORE INTO system_settings (key, value) VALUES (?, ?)",
@@ -3053,78 +785,6 @@ def _seed_admin_from_env():
 _seed_admin_from_env()
 
 
-def _seed_treatments_to_db(treatments_list: List[Dict]):
-    """Overwrite Excel-sourced rows in DB from the in-memory treatments list."""
-    conn = get_db()
-    conn.execute("DELETE FROM treatments_db WHERE source = 'excel'")
-    for t in treatments_list:
-        conn.execute("""
-            INSERT OR REPLACE INTO treatments_db
-            (id, name, class_name, category, keywords, suitable_for_all_skins,
-             results_timing, aftercare, recommended_frequency,
-             pregnancy_breastfeeding, medical_limitations, source)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'excel')
-        """, (t["id"], t["name"], t["class_name"], t["category"], t["keywords"],
-              t["suitable_for_all_skins"], t["results_timing"], t["aftercare"],
-              t["recommended_frequency"], t["pregnancy_breastfeeding"], t["medical_limitations"]))
-    conn.commit()
-    conn.close()
-
-
-def _faq_map_from_excel() -> Dict[str, Dict]:
-    """Build name→{question: answer} map from questions.xlsx."""
-    try:
-        faq_df = pd.read_excel(EXCEL_DIR / "questions.xlsx")
-        m: Dict[str, Dict] = {}
-        for _, row in faq_df.iterrows():
-            name = to_text(row.get("שם_הטיפול", "")).lower()
-            q = to_text(row.get("שאלה", ""))
-            a = to_text(row.get("תשובה", ""))
-            if name and q and a:
-                m.setdefault(name, {})[q] = a
-        return m
-    except Exception:
-        return {}
-
-
-def _refresh_treatments_from_db():
-    """Reload TREATMENTS and TREATMENT_MAP from the DB (Excel rows + admin rows)."""
-    global TREATMENTS, TREATMENT_MAP
-    faq_map = _faq_map_from_excel()
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM treatments_db ORDER BY class_name, name"
-    ).fetchall()
-    conn.close()
-    treatments = []
-    for r in rows:
-        d = dict(r)
-        d["faq"] = faq_map.get(d["name"].lower(), {})
-        d["ages"] = ""
-        d["complementary_products"] = ""
-        d["consultation_required"] = ""
-        treatments.append(d)
-    existing_ids = {t["id"] for t in treatments}
-    for _t in _EXTRA_TREATMENTS:
-        if _t["id"] not in existing_ids:
-            treatments.append(_t)
-    TREATMENTS = treatments
-    TREATMENT_MAP = {t["id"]: t for t in TREATMENTS}
-
-
-# Seed DB from Excel on first startup (only if table is empty)
-def _initial_seed():
-    conn = get_db()
-    count = conn.execute("SELECT COUNT(*) FROM treatments_db WHERE source='excel'").fetchone()[0]
-    conn.close()
-    if count == 0:
-        _seed_treatments_to_db(TREATMENTS)
-
-
-_initial_seed()
-_refresh_treatments_from_db()
-
-
 class AppointmentCreate(BaseModel):
     client_name: str
     client_phone: Optional[str] = None
@@ -3138,6 +798,254 @@ class AppointmentCreate(BaseModel):
     notes: Optional[str] = None
 
 
+class EmployeeCreate(BaseModel):
+    full_name: str
+    phone: Optional[str] = ""
+    specialties: List[str]
+    is_active: Optional[bool] = True
+
+
+class EmployeeUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    specialties: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+
+class EmployeeShiftBlockItem(BaseModel):
+    employee_id: int
+    shift_date: str
+    start_time: str
+    end_time: str
+
+
+class EmployeeShiftWeekSave(BaseModel):
+    week_start: str
+    shift_blocks: List[EmployeeShiftBlockItem]
+    force_conflicts: Optional[bool] = False
+
+
+def parse_iso_date(value: str, field_name: str = "date") -> datetime:
+    try:
+        return datetime.strptime(value, "%Y-%m-%d")
+    except Exception:
+        raise HTTPException(status_code=400, detail="תאריך לא תקין. יש להשתמש בפורמט YYYY-MM-DD")
+
+
+def require_valid_time(value: Optional[str], field_name: str):
+    if not value or not TIME_RE.match(value):
+        raise HTTPException(status_code=400, detail="שעה לא תקינה. יש להשתמש בפורמט HH:MM")
+
+
+def time_to_minutes(value: str) -> int:
+    hours, minutes = value.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def minutes_to_time(total_minutes: int) -> str:
+    return f"{total_minutes // 60:02d}:{total_minutes % 60:02d}"
+
+
+def add_days_iso(iso_date: str, days: int) -> str:
+    return (parse_iso_date(iso_date) + timedelta(days=days)).strftime("%Y-%m-%d")
+
+
+def employee_response(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
+    specialties = conn.execute(
+        "SELECT specialty FROM employee_specialties WHERE employee_id = ? ORDER BY specialty",
+        (row["id"],),
+    ).fetchall()
+    return {
+        "id": row["id"],
+        "full_name": row["full_name"],
+        "name": row["full_name"],
+        "phone": row["phone"] or "",
+        "is_active": bool(row["is_active"]),
+        "specialties": [item["specialty"] for item in specialties],
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+    }
+
+
+def validate_specialties(specialties: List[str]) -> List[str]:
+    clean = []
+    for specialty in specialties or []:
+        value = (specialty or "").strip()
+        if value and value not in clean:
+            clean.append(value)
+    if not clean:
+        raise HTTPException(status_code=400, detail="יש לבחור לפחות תחום טיפול אחד")
+    invalid = [value for value in clean if value not in TREATMENT_CATEGORIES]
+    if invalid:
+        raise HTTPException(status_code=400, detail="נבחר תחום טיפול לא תקין")
+    return clean
+
+
+def validate_employee_payload(full_name: str, phone: Optional[str], specialties: List[str]) -> tuple:
+    name = (full_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=400, detail="שם מלא הוא שדה חובה")
+    phone_value = validate_phone(phone) if phone else ""
+    return name, phone_value, validate_specialties(specialties)
+
+
+def set_employee_specialties(conn: sqlite3.Connection, employee_id: int, specialties: List[str]):
+    conn.execute("DELETE FROM employee_specialties WHERE employee_id = ?", (employee_id,))
+    for specialty in specialties:
+        conn.execute(
+            "INSERT OR IGNORE INTO employee_specialties (employee_id, specialty) VALUES (?, ?)",
+            (employee_id, specialty),
+        )
+
+
+def get_employee_or_404(conn: sqlite3.Connection, employee_id: int, active_only: bool = False) -> sqlite3.Row:
+    where = "id = ?"
+    params = [employee_id]
+    if active_only:
+        where += " AND is_active = 1"
+    row = conn.execute(f"SELECT * FROM employees WHERE {where}", params).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="העובד/ת לא נמצא/ה במערכת")
+    return row
+
+
+def validate_shift_blocks(conn: sqlite3.Connection, blocks: List[EmployeeShiftBlockItem], allowed_dates: set) -> List[dict]:
+    validated = []
+    for block in blocks:
+        employee = get_employee_or_404(conn, block.employee_id, active_only=True)
+        shift_date = parse_iso_date(block.shift_date, "shift_date").strftime("%Y-%m-%d")
+        if shift_date not in allowed_dates:
+            raise HTTPException(status_code=400, detail="תאריך המשמרת חייב להיות בתוך השבוע שנבחר")
+        start_time = (block.start_time or "").strip()
+        end_time = (block.end_time or "").strip()
+        require_valid_time(start_time, "start_time")
+        require_valid_time(end_time, "end_time")
+        if time_to_minutes(end_time) <= time_to_minutes(start_time):
+            raise HTTPException(status_code=400, detail="שעת הסיום חייבת להיות אחרי שעת ההתחלה")
+        validated.append({
+            "employee_id": int(block.employee_id),
+            "employee_name": employee["full_name"],
+            "shift_date": shift_date,
+            "start_time": start_time,
+            "end_time": end_time,
+        })
+
+    by_employee_date: Dict[tuple, List[dict]] = {}
+    seen = set()
+    for block in validated:
+        duplicate_key = (block["employee_id"], block["shift_date"], block["start_time"], block["end_time"])
+        if duplicate_key in seen:
+            raise HTTPException(status_code=400, detail="קיימת כפילות בחלונות העבודה")
+        seen.add(duplicate_key)
+        by_employee_date.setdefault((block["employee_id"], block["shift_date"]), []).append(block)
+
+    for day_blocks in by_employee_date.values():
+        day_blocks.sort(key=lambda item: time_to_minutes(item["start_time"]))
+        for index in range(1, len(day_blocks)):
+            if time_to_minutes(day_blocks[index]["start_time"]) < time_to_minutes(day_blocks[index - 1]["end_time"]):
+                raise HTTPException(
+                    status_code=400,
+                    detail="זמני המשמרות חופפים. יש לעדכן את שעות העבודה",
+                )
+    return sorted(validated, key=lambda item: (item["employee_id"], item["shift_date"], item["start_time"]))
+
+
+def is_appointment_inside_shift_block(appt_start: str, appt_end: str, blocks: List[dict]) -> bool:
+    start = time_to_minutes(appt_start)
+    end = time_to_minutes(appt_end)
+    return any(start >= time_to_minutes(block["start_time"]) and end <= time_to_minutes(block["end_time"]) for block in blocks)
+
+
+def get_employee_shift_blocks_for_date(conn: sqlite3.Connection, employee_id: int, shift_date: str) -> List[dict]:
+    rows = conn.execute(
+        """SELECT * FROM employee_shift_blocks
+           WHERE employee_id = ? AND shift_date = ?
+           ORDER BY start_time""",
+        (employee_id, shift_date),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def employee_has_shift_on_date(conn: sqlite3.Connection, employee_id: int, shift_date: str) -> bool:
+    return len(get_employee_shift_blocks_for_date(conn, employee_id, shift_date)) > 0
+
+
+def detect_shift_conflicts(conn: sqlite3.Connection, blocks: List[dict], week_dates: List[str], employees: List[sqlite3.Row]) -> List[dict]:
+    conflicts = []
+    by_employee_date: Dict[tuple, List[dict]] = {}
+    for block in blocks:
+        by_employee_date.setdefault((block["employee_id"], block["shift_date"]), []).append(block)
+
+    for employee in employees:
+        employee_id = employee["id"]
+        employee_name = employee["full_name"]
+        for shift_date in week_dates:
+            day_blocks = by_employee_date.get((employee_id, shift_date), [])
+            rows = conn.execute(
+                """SELECT employee_name, date, time, end_time, treatment_name
+                   FROM appointments
+                   WHERE employee_name = ? AND date = ? AND COALESCE(status, 'scheduled') != 'cancelled'
+                   ORDER BY time""",
+                (employee_name, shift_date),
+            ).fetchall()
+            for row in rows:
+                appt_start = row["time"]
+                appt_end = row["end_time"] or minutes_to_time(time_to_minutes(appt_start) + 60)
+                if not day_blocks or not is_appointment_inside_shift_block(appt_start, appt_end, day_blocks):
+                    conflicts.append({
+                        "employee_name": row["employee_name"],
+                        "date": row["date"],
+                        "start_time": appt_start,
+                        "end_time": appt_end,
+                        "treatment_name": row["treatment_name"] or "",
+                    })
+    return conflicts
+
+
+def shift_block_response(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["employee_name"] = data.get("employee_name") or data.get("full_name", "")
+    return data
+
+
+def detect_legacy_shift_conflicts(conn: sqlite3.Connection, shifts: List[dict]) -> List[dict]:
+    conflicts = []
+    for shift in shifts:
+        rows = conn.execute(
+            """SELECT employee_name, date, time, end_time
+               FROM appointments
+               WHERE employee_name = ? AND date = ? AND COALESCE(status, 'scheduled') != 'cancelled'
+               ORDER BY time""",
+            (shift["employee_name"], shift["shift_date"]),
+        ).fetchall()
+        shift_start = time_to_minutes(shift["start_time"]) if shift["is_working"] and shift["start_time"] else None
+        shift_end = time_to_minutes(shift["end_time"]) if shift["is_working"] and shift["end_time"] else None
+        for row in rows:
+            appt_start = time_to_minutes(row["time"])
+            appt_end = time_to_minutes(row["end_time"]) if row["end_time"] else appt_start + 60
+            outside_shift = (
+                not shift["is_working"] or
+                shift_start is None or
+                shift_end is None or
+                appt_start < shift_start or
+                appt_end > shift_end
+            )
+            if outside_shift:
+                conflicts.append({
+                    "employee_name": row["employee_name"],
+                    "date": row["date"],
+                    "start_time": row["time"],
+                    "end_time": row["end_time"] or minutes_to_time(appt_end),
+                })
+    return conflicts
+
+
+def shift_response(row: sqlite3.Row) -> dict:
+    data = dict(row)
+    data["is_working"] = bool(data.get("is_working"))
+    return data
+
+
 def find_customer_by_phone(conn: sqlite3.Connection, phone: Optional[str]) -> Optional[sqlite3.Row]:
     normalized_phone = normalize_phone_for_match(phone)
     if not normalized_phone:
@@ -3149,6 +1057,161 @@ def find_customer_by_phone(conn: sqlite3.Connection, phone: Optional[str]) -> Op
         if normalize_phone_for_match(row["phone"]) == normalized_phone:
             return row
     return None
+
+
+@app.get("/treatment-categories")
+def get_treatment_categories(_: dict = Depends(require_staff)):
+    return {"ok": True, "categories": TREATMENT_CATEGORIES}
+
+
+@app.get("/employees")
+def list_employees(include_inactive: bool = False, _: dict = Depends(require_staff)):
+    conn = get_db()
+    where = "" if include_inactive else "WHERE is_active = 1"
+    rows = conn.execute(f"SELECT * FROM employees {where} ORDER BY is_active DESC, full_name").fetchall()
+    employees = [employee_response(conn, row) for row in rows]
+    conn.close()
+    return {"ok": True, "employees": employees, "categories": TREATMENT_CATEGORIES}
+
+
+@app.post("/employees", status_code=201)
+def create_employee(body: EmployeeCreate, current_user: dict = Depends(require_admin)):
+    full_name, phone, specialties = validate_employee_payload(body.full_name, body.phone, body.specialties)
+    conn = get_db()
+    existing = conn.execute("SELECT id FROM employees WHERE lower(full_name) = lower(?)", (full_name,)).fetchone()
+    if existing:
+        conn.close()
+        raise HTTPException(status_code=409, detail="כבר קיים/ת עובד/ת בשם הזה")
+    cursor = conn.execute(
+        "INSERT INTO employees (full_name, phone, is_active) VALUES (?, ?, ?)",
+        (full_name, phone, 1 if body.is_active else 0),
+    )
+    employee_id = cursor.lastrowid
+    set_employee_specialties(conn, employee_id, specialties)
+    conn.commit()
+    row = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+    employee = employee_response(conn, row)
+    conn.close()
+    log_audit("employee created", current_user, "employee", employee_id, full_name)
+    return {"ok": True, "message": "העובד/ת נוסף/ה בהצלחה", "employee": employee}
+
+
+@app.put("/employees/{employee_id}")
+def update_employee(employee_id: int, body: EmployeeUpdate, current_user: dict = Depends(require_admin)):
+    conn = get_db()
+    row = get_employee_or_404(conn, employee_id)
+    full_name = body.full_name.strip() if body.full_name is not None else row["full_name"]
+    phone = validate_phone(body.phone) if body.phone is not None and body.phone else (body.phone if body.phone == "" else row["phone"] or "")
+    specialties = validate_specialties(body.specialties) if body.specialties is not None else None
+    if not full_name:
+        conn.close()
+        raise HTTPException(status_code=400, detail="שם מלא הוא שדה חובה")
+    duplicate = conn.execute(
+        "SELECT id FROM employees WHERE lower(full_name) = lower(?) AND id != ?",
+        (full_name, employee_id),
+    ).fetchone()
+    if duplicate:
+        conn.close()
+        raise HTTPException(status_code=409, detail="כבר קיים/ת עובד/ת בשם הזה")
+    is_active = int(body.is_active) if body.is_active is not None else row["is_active"]
+    conn.execute(
+        """UPDATE employees
+           SET full_name = ?, phone = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ?""",
+        (full_name, phone or "", is_active, employee_id),
+    )
+    if specialties is not None:
+        set_employee_specialties(conn, employee_id, specialties)
+    conn.commit()
+    updated = conn.execute("SELECT * FROM employees WHERE id = ?", (employee_id,)).fetchone()
+    employee = employee_response(conn, updated)
+    conn.close()
+    log_audit("employee updated", current_user, "employee", employee_id, full_name)
+    return {"ok": True, "message": "פרטי העובד/ת עודכנו בהצלחה", "employee": employee}
+
+
+@app.get("/employee-shifts")
+def get_employee_shifts(week_start: str, include_inactive: bool = False, _: dict = Depends(require_staff)):
+    start = parse_iso_date(week_start, "week_start")
+    normalized_week_start = start.strftime("%Y-%m-%d")
+    week_dates = [(start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+    conn = get_db()
+    where = "" if include_inactive else "WHERE is_active = 1"
+    employee_rows = conn.execute(f"SELECT * FROM employees {where} ORDER BY is_active DESC, full_name").fetchall()
+    block_rows = conn.execute(
+        """SELECT b.*, e.full_name AS employee_name
+           FROM employee_shift_blocks b
+           JOIN employees e ON e.id = b.employee_id
+           WHERE b.shift_date BETWEEN ? AND ?
+           ORDER BY e.full_name, b.shift_date, b.start_time""",
+        (week_dates[0], week_dates[-1]),
+    ).fetchall()
+    employees = [employee_response(conn, row) for row in employee_rows]
+    conn.close()
+    return {
+        "ok": True,
+        "week_start": normalized_week_start,
+        "week_end": week_dates[-1],
+        "employees": employees,
+        "shift_blocks": [shift_block_response(row) for row in block_rows],
+        "shifts": [shift_block_response(row) for row in block_rows],
+        "has_shifts": len(block_rows) > 0,
+    }
+
+
+@app.put("/employee-shifts/week")
+def save_employee_shift_week(body: EmployeeShiftWeekSave, current_user: dict = Depends(require_admin)):
+    week_start = parse_iso_date(body.week_start, "week_start")
+    normalized_week_start = week_start.strftime("%Y-%m-%d")
+    week_dates = [(week_start + timedelta(days=i)).strftime("%Y-%m-%d") for i in range(7)]
+    conn = get_db()
+    validated = validate_shift_blocks(conn, body.shift_blocks, set(week_dates))
+    active_employees = conn.execute("SELECT * FROM employees WHERE is_active = 1 ORDER BY full_name").fetchall()
+    conflicts = detect_shift_conflicts(conn, validated, week_dates, active_employees)
+    if conflicts and not body.force_conflicts:
+        conn.close()
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "message": "קיימים תורים מחוץ לחלונות העבודה החדשים",
+                "conflicts": conflicts,
+            },
+        )
+
+    # Replace the selected week for active employees, then insert sorted blocks.
+    employee_ids = [row["id"] for row in active_employees]
+    if employee_ids:
+        placeholders = ",".join("?" for _ in employee_ids)
+        conn.execute(
+            f"""DELETE FROM employee_shift_blocks
+                WHERE shift_date BETWEEN ? AND ? AND employee_id IN ({placeholders})""",
+            [week_dates[0], week_dates[-1], *employee_ids],
+        )
+    for block in validated:
+        conn.execute(
+            """INSERT INTO employee_shift_blocks
+               (employee_id, shift_date, start_time, end_time)
+               VALUES (?, ?, ?, ?)""",
+            (block["employee_id"], block["shift_date"], block["start_time"], block["end_time"]),
+        )
+    conn.commit()
+    rows = conn.execute(
+        """SELECT b.*, e.full_name AS employee_name
+           FROM employee_shift_blocks b
+           JOIN employees e ON e.id = b.employee_id
+           WHERE b.shift_date BETWEEN ? AND ?
+           ORDER BY e.full_name, b.shift_date, b.start_time""",
+        (normalized_week_start, add_days_iso(normalized_week_start, 6)),
+    ).fetchall()
+    conn.close()
+    log_audit("employee shift blocks saved", current_user, "employee_shift_blocks", None, "", normalized_week_start)
+    return {
+        "ok": True,
+        "message": "המשמרות נשמרו בהצלחה",
+        "week_start": normalized_week_start,
+        "shift_blocks": [shift_block_response(row) for row in rows],
+        "conflicts": conflicts,
+    }
 
 
 @app.get("/appointments")
@@ -3165,7 +1228,6 @@ def list_appointments(_: dict = Depends(require_staff)):
 def create_appointment(appt: AppointmentCreate, _: dict = Depends(require_staff)):
     conn = get_db()
     normalized_phone = normalize_phone_for_match(appt.client_phone)
-    # Customer-appointment linking logic: match by normalized phone before saving.
     matched_customer = find_customer_by_phone(conn, appt.client_phone)
     cursor = conn.execute(
         """INSERT INTO appointments
@@ -3227,9 +1289,7 @@ def reschedule_appointment(appt_id: int, data: AppointmentReschedule, _: dict = 
 @app.get("/appointments/analytics-legacy")
 def get_analytics(_: dict = Depends(require_staff)):
     conn = get_db()
-
     total = conn.execute("SELECT COUNT(*) as c FROM appointments").fetchone()["c"]
-
     by_treatment = conn.execute("""
         SELECT treatment_name, COUNT(*) as count
         FROM appointments
@@ -3237,7 +1297,6 @@ def get_analytics(_: dict = Depends(require_staff)):
         ORDER BY count DESC
         LIMIT 10
     """).fetchall()
-
     by_day = conn.execute("""
         SELECT strftime('%w', date) as day_num, COUNT(*) as count
         FROM appointments
@@ -3245,7 +1304,6 @@ def get_analytics(_: dict = Depends(require_staff)):
         GROUP BY day_num
         ORDER BY day_num
     """).fetchall()
-
     by_hour = conn.execute("""
         SELECT substr(time, 1, 2) as hour, COUNT(*) as count
         FROM appointments
@@ -3253,15 +1311,11 @@ def get_analytics(_: dict = Depends(require_staff)):
         GROUP BY hour
         ORDER BY hour
     """).fetchall()
-
     recent = conn.execute("""
         SELECT * FROM appointments ORDER BY created_at DESC LIMIT 5
     """).fetchall()
-
     conn.close()
-
     day_names = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
-
     return {
         "total": total,
         "by_treatment": [{"name": r["treatment_name"], "count": r["count"]} for r in by_treatment],
@@ -3400,43 +1454,30 @@ def get_business_analytics(
     }
     categories = {}
     total_revenue = 0.0
-    has_revenue = bool(appointment_revenue_col or treatment_revenue_col)
 
     for row in analytics_rows:
-        appointment_date = _parse_appointment_date(row["date"])
-        revenue = _safe_float(row["appointment_revenue_value"]) or _safe_float(row["treatment_revenue_value"])
-        total_revenue += revenue
-
-        if appointment_date:
-            key = _month_key(appointment_date)
+        dt = _parse_appointment_date(row["date"])
+        if dt:
+            key = _month_key(dt)
             if key in monthly:
                 monthly[key]["count"] += 1
-                monthly[key]["revenue"] += revenue
-
-        category = (
-            row["treatment_class_name"]
-            or row["treatment_category"]
-            or row["treatment_name"]
-            or "ללא קטגוריה"
-        )
-        item = categories.setdefault(category, {"category": category, "count": 0, "revenue": 0.0})
-        item["count"] += 1
-        item["revenue"] += revenue
+        rev = _safe_float(row["appointment_revenue_value"]) or _safe_float(row["treatment_revenue_value"])
+        total_revenue += rev
+        if dt and key in monthly:
+            monthly[key]["revenue"] += rev
+        cat = row["treatment_class_name"] or "אחר"
+        categories[cat] = categories.get(cat, 0) + 1
 
     monthly_trend = list(monthly.values())
-    last_count = monthly_trend[-1]["count"] if monthly_trend else 0
-    prev_count = monthly_trend[-2]["count"] if len(monthly_trend) >= 2 else 0
-    if prev_count > 0:
-        monthly_growth_pct = round(((last_count - prev_count) / prev_count) * 100, 1)
-    elif last_count > 0:
-        monthly_growth_pct = 100.0
-    else:
-        monthly_growth_pct = 0.0
+    prev_month = monthly_trend[-2]["count"] if len(monthly_trend) >= 2 else 0
+    curr_month = monthly_trend[-1]["count"] if monthly_trend else 0
+    growth_pct = ((curr_month - prev_month) / prev_month * 100) if prev_month else 0.0
 
-    by_category = sorted(categories.values(), key=lambda item: item["count"], reverse=True)
-    for item in by_category:
-        item["percentage"] = round((item["count"] / total) * 100, 1) if total else 0
-        item["revenue"] = round(item["revenue"], 2)
+    by_category = sorted(
+        [{"category": k, "count": v} for k, v in categories.items()],
+        key=lambda x: x["count"],
+        reverse=True,
+    )
 
     day_names = ["ראשון", "שני", "שלישי", "רביעי", "חמישי", "שישי", "שבת"]
 
@@ -3444,13 +1485,10 @@ def get_business_analytics(
         "total": total,
         "today": today_count,
         "this_week": this_week_count,
-        "total_revenue": round(total_revenue, 2),
-        "has_revenue": has_revenue,
-        "monthly_growth_pct": monthly_growth_pct,
-        "monthly_trend": [
-            {**item, "revenue": round(item["revenue"], 2)}
-            for item in monthly_trend
-        ],
+        "total_revenue": total_revenue,
+        "has_revenue": total_revenue > 0,
+        "monthly_growth_pct": round(growth_pct, 1),
+        "monthly_trend": monthly_trend,
         "by_category": by_category,
         "top_category": by_category[0] if by_category else None,
         "least_category": by_category[-1] if by_category else None,
@@ -3490,111 +1528,6 @@ def get_appointments_by_category_analytics(
         "top_category": data["top_category"],
         "least_category": data["least_category"],
     }
-
-# ------------------------------------------------------------
-# Recommendation engine
-# ------------------------------------------------------------
-
-def score_treatment(treatment: dict, profile: dict) -> float:
-    text = " ".join(filter(None, [
-        treatment.get("suitable_for_all_skins", ""),
-        treatment.get("keywords", ""),
-        treatment.get("aftercare", ""),
-        treatment.get("results_timing", ""),
-        treatment.get("category", ""),
-        treatment.get("class_name", ""),
-    ])).lower()
-
-    limitations = (treatment.get("medical_limitations") or "").lower()
-    pregnancy_text = (treatment.get("pregnancy_breastfeeding") or "").lower()
-
-    score = 0.0
-
-    goal = (profile.get("goal") or "").lower()
-    if goal and goal in text:
-        score += 3.0
-
-    skin_type = (profile.get("skin_type") or "").lower()
-    if skin_type and skin_type in text:
-        score += 2.5
-
-    age = (profile.get("age_range") or "").lower()
-    if age and age in text:
-        score += 1.0
-
-    area = (profile.get("area") or "").lower()
-    if area and area in text:
-        score += 2.0
-
-    skin_tone = (profile.get("skin_tone") or "").lower()
-    if skin_tone:
-        if skin_tone in limitations:
-            score -= 5.0
-        elif skin_tone in text:
-            score += 1.5
-
-    pregnant = profile.get("pregnant", "")
-    if pregnant == "כן":
-        if "הריון" in limitations or "הנקה" in limitations:
-            score -= 10.0
-        if pregnancy_text and "לא" in pregnancy_text:
-            score -= 5.0
-
-    return score
-
-
-@app.get("/recommendations")
-def get_recommendations(
-    exclude_id: Optional[str] = None,
-    limit: int = 4,
-    current_user: Optional[dict] = Depends(get_current_user),
-):
-    profile = {}
-    preferred_category = None
-
-    if current_user:
-        conn = get_db()
-        row = conn.execute(
-            "SELECT skin_profile, category FROM chat_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 1",
-            (current_user["id"],),
-        ).fetchone()
-        conn.close()
-        if row:
-            profile = json.loads(row["skin_profile"] or "{}")
-            preferred_category = row["category"]
-
-    candidates = [t for t in TREATMENTS if t["id"] != exclude_id]
-
-    if profile:
-        scored = [(t, score_treatment(t, profile)) for t in candidates]
-        scored.sort(key=lambda x: x[1], reverse=True)
-        top = [t for t, s in scored if s > 0][:limit]
-        if len(top) < limit:
-            extras = [t for t, _ in scored if t not in top][: limit - len(top)]
-            top = top + extras
-    else:
-        conn = get_db()
-        rows = conn.execute(
-            "SELECT treatment_id, COUNT(*) as cnt FROM appointments GROUP BY treatment_id ORDER BY cnt DESC LIMIT 20"
-        ).fetchall()
-        conn.close()
-        popular_ids = {r["treatment_id"] for r in rows}
-        popular = [t for t in candidates if t["id"] in popular_ids]
-        rest = [t for t in candidates if t["id"] not in popular_ids]
-        if preferred_category:
-            rest = sorted(rest, key=lambda t: 0 if t.get("class_name") == preferred_category else 1)
-        top = (popular + rest)[:limit]
-
-    return [
-        {
-            "id": t["id"],
-            "name": t["name"],
-            "class_name": t.get("class_name", ""),
-            "category": t.get("category", ""),
-            "description": (t.get("suitable_for_all_skins") or t.get("aftercare") or "")[:100],
-        }
-        for t in top
-    ]
 
 
 # ------------------------------------------------------------
@@ -3848,7 +1781,6 @@ def start_customer_password_reset(body: PasswordResetStartRequest):
     )
     conn.commit()
     conn.close()
-    # Development flow: replace this print/response code with real SMS/email sending later.
     print(f"[password reset] Customer {row['username']} temporary code: {code}")
     return {
         "ok": True,
@@ -3935,7 +1867,7 @@ def bootstrap_admin_info():
     conn.close()
     return {
         "ok": True,
-        "message": "Use POST /auth/staff/bootstrap-admin with JSON username, password, full_name, and optional email. Opening this URL in a browser sends GET and will not create an admin.",
+        "message": "Use POST /auth/staff/bootstrap-admin with JSON username, password, full_name, and optional email.",
         "admin_exists": admin_count > 0,
     }
 
@@ -3985,13 +1917,7 @@ def get_me(current_user: Optional[dict] = Depends(get_current_user)):
 def _read_system_settings(conn: sqlite3.Connection) -> dict:
     settings = dict(DEFAULT_SYSTEM_SETTINGS)
     rows = conn.execute("SELECT key, value FROM system_settings").fetchall()
-    for row in rows:
-        value = str(row["value"] or "").strip()
-        if not value:
-            continue
-        if row["key"] == "email" and value.endswith("@meday.local"):
-            continue
-        settings[row["key"]] = value
+    settings.update({row["key"]: row["value"] for row in rows})
     return settings
 
 
@@ -4132,15 +2058,13 @@ def update_account_settings(body: AccountSettingsUpdate, current_user: dict = De
     conn = get_db()
 
     if user_type == "staff":
-      row = conn.execute("SELECT * FROM staff_users WHERE id = ? AND active = 1", (current_user["id"],)).fetchone()
-      table = "staff_users"
-      display_name_col = "full_name"
-      exclude_type = "staff"
+        row = conn.execute("SELECT * FROM staff_users WHERE id = ? AND active = 1", (current_user["id"],)).fetchone()
+        table = "staff_users"
+        exclude_type = "staff"
     else:
-      row = conn.execute("SELECT * FROM customer_users WHERE id = ? AND active = 1", (current_user["id"],)).fetchone()
-      table = "customer_users"
-      display_name_col = "full_name"
-      exclude_type = "customer"
+        row = conn.execute("SELECT * FROM customer_users WHERE id = ? AND active = 1", (current_user["id"],)).fetchone()
+        table = "customer_users"
+        exclude_type = "customer"
 
     if not row:
         conn.close()
@@ -4258,7 +2182,6 @@ def get_customer_appointments(current_user: dict = Depends(require_authenticated
     if not normalized_phone:
         conn.close()
         return {"ok": True, "appointments": []}
-    # Customer appointments are loaded by saved customer link first, with normalized phone fallback for old rows.
     rows = conn.execute(
         """SELECT id, client_name, client_phone, treatment_id, treatment_name, employee_name,
                   date, time, end_time, status, notes, created_at
@@ -4291,10 +2214,7 @@ def list_staff_users(_: dict = Depends(require_admin)):
         "SELECT * FROM staff_users WHERE role = 'secretary' ORDER BY full_name, username"
     ).fetchall()
     conn.close()
-    return {
-        "ok": True,
-        "users": [staff_user_response(row) for row in rows],
-    }
+    return {"ok": True, "users": [staff_user_response(row) for row in rows]}
 
 
 @app.post("/admin/secretaries", status_code=201)
@@ -4366,11 +2286,7 @@ def create_staff_user(body: StaffUserCreate, current_user: dict = Depends(requir
         raise HTTPException(status_code=409, detail="Username already exists")
     conn.close()
     log_audit("secretary created", current_user, "staff", row["id"], row["username"])
-    return {
-        "ok": True,
-        "message": "Secretary user created successfully",
-        "user": staff_user_response(row),
-    }
+    return {"ok": True, "message": "Secretary user created successfully", "user": staff_user_response(row)}
 
 
 @app.put("/admin/secretaries/{secretary_id}")
@@ -4379,8 +2295,7 @@ def update_secretary(secretary_id: int, body: StaffUserUpdate, current_user: dic
         raise HTTPException(status_code=403, detail="Admins can only update secretary users from this endpoint")
     conn = get_db()
     row = conn.execute(
-        "SELECT * FROM staff_users WHERE id = ? AND role = 'secretary'",
-        (secretary_id,),
+        "SELECT * FROM staff_users WHERE id = ? AND role = 'secretary'", (secretary_id,)
     ).fetchone()
     if not row:
         conn.close()
@@ -4430,8 +2345,7 @@ def update_staff_user(staff_user_id: int, body: StaffUserUpdate, current_user: d
         raise HTTPException(status_code=403, detail="Admins can only update secretary users from this endpoint")
     conn = get_db()
     row = conn.execute(
-        "SELECT * FROM staff_users WHERE id = ? AND role = 'secretary'",
-        (staff_user_id,),
+        "SELECT * FROM staff_users WHERE id = ? AND role = 'secretary'", (staff_user_id,)
     ).fetchone()
     if not row:
         conn.close()
@@ -4472,19 +2386,14 @@ def update_staff_user(staff_user_id: int, body: StaffUserUpdate, current_user: d
         log_audit("username changed", current_user, "staff", staff_user_id, username, f"{row['username']} -> {username}")
     if body.password:
         log_audit("password changed", current_user, "staff", staff_user_id, username)
-    return {
-        "ok": True,
-        "message": "Secretary user updated successfully",
-        "user": staff_user_response(updated),
-    }
+    return {"ok": True, "message": "Secretary user updated successfully", "user": staff_user_response(updated)}
 
 
 @app.delete("/admin/secretaries/{secretary_id}")
 def delete_secretary(secretary_id: int, current_user: dict = Depends(require_admin)):
     conn = get_db()
     row = conn.execute(
-        "SELECT id, username FROM staff_users WHERE id = ? AND role = 'secretary'",
-        (secretary_id,),
+        "SELECT id, username FROM staff_users WHERE id = ? AND role = 'secretary'", (secretary_id,)
     ).fetchone()
     if not row:
         conn.close()
@@ -4500,8 +2409,7 @@ def delete_secretary(secretary_id: int, current_user: dict = Depends(require_adm
 def delete_staff_user(staff_user_id: int, current_user: dict = Depends(require_admin)):
     conn = get_db()
     row = conn.execute(
-        "SELECT id, username FROM staff_users WHERE id = ? AND role = 'secretary'",
-        (staff_user_id,),
+        "SELECT id, username FROM staff_users WHERE id = ? AND role = 'secretary'", (staff_user_id,)
     ).fetchone()
     if not row:
         conn.close()
@@ -4641,61 +2549,6 @@ def get_audit_log(limit: int = 100, _: dict = Depends(require_admin)):
     ).fetchall()
     conn.close()
     return {"ok": True, "items": [dict(row) for row in rows]}
-
-
-# ------------------------------------------------------------
-# Chat session endpoints
-# ------------------------------------------------------------
-
-class SaveSessionRequest(BaseModel):
-    messages: List[Dict]
-    skin_profile: Optional[Dict] = None
-    category: Optional[str] = None
-
-
-@app.post("/chat-sessions")
-def save_chat_session(
-    body: SaveSessionRequest,
-    current_user: Optional[dict] = Depends(get_current_user),
-):
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    conn = get_db()
-    cursor = conn.execute(
-        "INSERT INTO chat_sessions (user_id, messages, skin_profile, category) VALUES (?, ?, ?, ?)",
-        (
-            current_user["id"],
-            json.dumps(body.messages, ensure_ascii=False),
-            json.dumps(body.skin_profile or {}, ensure_ascii=False),
-            body.category,
-        ),
-    )
-    conn.commit()
-    session_id = cursor.lastrowid
-    conn.close()
-    return {"id": session_id}
-
-
-@app.get("/chat-sessions")
-def get_chat_sessions(current_user: Optional[dict] = Depends(get_current_user)):
-    if not current_user:
-        raise HTTPException(status_code=401, detail="Authentication required")
-
-    conn = get_db()
-    rows = conn.execute(
-        "SELECT * FROM chat_sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT 20",
-        (current_user["id"],),
-    ).fetchall()
-    conn.close()
-
-    sessions = []
-    for row in rows:
-        s = dict(row)
-        s["messages"] = json.loads(s["messages"])
-        s["skin_profile"] = json.loads(s.get("skin_profile") or "{}")
-        sessions.append(s)
-    return sessions
 
 
 if __name__ == "__main__":
