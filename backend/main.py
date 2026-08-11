@@ -16,8 +16,12 @@ import secrets
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from chatbot_config import MAX_CHAT_MESSAGE_CHARS
+import psycopg
+from psycopg.rows import dict_row
 
 load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 
 # ------------------------------------------------------------
 # Auth config
@@ -491,6 +495,14 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
+def get_postgres_db():
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not configured")
+
+    return psycopg.connect(
+        DATABASE_URL,
+        row_factory=dict_row,
+    )
 
 def init_db():
     conn = get_db()
