@@ -1,29 +1,8 @@
+import { API_BASE_URL } from "./config";
+import { getAuthToken } from "./authApi";
+
 const CONTACT_INQUIRIES_STORAGE_KEY = "meday.contactInquiries";
 const CONTACT_INQUIRY_EVENT = "meday:contact-inquiries-updated";
-
-function canUseStorage() {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
-}
-
-function readInquiries() {
-  if (!canUseStorage()) return [];
-
-  try {
-    const raw = window.localStorage.getItem(CONTACT_INQUIRIES_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map(normalizeInquiry);
-  } catch {
-    return [];
-  }
-}
-
-function writeInquiries(inquiries) {
-  if (!canUseStorage()) return;
-  const normalized = inquiries.map(normalizeInquiry);
-  window.localStorage.setItem(CONTACT_INQUIRIES_STORAGE_KEY, JSON.stringify(normalized));
-  window.dispatchEvent(new CustomEvent(CONTACT_INQUIRY_EVENT, { detail: normalized }));
-}
 
 function createInquiryId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -33,25 +12,36 @@ function createInquiryId() {
 }
 
 function normalizeInquiry(inquiry) {
-  const feedbackNotes = Array.isArray(inquiry.feedbackNotes) ? inquiry.feedbackNotes : [];
-  const legacyNote = String(inquiry.staffNote || "").trim();
-  const normalizedNotes = feedbackNotes.map((note) => ({
-    id: note.id || createInquiryId(),
-    text: String(note.text || "").trim(),
-    createdAt: note.createdAt || inquiry.createdAt || new Date().toISOString(),
-  })).filter((note) => note.text);
+  const feedbackNotes = Array.isArray(inquiry.feedbackNotes)
+    ? inquiry.feedbackNotes
+    : [];
 
   return {
     ...inquiry,
     status: inquiry.status || "new",
-    feedbackNotes: legacyNote && normalizedNotes.length === 0
-      ? [{ id: createInquiryId(), text: legacyNote, createdAt: inquiry.createdAt || new Date().toISOString() }]
-      : normalizedNotes,
+    feedbackNotes,
   };
 }
 
-export function saveContactInquiry({ fullName, phone, message }) {
-  const inquiry = {
+function dispatchUpdate(data) {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(CONTACT_INQUIRY_EVENT, { detail: data })
+    );
+  }
+}
+
+function staffHeaders() {
+  const token = getAuthToken();
+
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+export async function saveContactInquiry({ fullName, phone, message }) {
+  const inquiry = normalizeInquiry({
     id: createInquiryId(),
     fullName: String(fullName || "").trim(),
     phone: String(phone || "").trim(),
@@ -59,52 +49,100 @@ export function saveContactInquiry({ fullName, phone, message }) {
     createdAt: new Date().toISOString(),
     status: "new",
     feedbackNotes: [],
-  };
+  });
 
-  const inquiries = [inquiry, ...readInquiries()];
-  writeInquiries(inquiries);
-  return inquiry;
+  const response = await fetch(`${API_BASE_URL}/contact-inquiries`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: inquiry.id,
+      data: inquiry,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to save contact inquiry");
+  }
+
+  const saved = normalizeInquiry(await response.json());
+  dispatchUpdate(saved);
+  return saved;
 }
 
-export function getContactInquiries() {
-  return readInquiries();
+export async function getContactInquiries() {
+  const response = await fetch(`${API_BASE_URL}/contact-inquiries`, {
+    headers: staffHeaders(),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) return [];
+    throw new Error("Failed to load contact inquiries");
+  }
+
+  const data = await response.json();
+  return Array.isArray(data) ? data.map(normalizeInquiry) : [];
 }
 
-export function updateContactInquiryStatus(id, status) {
-  const inquiries = readInquiries();
-  const updated = inquiries.map((inquiry) =>
-    inquiry.id === id ? { ...inquiry, status } : inquiry
+async function saveUpdatedInquiry(inquiry) {
+  const response = await fetch(
+    `${API_BASE_URL}/contact-inquiries/${encodeURIComponent(inquiry.id)}`,
+    {
+      method: "PUT",
+      headers: staffHeaders(),
+      body: JSON.stringify({ data: inquiry }),
+    }
   );
-  writeInquiries(updated);
-  return updated.find((inquiry) => inquiry.id === id) ?? null;
+
+  if (!response.ok) {
+    throw new Error("Failed to update contact inquiry");
+  }
+
+  const saved = normalizeInquiry(await response.json());
+  dispatchUpdate(saved);
+  return saved;
 }
 
-export function updateContactInquiryNote(id, note) {
-  const inquiries = readInquiries();
-  const updated = inquiries.map((inquiry) =>
-    inquiry.id === id ? { ...inquiry, feedbackNotes: note ? [{ id: createInquiryId(), text: String(note), createdAt: new Date().toISOString() }, ...(inquiry.feedbackNotes || [])] : inquiry.feedbackNotes || [] } : inquiry
-  );
-  writeInquiries(updated);
-  return updated.find((inquiry) => inquiry.id === id) ?? null;
+export async function updateContactInquiryStatus(id, status) {
+  const inquiries = await getContactInquiries();
+  const inquiry = inquiries.find((item) => item.id === id);
+
+  if (!inquiry) return null;
+
+  return saveUpdatedInquiry({
+    ...inquiry,
+    status,
+  });
 }
 
-export function addContactInquiryFeedback(id, noteText) {
+export async function updateContactInquiryNote(id, note) {
+  return addContactInquiryFeedback(id, note);
+}
+
+export async function addContactInquiryFeedback(id, noteText) {
   const text = String(noteText || "").trim();
   if (!text) return null;
+
+  const inquiries = await getContactInquiries();
+  const inquiry = inquiries.find((item) => item.id === id);
+
+  if (!inquiry) return null;
 
   const feedbackNote = {
     id: createInquiryId(),
     text,
     createdAt: new Date().toISOString(),
   };
-  const inquiries = readInquiries();
-  const updated = inquiries.map((inquiry) =>
-    inquiry.id === id
-      ? { ...inquiry, feedbackNotes: [feedbackNote, ...(inquiry.feedbackNotes || [])] }
-      : inquiry
-  );
-  writeInquiries(updated);
-  return updated.find((inquiry) => inquiry.id === id) ?? null;
+
+  return saveUpdatedInquiry({
+    ...inquiry,
+    feedbackNotes: [
+      feedbackNote,
+      ...(inquiry.feedbackNotes || []),
+    ],
+  });
 }
 
-export { CONTACT_INQUIRY_EVENT, CONTACT_INQUIRIES_STORAGE_KEY };
+export {
+  CONTACT_INQUIRY_EVENT,
+  CONTACT_INQUIRIES_STORAGE_KEY,
+};

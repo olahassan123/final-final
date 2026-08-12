@@ -543,7 +543,12 @@ def init_db():
         conn.close()
         return
 
+    # ---------------------------------------------------------
+    # SQLite fallback for local development
+    # ---------------------------------------------------------
+
     conn = get_db()
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS treatments_db (
             id TEXT PRIMARY KEY,
@@ -562,6 +567,7 @@ def init_db():
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS appointments (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -580,6 +586,7 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS employee_shifts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -593,10 +600,12 @@ def init_db():
             UNIQUE(employee_name, shift_date)
         )
     """)
+
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_employee_shifts_date
         ON employee_shifts(shift_date)
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -607,6 +616,7 @@ def init_db():
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS employee_specialties (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -617,6 +627,7 @@ def init_db():
             FOREIGN KEY (employee_id) REFERENCES employees(id)
         )
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS employee_shift_blocks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -630,10 +641,12 @@ def init_db():
             FOREIGN KEY (employee_id) REFERENCES employees(id)
         )
     """)
+
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_employee_shift_blocks_date
         ON employee_shift_blocks(shift_date)
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -645,6 +658,7 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS staff_users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -659,6 +673,7 @@ def init_db():
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS customer_users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -675,6 +690,7 @@ def init_db():
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS audit_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -689,6 +705,7 @@ def init_db():
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS password_reset_codes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -701,6 +718,7 @@ def init_db():
             FOREIGN KEY (customer_id) REFERENCES customer_users(id)
         )
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS system_settings (
             key TEXT PRIMARY KEY,
@@ -708,6 +726,7 @@ def init_db():
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS chat_sessions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -719,37 +738,113 @@ def init_db():
             FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
-    for col in ["end_time", "employee_name", "user_id", "normalized_client_phone", "customer_user_id", "status"]:
+
+    # Contact inquiries submitted from the website.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS contact_inquiries (
+            id TEXT PRIMARY KEY,
+            data TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # Job applications submitted from the recruitment page.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS job_applications (
+            id TEXT PRIMARY KEY,
+            data TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
+    # ---------------------------------------------------------
+    # Backwards-compatible SQLite migrations
+    # ---------------------------------------------------------
+
+    for col in [
+        "end_time",
+        "employee_name",
+        "user_id",
+        "normalized_client_phone",
+        "customer_user_id",
+        "status",
+    ]:
         try:
             if col == "customer_user_id":
-                conn.execute("ALTER TABLE appointments ADD COLUMN customer_user_id INTEGER")
+                conn.execute(
+                    "ALTER TABLE appointments ADD COLUMN customer_user_id INTEGER"
+                )
             elif col == "status":
-                conn.execute("ALTER TABLE appointments ADD COLUMN status TEXT DEFAULT 'scheduled'")
+                conn.execute(
+                    "ALTER TABLE appointments ADD COLUMN status TEXT DEFAULT 'scheduled'"
+                )
             else:
-                conn.execute(f"ALTER TABLE appointments ADD COLUMN {col} TEXT")
+                conn.execute(
+                    f"ALTER TABLE appointments ADD COLUMN {col} TEXT"
+                )
         except Exception:
             pass
+
     for col, ddl in [
-        ("role", "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'customer'"),
-        ("email", "ALTER TABLE staff_users ADD COLUMN email TEXT"),
-        ("phone", "ALTER TABLE staff_users ADD COLUMN phone TEXT"),
-        ("active", "ALTER TABLE staff_users ADD COLUMN active INTEGER DEFAULT 1"),
-        ("updated_at", "ALTER TABLE staff_users ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP"),
-        ("customer_email", "ALTER TABLE customer_users ADD COLUMN email TEXT"),
-        ("customer_phone", "ALTER TABLE customer_users ADD COLUMN phone TEXT"),
-        ("customer_active", "ALTER TABLE customer_users ADD COLUMN active INTEGER DEFAULT 1"),
-        ("customer_updated_at", "ALTER TABLE customer_users ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP"),
+        (
+            "role",
+            "ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'customer'",
+        ),
+        (
+            "email",
+            "ALTER TABLE staff_users ADD COLUMN email TEXT",
+        ),
+        (
+            "phone",
+            "ALTER TABLE staff_users ADD COLUMN phone TEXT",
+        ),
+        (
+            "active",
+            "ALTER TABLE staff_users ADD COLUMN active INTEGER DEFAULT 1",
+        ),
+        (
+            "updated_at",
+            "ALTER TABLE staff_users ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP",
+        ),
+        (
+            "customer_email",
+            "ALTER TABLE customer_users ADD COLUMN email TEXT",
+        ),
+        (
+            "customer_phone",
+            "ALTER TABLE customer_users ADD COLUMN phone TEXT",
+        ),
+        (
+            "customer_active",
+            "ALTER TABLE customer_users ADD COLUMN active INTEGER DEFAULT 1",
+        ),
+        (
+            "customer_updated_at",
+            "ALTER TABLE customer_users ADD COLUMN updated_at TEXT DEFAULT CURRENT_TIMESTAMP",
+        ),
     ]:
         try:
             conn.execute(ddl)
         except Exception:
             pass
+
+    # ---------------------------------------------------------
+    # Default employees + specialties
+    # ---------------------------------------------------------
+
     for employee in DEFAULT_EMPLOYEES:
         conn.execute(
             "INSERT OR IGNORE INTO employees (full_name, phone, is_active) VALUES (?, '', 1)",
             (employee["full_name"],),
         )
-        row = conn.execute("SELECT id FROM employees WHERE full_name = ?", (employee["full_name"],)).fetchone()
+
+        row = conn.execute(
+            "SELECT id FROM employees WHERE full_name = ?",
+            (employee["full_name"],),
+        ).fetchone()
+
         if row:
             for specialty in employee["specialties"]:
                 conn.execute(
@@ -757,33 +852,57 @@ def init_db():
                     (row["id"], specialty),
                 )
 
-    # Migrate the previous one-shift-per-day table into split shift blocks once, preserving old data.
+    # ---------------------------------------------------------
+    # Migrate old employee_shifts into employee_shift_blocks
+    # ---------------------------------------------------------
+
     try:
         old_rows = conn.execute(
-            """SELECT employee_name, shift_date, start_time, end_time
-               FROM employee_shifts
-               WHERE is_working = 1 AND start_time IS NOT NULL AND end_time IS NOT NULL"""
+            """
+            SELECT employee_name, shift_date, start_time, end_time
+            FROM employee_shifts
+            WHERE is_working = 1
+              AND start_time IS NOT NULL
+              AND end_time IS NOT NULL
+            """
         ).fetchall()
+
         for old in old_rows:
             employee = conn.execute(
                 "SELECT id FROM employees WHERE full_name = ?",
                 (old["employee_name"],),
             ).fetchone()
+
             if not employee:
                 continue
+
             conn.execute(
-                """INSERT OR IGNORE INTO employee_shift_blocks
-                   (employee_id, shift_date, start_time, end_time)
-                   VALUES (?, ?, ?, ?)""",
-                (employee["id"], old["shift_date"], old["start_time"], old["end_time"]),
+                """
+                INSERT OR IGNORE INTO employee_shift_blocks
+                    (employee_id, shift_date, start_time, end_time)
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    employee["id"],
+                    old["shift_date"],
+                    old["start_time"],
+                    old["end_time"],
+                ),
             )
+
     except Exception:
         pass
+
+    # ---------------------------------------------------------
+    # Default system settings
+    # ---------------------------------------------------------
+
     for key, value in DEFAULT_SYSTEM_SETTINGS.items():
         conn.execute(
             "INSERT OR IGNORE INTO system_settings (key, value) VALUES (?, ?)",
             (key, value),
         )
+
     conn.commit()
     conn.close()
 
@@ -2599,6 +2718,146 @@ def get_audit_log(limit: int = 100, _: dict = Depends(require_admin)):
     ).fetchall()
     conn.close()
     return {"ok": True, "items": [dict(row) for row in rows]}
+
+class SharedRecordCreate(BaseModel):
+    id: str
+    data: dict
+
+
+class SharedRecordUpdate(BaseModel):
+    data: dict
+
+
+def _shared_records(table_name: str):
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            f"SELECT id, data, created_at, updated_at FROM {table_name} ORDER BY created_at DESC"
+        ).fetchall()
+
+        result = []
+        for row in rows:
+            data = row["data"]
+
+            # PostgreSQL JSONB already returns a dict.
+            # SQLite fallback may return JSON text.
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except Exception:
+                    data = {}
+
+            result.append(data)
+
+        return result
+    finally:
+        conn.close()
+
+
+def _create_shared_record(table_name: str, body: SharedRecordCreate):
+    conn = get_db()
+    try:
+        payload = dict(body.data)
+        payload["id"] = body.id
+
+        if DATABASE_URL:
+            conn.execute(
+                f"""
+                INSERT INTO {table_name} (id, data, created_at, updated_at)
+                VALUES (?, ?::jsonb, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ON CONFLICT(id) DO UPDATE SET
+                    data = EXCLUDED.data,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (body.id, json.dumps(payload, ensure_ascii=False)),
+            )
+        else:
+            # Local SQLite fallback.
+            conn.execute(
+                f"""
+                INSERT OR REPLACE INTO {table_name}
+                (id, data, created_at, updated_at)
+                VALUES (?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """,
+                (body.id, json.dumps(payload, ensure_ascii=False)),
+            )
+
+        conn.commit()
+        return payload
+    finally:
+        conn.close()
+
+
+def _update_shared_record(table_name: str, record_id: str, body: SharedRecordUpdate):
+    conn = get_db()
+    try:
+        payload = dict(body.data)
+        payload["id"] = record_id
+
+        if DATABASE_URL:
+            cursor = conn.execute(
+                f"""
+                UPDATE {table_name}
+                SET data = ?::jsonb, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (json.dumps(payload, ensure_ascii=False), record_id),
+            )
+        else:
+            cursor = conn.execute(
+                f"""
+                UPDATE {table_name}
+                SET data = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+                """,
+                (json.dumps(payload, ensure_ascii=False), record_id),
+            )
+
+        conn.commit()
+        return payload
+    finally:
+        conn.close()
+
+
+@app.post("/contact-inquiries", status_code=201)
+def create_contact_inquiry(body: SharedRecordCreate):
+    # Public: website visitors must be able to submit a contact form.
+    return _create_shared_record("contact_inquiries", body)
+
+
+@app.get("/contact-inquiries")
+def list_contact_inquiries(_: dict = Depends(require_staff)):
+    # Staff only.
+    return _shared_records("contact_inquiries")
+
+
+@app.put("/contact-inquiries/{inquiry_id}")
+def update_contact_inquiry(
+    inquiry_id: str,
+    body: SharedRecordUpdate,
+    _: dict = Depends(require_staff),
+):
+    return _update_shared_record("contact_inquiries", inquiry_id, body)
+
+
+@app.post("/job-applications", status_code=201)
+def create_job_application(body: SharedRecordCreate):
+    # Public: applicants don't need a staff account.
+    return _create_shared_record("job_applications", body)
+
+
+@app.get("/job-applications")
+def list_job_applications(_: dict = Depends(require_staff)):
+    return _shared_records("job_applications")
+
+
+@app.put("/job-applications/{application_id}")
+def update_job_application(
+    application_id: str,
+    body: SharedRecordUpdate,
+    _: dict = Depends(require_staff),
+):
+    return _update_shared_record("job_applications", application_id, body)
 
 
 if __name__ == "__main__":
