@@ -1123,3 +1123,66 @@ def test_disambiguation_survives_the_repeat_guard(R, DB):
     resp = R.handle_message(sid, message="ספרי לי על Botox", selected_treatment=sel)
     assert resp.get("buttons"), "the choice must still be offered"
     assert "חוזרת על עצמי" not in (resp.get("reply") or ""), resp.get("reply")
+
+
+# ── Ask, don't guess ─────────────────────────────────────────────────────────
+# A message that survives every handler used to get "I didn't understand", which
+# throws away everything on screen. It now asks which of the currently-valid moves
+# was meant. Deliberately a QUESTION, not a guessed intent: measuring 26 short
+# messages in a category context showed an intent-guessing fallback would have been
+# right 4 times and wrong 11.
+
+def _asks_back(reply):
+    return any(m in reply for m in ("לא בטוחה שהבנתי", "مش متأكدة", "not sure I understood"))
+
+
+@pytest.mark.parametrize("msg", ["מי יש בו", "מה כולל", "ומה עוד?", "רגע", "???"])
+def test_an_unresolved_message_in_a_category_asks_instead_of_giving_up(bot, R, msg):
+    bot.say("טיפולי גוף")
+    resp = bot.say(msg)
+    assert not is_unclear(R, bot.reply), bot.reply
+    assert _asks_back(bot.reply), bot.reply
+    assert resp.get("buttons"), "the question must offer the moves that are valid now"
+
+
+def test_the_category_question_offers_the_moves_on_screen(bot, DB):
+    bot.say("טיפולי גוף")
+    resp = bot.say("מי יש בו")
+    values = [b["value"] for b in (resp.get("buttons") or [])]
+    assert any(v.startswith("__show_category__") for v in values), values
+    assert any(v.startswith("__start_flow__") for v in values), "CAT-04 has a questionnaire"
+
+
+def test_the_treatment_question_names_that_treatment(R, DB):
+    """Unit-level: end to end this rarely fires, because the treatment follow-up
+    handler claims nearly every message while a treatment is on screen (22/22 on
+    the eval set). It is the floor for when that handler declines."""
+    t = DB.get_treatment_by_name("עיסוי שוודי")
+    session = {"last_treatment_id": t["treatment_id"], "recent_context": []}
+    resp = R._context_clarify_reply(session, "he")
+    assert resp and "עיסוי שוודי" in resp["reply"], resp
+    assert resp["buttons"], "it must offer a way out of this treatment"
+
+
+def test_a_cold_unclear_message_is_still_answered_as_unclear(bot, R):
+    """With nothing on screen there is genuinely nothing to ask about — inventing
+    a question there would be worse than admitting we didn't understand."""
+    bot.say("אממ")
+    assert is_unclear(R, bot.reply) or is_scope_decline(R, bot.reply), bot.reply
+    assert not _asks_back(bot.reply), bot.reply
+
+
+def test_asking_back_never_asserts_an_intent(bot, DB):
+    """The safety property: the question must not answer as if an intent was
+    chosen — no treatment list, no card, no claim about the clinic."""
+    bot.say("טיפולי גוף")
+    bot.say("???")
+    for t in DB.get_treatments_in_category("CAT-04")[:5]:
+        assert t["treatment_name"] not in bot.reply, "it answered instead of asking"
+
+
+def test_messages_that_already_had_answers_are_untouched(bot, R):
+    """The change may only affect the give-up path."""
+    bot.say("טיפולי גוף")
+    bot.say("כמה עולה")
+    assert is_price_deflection(R, bot.reply), bot.reply

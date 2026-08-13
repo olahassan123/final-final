@@ -849,8 +849,67 @@ def _unmatched_fallback(message: str, lang: str, session: dict) -> dict:
     if resp:
         return resp
     if _has_active_context(session):
-        return _cant_parse_reply(lang)
+        # Prefer asking about what is on screen over a bare "couldn't parse that".
+        return _context_clarify_reply(session, lang) or _cant_parse_reply(lang)
     return _out_of_scope_reply(lang)
+
+
+# ── Ask, don't guess ─────────────────────────────────────────────────────────
+# When a message survives every handler we have TWO honest options, and only two:
+# say "I didn't understand" (throws the context away), or ask which of the moves
+# that are valid right now they meant. The second is strictly better and, unlike
+# guessing an intent, it cannot be wrong — it asserts nothing.
+#
+# Deliberately NOT a fallback that picks an action: measuring 26 short messages in
+# a category context showed an intent-guessing fallback would be right 4 times and
+# wrong 11. So this asks instead.
+
+def _context_clarify_reply(session: dict, lang: str) -> Optional[dict]:
+    """A clarifying question built from what is actually on screen, or None when
+    there is no context — a cold, contextless message really is unclear, and
+    pretending otherwise would be worse."""
+    treatment = _active_treatment(session)
+    if treatment:
+        name = treatment.get("treatment_name") or ""
+        msgs = {
+            "he": f"לא בטוחה שהבנתי 😊 רוצה לשמוע עוד על {name}, או שאעזור לך למצוא טיפול אחר?",
+            "ar": f"مش متأكدة إني فهمت 😊 بتحبي تسمعي أكتر عن {name}، ولا بساعدك تلاقي علاج تاني؟",
+            "en": f"I'm not sure I understood 😊 Would you like to hear more about {name}, "
+                  f"or shall I help you find another treatment?",
+        }
+        followups = _treatment_followups(treatment, lang)
+        other = {"he": "טיפול אחר", "ar": "علاج تاني", "en": "Another treatment"}
+        return {
+            "reply": msgs.get(lang, msgs["he"]),
+            "buttons": [_button(_L(other, lang), "__pick_category__")],
+            "mode": "general",
+            "suggestions": followups or None,
+            "no_suggest": True,
+        }
+
+    category_id = session.get("last_category_id")
+    cat = get_category_by_id(category_id) if category_id else None
+    if cat:
+        name = cat.get("category_name") or ""
+        msgs = {
+            "he": f"לא בטוחה שהבנתי 😊 רוצה לראות את כל הטיפולים ב{name}, "
+                  f"שאעזור לך לבחור, או משהו אחר?",
+            "ar": f"مش متأكدة إني فهمت 😊 بتحبي تشوفي كل العلاجات بـ{name}، "
+                  f"ولا بساعدك تختاري، ولا إشي تاني؟",
+            "en": f"I'm not sure I understood 😊 Would you like to see all the treatments "
+                  f"in {name}, have me help you choose, or something else?",
+        }
+        show = {"he": "הצגת כל הטיפולים", "ar": "كل العلاجات", "en": "Show all treatments"}
+        choose = {"he": "עזרי לי לבחור", "ar": "ساعديني في الاختيار", "en": "Help me choose"}
+        other = {"he": "משהו אחר", "ar": "إشي تاني", "en": "Something else"}
+        buttons = [_button(_L(show, lang), f"__show_category__:{category_id}")]
+        if cat.get("has_recommendation"):
+            buttons.append(_button(_L(choose, lang), f"__start_flow__:{category_id}"))
+        buttons.append(_button(_L(other, lang), "__pick_category__"))
+        return {"reply": msgs.get(lang, msgs["he"]), "buttons": buttons,
+                "mode": "general", "no_suggest": True}
+
+    return None
 
 
 def _match_forward_topic(message: str):
@@ -3227,7 +3286,8 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
                     locked_treatment = full_treatment
 
     if _should_clarify_before_treatment(message, locked_treatment):
-        resp = _unclear_reply(_unclear_language(message, lang, session))
+        resp = (_context_clarify_reply(session, lang)
+                or _unclear_reply(_unclear_language(message, lang, session)))
         append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
         save_session(session_id, session)
         return resp
