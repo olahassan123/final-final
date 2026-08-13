@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import manicureSlide from "../assets/slide1.jpg";
 import hairSlide from "../assets/slide2.jpg";
 import cosmoSlide from "../assets/Como.jpg";
@@ -8,7 +8,7 @@ import makeupSlide from "../assets/makeup-professional.png";
 import eyebrowsSlide from "../assets/eyebrows.png";
 import personalStylingSlide from "../assets/personal_styling.png";
 import aestheticSlide from "../assets/aesth.png";
-import { Link, Navigate, useParams } from "react-router-dom";
+import { Link, Navigate, useLocation, useParams } from "react-router-dom";
 import {
   ArrowRight, ChevronLeft, Sparkles, Scissors, Heart, Star,
   Zap, Eye, Award, ShieldCheck, Brush, LayoutGrid, Layers, ChevronDown,
@@ -82,12 +82,14 @@ function TreatmentLinkCard({ categorySlug, treatment, sectionTitle, index, accen
 
   return (
     <motion.div
+      id={`treatment-${treatment.slug}`}
       ref={ref}
       initial={{ opacity: 0, y: 45 }}
       animate={inView ? { opacity: 1, y: 0 } : {}}
       transition={{ duration: 0.6, delay: (index % 6) * 0.09, ease: [0.22, 1, 0.36, 1] }}
       onMouseMove={handleMove}
       onMouseLeave={() => { x.set(0); y.set(0); }}
+      className="scroll-mt-28 target:rounded-3xl target:ring-4 target:ring-[#4A9BA8]/40"
       style={{ rotateX, rotateY, transformStyle: "preserve-3d" }}
     >
       <Link
@@ -193,32 +195,42 @@ function CosmeticSectionBlock({ section }) {
       <div className="px-10 py-8 grid grid-cols-1 md:grid-cols-2 gap-x-10 gap-y-8">
         {section.treatments.map((treatment) => {
           const isOpen = openSlug === treatment.slug;
+          const summary = (treatment.summary || "").trim();
+          const detailLines = (treatment.details || [])
+            .map((line) => (line || "").trim())
+            .filter((line) => line && line !== summary);
+          const contentLength = summary.length + detailLines.join(" ").length;
+          const shouldCollapse = detailLines.length > 3 || contentLength > 280;
           return (
-            <div key={treatment.slug} className="text-right">
+            <div
+              id={`treatment-${treatment.slug}`}
+              key={treatment.slug}
+              className="scroll-mt-28 rounded-2xl text-right target:bg-white/60 target:p-4 target:ring-4 target:ring-[#4A9BA8]/40"
+            >
               <h3
                 className="font-black mb-2 leading-snug"
-                style={{ fontSize: "clamp(1rem, 1.3vw, 1.18rem)", color: "#1A0E06" }}
+                style={{ fontSize: "clamp(1.2rem, 1.55vw, 1.38rem)", color: "#1A0E06" }}
               >
                 {treatment.name}
               </h3>
-              <p className="text-sm leading-relaxed mb-3" style={{ color: "#5C4033" }}>
-                {treatment.summary}
+              <p className="mb-3 text-base leading-8" style={{ color: "#5C4033" }}>
+                {summary}
               </p>
 
               {/* expandable details */}
               <AnimatePresence initial={false}>
-                {isOpen && (
+                {(!shouldCollapse || isOpen) && detailLines.length > 0 && (
                   <motion.div
-                    initial={{ height: 0, opacity: 0 }}
+                    initial={shouldCollapse ? { height: 0, opacity: 0 } : false}
                     animate={{ height: "auto", opacity: 1 }}
                     exit={{ height: 0, opacity: 0 }}
                     transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
                     style={{ overflow: "hidden" }}
                   >
-                    <div className="mb-3 space-y-1.5">
-                      {(treatment.details || []).slice(1).map((line, i) => (
-                        <p key={i} className="text-sm leading-relaxed" style={{ color: "#5C4033" }}>
-                          • {line}
+                    <div className="mb-4 space-y-2">
+                      {detailLines.map((line, i) => (
+                        <p key={i} className="text-base leading-8" style={{ color: "#5C4033" }}>
+                          {line}
                         </p>
                       ))}
                     </div>
@@ -227,13 +239,15 @@ function CosmeticSectionBlock({ section }) {
               </AnimatePresence>
 
               {/* read more toggle */}
-              <button
-                onClick={() => setOpenSlug(isOpen ? null : treatment.slug)}
-                className="inline-flex items-center gap-1 text-sm font-semibold mb-4"
-                style={{ color: "#4A9BA8" }}
-              >
-                <span>{isOpen ? "סגור ▲" : "לקרוא עוד ▼"}</span>
-              </button>
+              {shouldCollapse && (
+                <button
+                  onClick={() => setOpenSlug(isOpen ? null : treatment.slug)}
+                  className="mb-4 inline-flex items-center gap-1 text-base font-semibold"
+                  style={{ color: "#4A9BA8" }}
+                >
+                  <span>{isOpen ? "סגור ▲" : "לקרוא עוד ▼"}</span>
+                </button>
+              )}
 
               {/* CTA — bordered style */}
               <div>
@@ -380,7 +394,20 @@ function PromoDescriptionBlock({ heading, paragraphs }) {
 /* ── page ─────────────────────────────────────────────────────── */
 export default function ServiceCategoryPage() {
   const { categorySlug } = useParams();
+  const { hash } = useLocation();
   const category = getCategoryBySlug(categorySlug);
+
+  useEffect(() => {
+    if (!hash) return;
+    const targetId = decodeURIComponent(hash.slice(1));
+    const timer = window.setTimeout(() => {
+      document.getElementById(targetId)?.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+      });
+    }, 150);
+    return () => window.clearTimeout(timer);
+  }, [categorySlug, hash]);
 
   if (!category) {
     return (
