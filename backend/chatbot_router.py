@@ -1587,68 +1587,6 @@ def _catalog_deflection(reply: str) -> bool:
 
 # ── Deterministic intent layer (context-aware; works even if the LLM is down) ─
 
-_COUNT_MARKERS = [
-    "כמה סוגי", "כמה טיפולים", "כמה שירותים", "מספר הטיפולים", "מספר השירותים",
-    "how many types", "how many treatments", "how many services", "number of treatments",
-    "كم نوع", "كم علاج", "كم خدمة", "عدد العلاجات", "عدد الخدمات",
-]
-_CATEGORY_COUNT_MARKERS = [
-    "כמה קטגוריות", "כמה קטוגריות", "כמה קטגוריה", "כמה קטוגריה",
-    "מספר הקטגוריות", "מספר הקטוגריות", "כמה תחומים", "מספר התחומים",
-    "how many categories", "how many areas", "number of categories",
-    "كم فئة", "كم مجال", "عدد الفئات", "عدد المجالات",
-]
-
-
-def _is_catalog_count_question(message: str) -> bool:
-    ml = (message or "").lower()
-    if any(k in ml for k in _COUNT_MARKERS + _CATEGORY_COUNT_MARKERS):
-        return True
-    return bool(
-        re.search(r"כמה.{0,30}(טיפולים|שירותים|סוגים|קט[וג]{1,2}ריות|קט[וג]{1,2}ריה|תחומים)", ml)
-        or re.search(r"how many.{0,40}(treatments|services|types|categories|areas)", ml)
-        or re.search(r"كم.{0,30}(علاج|خدمة|نوع|فئة|مجال)", ml)
-    )
-
-
-def _catalog_count_reply(message: str, lang: str) -> dict:
-    ml = (message or "").lower()
-    categories = get_categories()
-    category_id = _detect_category_in_message(message)
-    asks_categories = any(k in ml for k in _CATEGORY_COUNT_MARKERS) or any(
-        k in ml for k in ["קטגוריות", "קטוגריות", "קטגוריה", "קטוגריה", "תחומים", "categories", "areas", "فئات", "مجالات"]
-    )
-    if category_id and not asks_categories:
-        category = get_category_by_id(category_id) or {}
-        treatments = get_treatments_in_category(category_id)
-        count = len(treatments)
-        name = category.get("category_name", "")
-        replies = {
-            "he": f"בקטגוריית {name} יש כרגע {count} טיפולים במאגר שלנו.",
-            "ar": f"يوجد حالياً {count} علاجاً في فئة {name} ضمن قائمتنا.",
-            "en": f"We currently have {count} treatments listed in {name}.",
-        }
-        return {"reply": replies.get(lang, replies["he"]), "buttons": None,
-                "mode": "general", "suggestions": [t["treatment_name"] for t in treatments[:6]]}
-    if asks_categories:
-        count = len(categories)
-        replies = {
-            "he": f"יש לנו {count} קטגוריות טיפול עיקריות ב-MeDay.",
-            "ar": f"لدينا {count} فئات علاج رئيسية في MeDay.",
-            "en": f"We have {count} main treatment categories at MeDay.",
-        }
-    else:
-        count = len(get_all_treatments_summary())
-        replies = {
-            "he": f"יש לנו כרגע {count} טיפולים ושירותים במאגר, המחולקים ל-{len(categories)} קטגוריות עיקריות.",
-            "ar": f"لدينا حالياً {count} علاجاً وخدمة، موزعة على {len(categories)} فئات رئيسية.",
-            "en": f"We currently list {count} treatments and services across {len(categories)} main categories.",
-        }
-    names = [c["category_name"] for c in categories if c.get("category_name")]
-    return {"reply": replies.get(lang, replies["he"]), "buttons": None,
-            "mode": "general", "suggestions": names}
-
-
 _POPULAR_TREATMENT_KW = [
     "טיפול פופולרי", "הטיפול הפופולרי", "הכי פופולרי", "הכי מבוקש", "טיפול מבוקש",
     "טיפול נפוץ", "הכי נפוץ", "הרבה אנשים עושים", "הרבה אנשים בוחרים",
@@ -3387,13 +3325,6 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
                     session["answered_fields"] = []
                     setConversationState(session, TREATMENT_SELECTED)
                     locked_treatment = full_treatment
-
-    # Catalog counts are factual database questions, not price/session questions.
-    if _is_catalog_count_question(message):
-        resp = _catalog_count_reply(message, lang)
-        append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
-        save_session(session_id, session)
-        return resp
 
     if _is_popular_treatment_question(message):
         resp = _popular_treatment_reply(lang)
