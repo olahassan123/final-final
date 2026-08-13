@@ -1742,12 +1742,13 @@ def _is_popular_treatment_question(message: str) -> bool:
 
 def _popular_treatment_reply(lang: str) -> dict:
     replies = {
-        "he": "אין לי נתוני הזמנות מאומתים שמאפשרים לקבוע איזה טיפול הוא הפופולרי ביותר, ולכן לא ארצה להטעות אותך. אוכל לעזור לבחור טיפול לפי המטרה וההעדפות שלך — טיפולי פנים או טיפולי גוף ועיסוי?",
-        "ar": "لا تتوفر لدي بيانات حجوزات موثقة تحدد العلاج الأكثر شيوعاً، لذلك لا أريد أن أقدم معلومة غير دقيقة. يمكنني مساعدتك في الاختيار حسب هدفك وتفضيلاتك — علاجات الوجه أم علاجات الجسم والمساج؟",
-        "en": "I don't have verified booking data showing which treatment is the most popular, so I don't want to mislead you. I can help you choose based on your goals and preferences — facial treatments or body treatments and massage?",
+        "he": "אין לי נתוני הזמנות מאומתים שמאפשרים לקבוע איזה טיפול הוא הפופולרי ביותר, ולכן לא ארצה להטעות אותך. אין כאן עדיפות לטיפול או לקטגוריה מסוימת — אפשר לבחור מכל הקטגוריות שלנו, ואעזור לך לפי המטרה וההעדפות שלך.",
+        "ar": "لا تتوفر لدي بيانات حجوزات موثقة تحدد العلاج الأكثر شيوعاً، لذلك لا أريد أن أقدم معلومة غير دقيقة. لا توجد هنا أفضلية لعلاج أو فئة معينة — يمكنك الاختيار من جميع فئاتنا وسأساعدك حسب هدفك وتفضيلاتك.",
+        "en": "I don't have verified booking data showing which treatment is the most popular, so I don't want to mislead you. No treatment or category is being prioritized here — you can choose from all our categories, and I'll help based on your goals and preferences.",
     }
+    categories = [c["category_name"] for c in get_categories() if c.get("category_name")]
     return {"reply": replies.get(lang, replies["he"]),
-            "buttons": _rec_category_buttons(lang), "mode": "general", "no_suggest": True}
+            "buttons": None, "mode": "general", "suggestions": categories}
 
 
 def _recommend_category_from_goal(message: str) -> Optional[str]:
