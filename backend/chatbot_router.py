@@ -266,6 +266,28 @@ def _is_price(msg: str) -> bool:
     return False
 
 
+_COMPLAINT_KW = [
+    "תלונה", "התקלף", "התקלפה", "נהרס", "נזק", "לא מרוצה", "מאוכזב", "מאוכזבת",
+    "החזר", "החזר כספי", "כסף בחזרה", "שירות גרוע", "אחרי יומיים", "אחרי יום",
+    "complaint", "peeled", "damaged", "not happy", "disappointed", "refund", "money back",
+    "شكوى", "تقشر", "تلف", "غير راضية", "غير راض", "استرجاع", "استرداد", "تعويض",
+]
+
+
+def _is_complaint(message: str) -> bool:
+    ml = (message or "").lower()
+    return any(k in ml for k in _COMPLAINT_KW)
+
+
+def _complaint_msg(lang: str = "he") -> str:
+    msgs = {
+        "he": f"מצטערת לשמוע על החוויה הזו. חשוב שנציג/ה מהצוות יבדקו את המקרה באופן אישי ולא דרך הצ׳אט. ניתן ליצור קשר ב-{CLINIC_PHONE} או בוואטסאפ, ונשמח לטפל בפנייה.",
+        "ar": f"نأسف لسماع ذلك. من المهم أن يراجع أحد أفراد الفريق الحالة شخصياً وليس عبر الدردشة. تواصلي معنا على {CLINIC_PHONE} أو واتساب وسنتابع طلبك.",
+        "en": f"I'm sorry to hear about this experience. A team member should review the case personally rather than through chat. Please contact us at {CLINIC_PHONE} or via WhatsApp so we can follow up.",
+    }
+    return msgs.get(lang, msgs["he"])
+
+
 # Treatment duration/time questions → forwarded to the clinic (never answered).
 _DURATION_KW = [
     "כמה זמן לוקח", "כמה זמן אורך", "כמה זמן נמשך", "כמה זמן הטיפול", "כמה זמן זה לוקח",
@@ -459,6 +481,28 @@ _GENERIC_CLINIC_VOCAB = [
     "علاج", "خدمة", "موعد", "عيادة", "جمال", "بشرة", "استشارة", "ساعد",
     "treatment", "service", "appointment", "clinic", "beauty", "recommend", "help",
 ]
+
+_TREATMENT_TOPIC_VOCAB = [
+    "כואב", "כאב", "החלמה", "תוצאה", "תוצאות", "הכנה", "מתכוננ", "לפני", "אחרי", "מתאים",
+    "pain", "hurt", "recovery", "result", "results", "prepare", "before", "after", "suitable",
+    "ألم", "مؤلم", "تعافي", "نتيجة", "نتائج", "تحضير", "قبل", "بعد", "مناسب",
+]
+
+
+def _needs_treatment_clarification(message: str) -> bool:
+    ml = (message or "").lower()
+    return any(k in ml for k in _TREATMENT_TOPIC_VOCAB)
+
+
+def _treatment_clarification_reply(lang: str) -> dict:
+    replies = {
+        "he": "בשמחה — כדי לענות במדויק, על איזה טיפול או תחום מדובר?",
+        "ar": "بكل سرور — لكي أجيب بدقة، عن أي علاج أو مجال تسألين؟",
+        "en": "Of course — to answer accurately, which treatment or area do you mean?",
+    }
+    categories = [c["category_name"] for c in get_categories() if c.get("category_name")]
+    return {"reply": replies.get(lang, replies["he"]), "buttons": None,
+            "mode": "general", "suggestions": categories}
 
 
 def _is_plausibly_in_scope(message: str) -> bool:
@@ -848,6 +892,22 @@ def _unmatched_fallback(message: str, lang: str, session: dict) -> dict:
     resp = _deterministic_fallback(message, lang)
     if resp:
         return resp
+    active_treatment = _active_treatment(session)
+    if active_treatment:
+        # A natural follow-up may not contain one of our exact topic keywords.
+        # Give the next verified treatment facts rather than claiming confusion.
+        treatment_reply = handleTreatmentQuestion(session, message, lang)
+        if treatment_reply:
+            return treatment_reply
+    if _is_plausibly_in_scope(message):
+        category_id = _detect_category_in_message(message) or _recommend_category_from_goal(message)
+        if category_id:
+            category_reply = _build_category_db_reply(category_id, lang)
+            if category_reply:
+                return category_reply
+        if _needs_treatment_clarification(message):
+            return _treatment_clarification_reply(lang)
+        return _build_catalog_overview(lang)
     if _has_active_context(session):
         return _cant_parse_reply(lang)
     return _out_of_scope_reply(lang)
@@ -1526,6 +1586,108 @@ def _catalog_deflection(reply: str) -> bool:
 
 
 # ── Deterministic intent layer (context-aware; works even if the LLM is down) ─
+
+_COUNT_MARKERS = [
+    "כמה סוגי", "כמה טיפולים", "כמה שירותים", "מספר הטיפולים", "מספר השירותים",
+    "how many types", "how many treatments", "how many services", "number of treatments",
+    "كم نوع", "كم علاج", "كم خدمة", "عدد العلاجات", "عدد الخدمات",
+]
+_CATEGORY_COUNT_MARKERS = [
+    "כמה קטגוריות", "כמה קטוגריות", "כמה קטגוריה", "כמה קטוגריה",
+    "מספר הקטגוריות", "מספר הקטוגריות", "כמה תחומים", "מספר התחומים",
+    "how many categories", "how many areas", "number of categories",
+    "كم فئة", "كم مجال", "عدد الفئات", "عدد المجالات",
+]
+
+
+def _is_catalog_count_question(message: str) -> bool:
+    ml = (message or "").lower()
+    if any(k in ml for k in _COUNT_MARKERS + _CATEGORY_COUNT_MARKERS):
+        return True
+    return bool(
+        re.search(r"כמה.{0,30}(טיפולים|שירותים|סוגים|קט[וג]{1,2}ריות|קט[וג]{1,2}ריה|תחומים)", ml)
+        or re.search(r"how many.{0,40}(treatments|services|types|categories|areas)", ml)
+        or re.search(r"كم.{0,30}(علاج|خدمة|نوع|فئة|مجال)", ml)
+    )
+
+
+def _catalog_count_reply(message: str, lang: str) -> dict:
+    ml = (message or "").lower()
+    categories = get_categories()
+    category_id = _detect_category_in_message(message)
+    asks_categories = any(k in ml for k in _CATEGORY_COUNT_MARKERS) or any(
+        k in ml for k in ["קטגוריות", "קטוגריות", "קטגוריה", "קטוגריה", "תחומים", "categories", "areas", "فئات", "مجالات"]
+    )
+    if category_id and not asks_categories:
+        category = get_category_by_id(category_id) or {}
+        treatments = get_treatments_in_category(category_id)
+        count = len(treatments)
+        name = category.get("category_name", "")
+        replies = {
+            "he": f"בקטגוריית {name} יש כרגע {count} טיפולים במאגר שלנו.",
+            "ar": f"يوجد حالياً {count} علاجاً في فئة {name} ضمن قائمتنا.",
+            "en": f"We currently have {count} treatments listed in {name}.",
+        }
+        return {"reply": replies.get(lang, replies["he"]), "buttons": None,
+                "mode": "general", "suggestions": [t["treatment_name"] for t in treatments[:6]]}
+    if asks_categories:
+        count = len(categories)
+        replies = {
+            "he": f"יש לנו {count} קטגוריות טיפול עיקריות ב-MeDay.",
+            "ar": f"لدينا {count} فئات علاج رئيسية في MeDay.",
+            "en": f"We have {count} main treatment categories at MeDay.",
+        }
+    else:
+        count = len(get_all_treatments_summary())
+        replies = {
+            "he": f"יש לנו כרגע {count} טיפולים ושירותים במאגר, המחולקים ל-{len(categories)} קטגוריות עיקריות.",
+            "ar": f"لدينا حالياً {count} علاجاً وخدمة، موزعة على {len(categories)} فئات رئيسية.",
+            "en": f"We currently list {count} treatments and services across {len(categories)} main categories.",
+        }
+    names = [c["category_name"] for c in categories if c.get("category_name")]
+    return {"reply": replies.get(lang, replies["he"]), "buttons": None,
+            "mode": "general", "suggestions": names}
+
+
+_POPULAR_TREATMENT_KW = [
+    "טיפול פופולרי", "הטיפול הפופולרי", "הכי פופולרי", "הכי מבוקש", "טיפול מבוקש",
+    "טיפול נפוץ", "הכי נפוץ", "הרבה אנשים עושים", "הרבה אנשים בוחרים",
+    "רוב האנשים עושים", "עושים אצלכם", "עושים בקליניקה", "עושים בקלינקה",
+    "popular treatment", "most popular", "most requested", "most common",
+    "people usually get", "people choose most", "العلاج الأكثر شيوعاً", "العلاج الأكثر شيوعا",
+    "العلاج الاكثر شيوعا", "الأكثر شيوعا", "الاكثر شيوعا", "الأكثر طلباً",
+    "الأكثر طلبا", "الاكثر طلبا", "علاج مشهور", "معظم الناس", "الناس يختارون",
+]
+
+
+def _is_popular_treatment_question(message: str) -> bool:
+    ml = (message or "").lower()
+    return any(k in ml for k in _POPULAR_TREATMENT_KW)
+
+
+def _popular_treatment_reply(lang: str) -> dict:
+    replies = {
+        "he": "אין לי נתוני הזמנות מאומתים שמאפשרים לקבוע איזה טיפול הוא הפופולרי ביותר, ולכן לא ארצה להטעות אותך. אוכל לעזור לבחור טיפול לפי המטרה וההעדפות שלך — טיפולי פנים או טיפולי גוף ועיסוי?",
+        "ar": "لا تتوفر لدي بيانات حجوزات موثقة تحدد العلاج الأكثر شيوعاً، لذلك لا أريد أن أقدم معلومة غير دقيقة. يمكنني مساعدتك في الاختيار حسب هدفك وتفضيلاتك — علاجات الوجه أم علاجات الجسم والمساج؟",
+        "en": "I don't have verified booking data showing which treatment is the most popular, so I don't want to mislead you. I can help you choose based on your goals and preferences — facial treatments or body treatments and massage?",
+    }
+    return {"reply": replies.get(lang, replies["he"]),
+            "buttons": _rec_category_buttons(lang), "mode": "general", "no_suggest": True}
+
+
+def _recommend_category_from_goal(message: str) -> Optional[str]:
+    ml = (message or "").lower()
+    facial = ["עור", "פנים", "אקנה", "פצעונים", "צלקות", "זוהר", "פיגמנטציה",
+              "skin", "facial", "acne", "scar", "glow", "pigmentation", "pores",
+              "بشرة", "وجه", "حب الشباب", "ندبات", "نضارة", "تصبغات"]
+    body = ["עיסוי", "מסאז", "שרירים", "גב", "צוואר", "הרפיה",
+            "massage", "muscle", "back pain", "neck pain", "relaxation",
+            "مساج", "تدليك", "عضلات", "ظهر", "رقبة", "استرخاء"]
+    if any(k in ml for k in facial):
+        return "CAT-03"
+    if any(k in ml for k in body):
+        return "CAT-04"
+    return None
 
 def _rec_category_ids() -> list:
     return [c["category_id"] for c in get_categories() if c.get("has_recommendation")]
@@ -3226,6 +3388,21 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
                     setConversationState(session, TREATMENT_SELECTED)
                     locked_treatment = full_treatment
 
+    # Catalog counts are factual database questions, not price/session questions.
+    if _is_catalog_count_question(message):
+        resp = _catalog_count_reply(message, lang)
+        append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return resp
+
+    if _is_popular_treatment_question(message):
+        resp = _popular_treatment_reply(lang)
+        clearConversationContext(session)
+        setConversationState(session, CATEGORY_SELECTED)
+        append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return resp
+
     if _should_clarify_before_treatment(message, locked_treatment):
         resp = _unclear_reply(_unclear_language(message, lang, session))
         append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
@@ -3686,6 +3863,22 @@ def _handle_message(
     session = get_session(session_id)
     _apply_selected_treatment_context(session, selected_treatment)
     mode = session.get("mode", "general")
+
+    # Complaints and refund requests always take priority over treatment names.
+    if message and _is_complaint(message):
+        lang = _detect_language(message)
+        session["mode"] = "general"
+        setConversationState(session, GENERAL_CHAT)
+        session["flow_category_id"] = None
+        session["flow_question_index"] = 0
+        session["flow_scores"] = {}
+        session["flow_answers"] = []
+        reply = _complaint_msg(lang)
+        append_context(session, "user", message, MAX_CONTEXT_MESSAGES)
+        append_context(session, "assistant", reply, MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return {"reply": reply, "buttons": None, "offer_continue": None,
+                "mode": "general", "no_suggest": True}
 
     # Special control buttons
     if button_value and button_value.startswith("__ask_treatment__:"):
