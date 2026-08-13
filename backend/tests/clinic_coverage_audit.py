@@ -28,7 +28,12 @@ QUESTIONS = [
     "מה הטיפול הכי פופולרי?", "האם יש תוצאות מיד?", "כמה זמן התוצאות מחזיקות?",
     "هل لديكم مواقف سيارات؟", "هل المكان مناسب لذوي الكراسي المتحركة؟", "كيف أحجز موعداً؟",
     "Do you have parking?", "Is the clinic wheelchair accessible?", "Can I reschedule an appointment?",
+    "תציע טיפול גוף לבן אדם שעובד הרבה זמן לאורך שעות",
 ]
+
+WRONG_PHRASES = {
+    "תציע טיפול גוף לבן אדם שעובד הרבה זמן לאורך שעות": ["08:30", "שעות הפעילות"],
+}
 
 
 def main():
@@ -52,7 +57,8 @@ def main():
         for question in QUESTIONS:
             response = router.handle_message(f"audit-{uuid.uuid4().hex}", message=question)
             reply = (response.get("reply") or "").strip()
-            status = "MISS" if reply in unclear or not reply else "OK"
+            wrong = any(phrase in reply for phrase in WRONG_PHRASES.get(question, []))
+            status = "MISS" if reply in unclear or not reply or wrong else "OK"
             if status == "MISS":
                 misses.append(question)
             print(f"{status:4} | {question} | {reply.replace(chr(10), ' ')[:180]}")

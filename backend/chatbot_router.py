@@ -652,7 +652,7 @@ def _clinic_info_reply(message: str, lang: str) -> str:
             "en": f"MeDay is at 99 HaNassi Ave., Haifa 😊 For directions or details, contact the team at {CLINIC_PHONE}.",
         }
         return replies.get(lang, replies["he"])
-    if any(k in ml for k in ["שעות", "פתוח", "פעילות", "hours", "open"]):
+    if _is_opening_hours_question(message):
         replies = {
             "he": f"שעות הפעילות של MeDay הן ראשון-חמישי 08:30-20:00, ושישי 08:30-15:00 😊 לפרטים אפשר לפנות ב-{CLINIC_PHONE}.",
             "ar": f"ساعات عمل MeDay هي الأحد-الخميس 08:30-20:00، والجمعة 08:30-15:00 😊 للتفاصيل يمكن التواصل على {CLINIC_PHONE}.",
@@ -1770,7 +1770,8 @@ def _rec_category_ids() -> list:
 
 
 _RECOMMEND_KW = [
-    "תמליצי", "תמליץ", "המלצה", "המלצי", "עזרי לי לבחור", "עזור לי לבחור", "עזרו לי לבחור",
+    "תמליצי", "תמליץ", "המלצה", "המלצי", "תציע", "תציעי", "הצע טיפול",
+    "עזרי לי לבחור", "עזור לי לבחור", "עזרו לי לבחור",
     "לבחור טיפול", "מה מתאים לי", "איזה טיפול מתאים", "מה הכי מתאים", "לבחור לי", "תעזרי לי לבחור",
     # "which is better FOR ME" is a request for a recommendation, not a comparison
     # of two named things — without this it reaches no handler at all and is
@@ -1843,11 +1844,27 @@ _LOGISTICS = [
 ]
 
 
+def _is_opening_hours_question(message: str) -> bool:
+    ml = re.sub(r"\s+", " ", (message or "").lower()).strip(" ?!.,،؟")
+    explicit = [
+        "שעות פתיחה", "שעות הפעילות", "מתי אתם פתוחים", "מתי פתוח", "אתם פתוחים",
+        "מה השעות", "באיזה שעות פתוח", "opening hours", "business hours",
+        "what are your hours", "when are you open", "are you open",
+        "ساعات العمل", "ساعات الدوام", "متى تفتح", "متى أنتم مفتوحون", "هل أنتم مفتوحون",
+    ]
+    if any(phrase in ml for phrase in explicit):
+        return True
+    return ml in {"שעות", "שעות?", "hours", "opening hours", "ساعات", "الدوام"}
+
+
 def _match_logistics_faq(message: str):
     ml = (message or "").lower()
     answers = []
     for fid, kws in _LOGISTICS:
-        if any(k.lower() in ml for k in kws):
+        matched = _is_opening_hours_question(message) if fid == "FAQ-13" else any(
+            k.lower() in ml for k in kws
+        )
+        if matched:
             f = get_faq_by_id(fid)
             if f and f["answer"] not in answers:
                 answers.append(f["answer"])
