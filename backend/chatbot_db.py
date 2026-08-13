@@ -97,6 +97,7 @@ def init_chatbot_db():
             flow_answers TEXT DEFAULT '[]',
             recent_context TEXT DEFAULT '[]',
             last_treatment_id TEXT,
+            last_category_id TEXT,
             answered_fields TEXT DEFAULT '[]',
             updated_at TEXT DEFAULT CURRENT_TIMESTAMP
         )
@@ -153,6 +154,8 @@ def _migrate_treatment_columns(conn: sqlite3.Connection):
         conn.execute("ALTER TABLE cb_sessions ADD COLUMN conversation_state TEXT DEFAULT 'GENERAL_CHAT'")
     if "answered_fields" not in sess_cols:
         conn.execute("ALTER TABLE cb_sessions ADD COLUMN answered_fields TEXT DEFAULT '[]'")
+    if "last_category_id" not in sess_cols:
+        conn.execute("ALTER TABLE cb_sessions ADD COLUMN last_category_id TEXT")
 
 
 # ── Session management ────────────────────────────────────────────────────
@@ -180,8 +183,8 @@ def save_session(session_id: str, state: dict):
         INSERT OR REPLACE INTO cb_sessions
         (session_id, mode, conversation_state, flow_category_id, flow_question_index,
          flow_scores, flow_answers, recent_context, last_treatment_id,
-         answered_fields, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         last_category_id, answered_fields, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
     """, (
         session_id,
         state.get("mode", "general"),
@@ -192,6 +195,7 @@ def save_session(session_id: str, state: dict):
         json.dumps(state.get("flow_answers", []), ensure_ascii=False),
         json.dumps(state.get("recent_context", []), ensure_ascii=False),
         state.get("last_treatment_id"),
+        state.get("last_category_id"),
         json.dumps(state.get("answered_fields", []), ensure_ascii=False),
     ))
     conn.commit()
@@ -231,6 +235,7 @@ def _default_session(session_id: str) -> dict:
         "flow_answers": [],
         "recent_context": [],
         "last_treatment_id": None,
+        "last_category_id": None,
         "answered_fields": [],
     }
 
