@@ -463,11 +463,24 @@ def _phone_button() -> dict:
 def _booking_reply(lang: str = "he", treatment: Optional[dict] = None, availability: bool = False) -> dict:
     name = treatment.get("treatment_name") if treatment else None
     if availability:
-        text = "\u05db\u05d3\u05d9 \u05dc\u05d1\u05d3\u05d5\u05e7 \u05d6\u05de\u05d9\u05e0\u05d5\u05ea \u05d5\u05dc\u05e7\u05d1\u05d5\u05e2 \u05e9\u05e2\u05d4 \u05de\u05d3\u05d5\u05d9\u05e7\u05ea, \u05d0\u05e4\u05e9\u05e8 \u05dc\u05e4\u05e0\u05d5\u05ea \u05dc\u05e6\u05d5\u05d5\u05ea MeDay \u05d3\u05e8\u05da WhatsApp, \u05d5\u05e0\u05d7\u05d6\u05d5\u05e8 \u05d0\u05dc\u05d9\u05da \u05d1\u05d4\u05e7\u05d3\u05dd \u05d4\u05d0\u05e4\u05e9\u05e8\u05d9 \U0001f60a"
+        texts = {
+            "he": "כדי לבדוק זמינות ולקבוע שעה מדויקת, אפשר לפנות לצוות MeDay דרך WhatsApp, ונחזור אליך בהקדם האפשרי 😊",
+            "ar": "للتحقق من المواعيد المتاحة وتحديد وقت مناسب، يمكنك التواصل مع فريق MeDay عبر واتساب وسنعود إليك في أقرب وقت 😊",
+            "en": "To check availability and choose an exact time, contact the MeDay team via WhatsApp and we'll get back to you as soon as possible 😊",
+        }
     elif name:
-        text = f"\u05d1\u05e9\u05de\u05d7\u05d4 \U0001f60a \u05db\u05d3\u05d9 \u05dc\u05e4\u05e0\u05d5\u05ea \u05dc\u05d2\u05d1\u05d9 {name}, \u05d0\u05e4\u05e9\u05e8 \u05dc\u05e4\u05e0\u05d5\u05ea \u05d0\u05dc\u05d9\u05e0\u05d5 \u05d1\u05d0\u05d7\u05ea \u05de\u05d4\u05d0\u05e4\u05e9\u05e8\u05d5\u05d9\u05d5\u05ea \u05d4\u05d1\u05d0\u05d5\u05ea, \u05d5\u05e6\u05d5\u05d5\u05ea MeDay \u05d9\u05d7\u05d6\u05d5\u05e8 \u05d0\u05dc\u05d9\u05da \u05d1\u05d4\u05e7\u05d3\u05dd \u05d4\u05d0\u05e4\u05e9\u05e8\u05d9."
+        texts = {
+            "he": f"בשמחה 😊 כדי לפנות לגבי {name}, אפשר לפנות אלינו באחת מהאפשרויות הבאות, וצוות MeDay יחזור אליך בהקדם האפשרי.",
+            "ar": f"بكل سرور 😊 للتواصل بخصوص {name}، استخدمي إحدى طرق الاتصال التالية وسيعود إليك فريق MeDay في أقرب وقت.",
+            "en": f"Of course 😊 To contact us about {name}, use one of the options below and the MeDay team will get back to you soon.",
+        }
     else:
-        text = "\u05d1\u05e9\u05de\u05d7\u05d4 \U0001f60a \u05d0\u05e4\u05e9\u05e8 \u05dc\u05e4\u05e0\u05d5\u05ea \u05d0\u05dc\u05d9\u05e0\u05d5 \u05d1\u05d0\u05d7\u05ea \u05de\u05d4\u05d0\u05e4\u05e9\u05e8\u05d5\u05d9\u05d5\u05ea \u05d4\u05d1\u05d0\u05d5\u05ea, \u05d5\u05e6\u05d5\u05d5\u05ea MeDay \u05d9\u05d7\u05d6\u05d5\u05e8 \u05d0\u05dc\u05d9\u05da \u05d1\u05d4\u05e7\u05d3\u05dd \u05d4\u05d0\u05e4\u05e9\u05e8\u05d9."
+        texts = {
+            "he": "בשמחה 😊 אפשר לפנות אלינו באחת מהאפשרויות הבאות, וצוות MeDay יחזור אליך בהקדם האפשרי.",
+            "ar": "بكل سرور 😊 يمكنك التواصل معنا بإحدى الطرق التالية، وسيعود إليك فريق MeDay في أقرب وقت.",
+            "en": "Of course 😊 Contact us using one of the options below, and the MeDay team will get back to you soon.",
+        }
+    text = texts.get(lang, texts["he"])
     return {"reply": text, "buttons": [_booking_button(), _contact_button(), _phone_button()], "mode": "general", "no_suggest": True}
 
 
@@ -484,8 +497,10 @@ _GENERIC_CLINIC_VOCAB = [
 
 _TREATMENT_TOPIC_VOCAB = [
     "כואב", "כאב", "החלמה", "תוצאה", "תוצאות", "הכנה", "מתכוננ", "לפני", "אחרי", "מתאים",
+    "ייעוץ", "להביא", "מחזיק", "מחזיקות", "מיד",
     "pain", "hurt", "recovery", "result", "results", "prepare", "before", "after", "suitable",
-    "ألم", "مؤلم", "تعافي", "نتيجة", "نتائج", "تحضير", "قبل", "بعد", "مناسب",
+    "consultation", "bring", "immediate", "last",
+    "ألم", "مؤلم", "تعافي", "نتيجة", "نتائج", "تحضير", "قبل", "بعد", "مناسب", "استشارة", "أحضر", "فورية", "تدوم",
 ]
 
 
@@ -1642,6 +1657,72 @@ def _category_breakdown_reply(lang: str) -> dict:
         "mode": "general",
         "suggestions": [name for name, _ in _VISIBLE_CATEGORY_STRUCTURE],
     }
+
+
+_PRACTICAL_CLINIC_TOPICS = {
+    "address": ["מה הכתובת", "כתובת הקליניקה", "clinic address", "what is your address", "عنوان العيادة"],
+    "contact": ["יש וואטסאפ", "מספר וואטסאפ", "whatsapp", "واتساب"],
+    "parking": ["חניה", "חנייה", "parking", "موقف", "مواقف"],
+    "accessibility": ["נגיש", "כיסא גלגלים", "כסא גלגלים", "wheelchair", "accessible", "ذوي الكراسي", "كرسي متحرك"],
+    "appointment_change": [
+        "לבטל תור", "ביטול תור", "מדיניות הביטולים", "לשנות תור", "שינוי תור",
+        "בלי תור", "ללא תור", "זמן מראש", "כמה זמן מראש",
+        "cancel appointment", "reschedule", "without an appointment", "walk-in", "cancellation policy",
+        "إلغاء موعد", "تغيير موعد", "بدون موعد", "سياسة الإلغاء",
+    ],
+    "booking": ["كيف أحجز", "كيف احجز", "حجز موعد", "book an appointment"],
+    "staff": [
+        "מי מבצע", "מי מבצעת", "מי מטפל", "מי מטפלת", "לבחור מטפלת", "לבחור מטפל",
+        "הכשרה", "הסמכה", "who performs", "choose a therapist", "staff qualifications",
+        "من يقوم", "اختيار المعالجة", "مؤهلات الفريق",
+    ],
+    "payment": [
+        "יש תשלומים", "אמצעי תשלום", "שובר מתנה", "גיפט קארד", "gift card",
+        "payment methods", "installments", "قسائم هدايا", "طرق الدفع", "تقسيط",
+    ],
+    "language": ["באילו שפות", "שפות נותנים שירות", "what languages", "languages do you speak", "ما اللغات"],
+    "age": ["מטפלים בילדים", "טיפול לילדים", "מאיזה גיל", "minimum age", "treat children", "علاج الأطفال", "من أي عمر"],
+    "combination": ["כמה טיפולים באותו יום", "מספר טיפולים באותו יום", "multiple treatments in one day", "عدة علاجات في نفس اليوم"],
+}
+
+
+def _practical_clinic_topic(message: str) -> Optional[str]:
+    ml = (message or "").lower()
+    for topic, phrases in _PRACTICAL_CLINIC_TOPICS.items():
+        if any(phrase in ml for phrase in phrases):
+            return topic
+    return None
+
+
+def _practical_clinic_reply(topic: str, lang: str) -> dict:
+    if topic == "address":
+        reply = _clinic_info_reply("כתובת", lang)
+    elif topic == "contact":
+        reply = _clinic_info_reply("וואטסאפ", lang)
+    elif topic == "age":
+        reply = _treatment_medical_safety_reply(None, lang)
+    elif topic == "booking":
+        return _booking_reply(lang, None)
+    elif topic == "combination":
+        reply = _treatment_medical_safety_reply(None, lang)
+    else:
+        labels = {
+            "parking": {"he": "חניה", "ar": "مواقف السيارات", "en": "parking"},
+            "accessibility": {"he": "נגישות", "ar": "إمكانية الوصول", "en": "accessibility"},
+            "appointment_change": {"he": "ביטול, שינוי או הגעה ללא תור", "ar": "إلغاء الموعد أو تغييره أو الحضور بدونه", "en": "cancellations, rescheduling, or walk-ins"},
+            "staff": {"he": "בחירת מטפל/ת ופרטי ההכשרה של הצוות", "ar": "اختيار المعالج ومؤهلات الفريق", "en": "choosing a therapist and staff qualifications"},
+            "payment": {"he": "אמצעי תשלום, תשלומים ושוברי מתנה", "ar": "طرق الدفع والتقسيط وقسائم الهدايا", "en": "payment methods, installments, and gift cards"},
+            "language": {"he": "השפות שבהן ניתן לקבל שירות", "ar": "اللغات المتاحة للخدمة", "en": "available service languages"},
+        }
+        label = labels[topic].get(lang, labels[topic]["he"])
+        templates = {
+            "he": f"אין לי מידע מאומת במאגר לגבי {label}, ולכן לא ארצה להטעות אותך. צוות MeDay ישמח לאשר את הפרטים בטלפון {CLINIC_PHONE} או בוואטסאפ.",
+            "ar": f"لا تتوفر لدي معلومات موثقة حول {label}، لذلك لا أريد أن أقدم معلومة غير دقيقة. يمكن لفريق MeDay تأكيد التفاصيل على {CLINIC_PHONE} أو عبر واتساب.",
+            "en": f"I don't have verified information about {label}, so I don't want to guess. The MeDay team can confirm at {CLINIC_PHONE} or via WhatsApp.",
+        }
+        reply = templates.get(lang, templates["he"])
+    return {"reply": reply, "buttons": [_contact_button(), _phone_button()],
+            "mode": "general", "no_suggest": True}
 
 _POPULAR_TREATMENT_KW = [
     "טיפול פופולרי", "הטיפול הפופולרי", "הכי פופולרי", "הכי מבוקש", "טיפול מבוקש",
@@ -3384,6 +3465,19 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
 
     if _is_category_breakdown_question(message):
         resp = _category_breakdown_reply(lang)
+        append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return resp
+
+    practical_topic = _practical_clinic_topic(message)
+    if practical_topic:
+        resp = _practical_clinic_reply(practical_topic, lang)
+        append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return resp
+
+    if not locked_treatment and not _match_treatment(message) and _needs_treatment_clarification(message):
+        resp = _treatment_clarification_reply(lang)
         append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
         save_session(session_id, session)
         return resp
