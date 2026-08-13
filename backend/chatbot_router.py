@@ -1587,6 +1587,40 @@ def _catalog_deflection(reply: str) -> bool:
 
 # ── Deterministic intent layer (context-aware; works even if the LLM is down) ─
 
+_CATEGORY_BREAKDOWN_KW = [
+    "כמה קטגוריות", "כמה קטוגריות", "מספר הקטגוריות", "מספר הקטוגריות",
+    "כמה תחומים", "כמה טיפולים בכל קטגוריה", "כמה טיפולים יש בכל קטגוריה",
+    "פירוט קטגוריות", "חלוקה לקטגוריות",
+    "how many categories", "treatments in each category", "category breakdown",
+    "كم فئة", "عدد الفئات", "كم علاج في كل فئة", "العلاجات في كل فئة",
+]
+
+
+def _is_category_breakdown_question(message: str) -> bool:
+    ml = (message or "").lower()
+    return any(keyword in ml for keyword in _CATEGORY_BREAKDOWN_KW)
+
+
+def _category_breakdown_reply(lang: str) -> dict:
+    categories = get_categories()
+    rows = [
+        (category.get("category_name") or "", len(get_treatments_in_category(category["category_id"])))
+        for category in categories
+        if category.get("category_id") and category.get("category_name")
+    ]
+    lines = "\n".join(f"• **{name}** — {count}" for name, count in rows)
+    intros = {
+        "he": f"יש לנו {len(rows)} קטגוריות ראשיות. מספר הטיפולים בכל קטגוריה:\n\n{lines}",
+        "ar": f"لدينا {len(rows)} فئات رئيسية. عدد العلاجات في كل فئة:\n\n{lines}",
+        "en": f"We have {len(rows)} main categories. Treatments in each category:\n\n{lines}",
+    }
+    return {
+        "reply": intros.get(lang, intros["he"]),
+        "buttons": None,
+        "mode": "general",
+        "suggestions": [name for name, _ in rows],
+    }
+
 _POPULAR_TREATMENT_KW = [
     "טיפול פופולרי", "הטיפול הפופולרי", "הכי פופולרי", "הכי מבוקש", "טיפול מבוקש",
     "טיפול נפוץ", "הכי נפוץ", "הרבה אנשים עושים", "הרבה אנשים בוחרים",
@@ -3325,6 +3359,12 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
                     session["answered_fields"] = []
                     setConversationState(session, TREATMENT_SELECTED)
                     locked_treatment = full_treatment
+
+    if _is_category_breakdown_question(message):
+        resp = _category_breakdown_reply(lang)
+        append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return resp
 
     if _is_popular_treatment_question(message):
         resp = _popular_treatment_reply(lang)
