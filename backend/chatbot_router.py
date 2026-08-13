@@ -1601,24 +1601,46 @@ def _is_category_breakdown_question(message: str) -> bool:
     return any(keyword in ml for keyword in _CATEGORY_BREAKDOWN_KW)
 
 
+_VISIBLE_CATEGORY_STRUCTURE = [
+    ("מניקור ופדיקור", [("מניקור", 3), ("פדיקור", 3)]),
+    ("עיצוב שיער", []),
+    ("טיפולי גוף", [("עיסוי גוף", 6), ("עיסוי ממוקד", 3), ("עיסויים מיוחדים", 4)]),
+    ("טיפולי קוסמטיקה", [
+        ("טיפולי פנים קלאסיים", 2),
+        ("טיפולי פנים מפנקים", 2),
+        ("טיפולי פנים טכנולוגיים מיוחדים", 7),
+    ]),
+    ("הסרת שיער", []),
+    ("איפור מקצועי", []),
+    ("איפור קבוע ועיצוב גבות", [
+        ("גבות", 3), ("תיחום עיניים", 3), ("שפתיים", 2), ("ראש", 3),
+    ]),
+    ("סטיילינג אישי", [("סטיילינג", 2)]),
+    ("טיפולי אסתטיקה", []),
+]
+
+
 def _category_breakdown_reply(lang: str) -> dict:
-    categories = get_categories()
-    rows = [
-        (category.get("category_name") or "", len(get_treatments_in_category(category["category_id"])))
-        for category in categories
-        if category.get("category_id") and category.get("category_name")
-    ]
-    lines = "\n".join(f"• **{name}** — {count}" for name, count in rows)
+    blocks = []
+    for category_name, sections in _VISIBLE_CATEGORY_STRUCTURE:
+        if sections:
+            section_lines = "\n".join(
+                f"  • {section_name} — {count} טיפולים" for section_name, count in sections
+            )
+        else:
+            section_lines = "  • אין כרגע תתי־כותרות טיפול בעמוד"
+        blocks.append(f"**{category_name}**\n{section_lines}")
+    breakdown = "\n\n".join(blocks)
     intros = {
-        "he": f"יש לנו {len(rows)} קטגוריות ראשיות. מספר הטיפולים בכל קטגוריה:\n\n{lines}",
-        "ar": f"لدينا {len(rows)} فئات رئيسية. عدد العلاجات في كل فئة:\n\n{lines}",
-        "en": f"We have {len(rows)} main categories. Treatments in each category:\n\n{lines}",
+        "he": f"יש לנו {len(_VISIBLE_CATEGORY_STRUCTURE)} קטגוריות ראשיות. הנה החלוקה לפי תתי־הכותרות שמופיעות בעמוד:\n\n{breakdown}",
+        "ar": f"لدينا {len(_VISIBLE_CATEGORY_STRUCTURE)} فئات رئيسية. هذا هو التقسيم حسب العناوين الفرعية الظاهرة في الصفحة:\n\n{breakdown}",
+        "en": f"We have {len(_VISIBLE_CATEGORY_STRUCTURE)} main categories. Here is the breakdown by the subsections shown on the page:\n\n{breakdown}",
     }
     return {
         "reply": intros.get(lang, intros["he"]),
         "buttons": None,
         "mode": "general",
-        "suggestions": [name for name, _ in rows],
+        "suggestions": [name for name, _ in _VISIBLE_CATEGORY_STRUCTURE],
     }
 
 _POPULAR_TREATMENT_KW = [
