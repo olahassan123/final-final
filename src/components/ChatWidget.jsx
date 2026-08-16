@@ -48,8 +48,21 @@ function normalizeLabel(value) {
   return (value || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
-function getTreatmentRoute(treatment) {
+function getTreatmentCategoryRoute(treatment) {
   const targetName = normalizeLabel(treatment?.name);
+  const targetCategory = normalizeLabel(treatment?.category);
+  if (targetCategory) {
+    const category = serviceCatalog.find(
+      (item) => normalizeLabel(item.name) === targetCategory
+    );
+    if (category) {
+      const match = getCategoryTreatments(category).find(
+        (item) => normalizeLabel(item.name) === targetName
+      );
+      return `/categories/${category.slug}${match ? `#treatment-${match.slug}` : ""}`;
+    }
+  }
+
   if (!targetName) return null;
 
   for (const category of serviceCatalog) {
@@ -57,7 +70,7 @@ function getTreatmentRoute(treatment) {
       (item) => normalizeLabel(item.name) === targetName
     );
     if (match) {
-      return `/categories/${category.slug}/${match.slug}`;
+      return `/categories/${category.slug}#treatment-${match.slug}`;
     }
   }
   return null;
@@ -257,7 +270,7 @@ export default function ChatWidget() {
   }
 
   function openTreatmentDetails(treatment) {
-    const route = treatment?.route || getTreatmentRoute(treatment);
+    const route = getTreatmentCategoryRoute(treatment);
     if (!route) return;
     setOpen(false);
     navigate(route);
@@ -382,7 +395,7 @@ export default function ChatWidget() {
                 {m.from === "bot" && m.treatments && idx === messages.length - 1 && (
                   <div className="mt-3 grid w-full max-w-[88%] gap-2">
                     {m.treatments
-                      .map((treatment) => ({ ...treatment, route: treatment.route || getTreatmentRoute(treatment) }))
+                      .map((treatment) => ({ ...treatment, route: getTreatmentCategoryRoute(treatment) }))
                       .slice(0, 3)
                       .map((treatment) => (
                         <div
