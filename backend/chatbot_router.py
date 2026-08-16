@@ -191,17 +191,79 @@ def _greeting_reply(lang: str) -> str:
 
 # ── Hard price guard (no LLM — enforced before everything) ───────────────────
 
-_PRICE_KW = [
-    "מחיר", "עלות", "עולה", "כמה עולה", "כמה זה", "כמה יעלה", "מחירון",
-    "זול", "יקר", "תשלום", "מבצע", "הנחה", "תעריף",
-    "price", "cost", "how much", "cheap", "expensive", "discount", "fee",
-    "سعر", "كم", "تكلفة", "غالي", "رخيص",
-]
+# Matched as whole TOKENS, never as substrings. "יקר" sits inside "מיקרובליידינג"
+# and "העיקרית", "עולה" inside "מעולה", "מבצע" inside "מבצעת", "كم" inside "عندكم",
+# "fee" inside "feel" — as raw substrings every one of those reads as a price
+# question. That is worse than a bad reply: this guard runs before the FAQ and
+# treatment steps, so a false positive makes the real answer unreachable.
+_PRICE_WORDS = {
+    # Hebrew
+    "מחיר", "מחירים", "מחירון", "תמחור", "עלות", "עלויות", "תעריף", "תעריפים",
+    "זול", "זולה", "יקר", "יקרה", "יקרים", "תשלום", "לשלם", "כסף",
+    "שקל", "שקלים", "מבצע", "מבצעים", "הנחה", "הנחות", "חבילות",
+    "עולה", "יעלה", "עלה", "יעלו", "בכמה",
+    # English
+    "price", "prices", "pricing", "cost", "costs", "cheap", "expensive",
+    "discount", "discounts", "fee", "fees", "budget",
+    # Arabic
+    "سعر", "أسعار", "اسعار", "تكلفة", "غالي", "رخيص", "خصم", "عروض",
+    "يكلف", "تكلف",
+}
+
+# "How much" alone is not about money: "כמה זה עוזר לצלקות", "כמה טיפולים צריך",
+# "كم جلسة احتاج", "كم يدوم" ask about effect, quantity, sessions and longevity.
+# A quantifier counts as a price question only next to a cost word (R2), or when
+# it IS the whole message (R3) — "כמה זה?".
+_PRICE_QUANTIFIERS = ("כמה", "كم", "how much", "how many")
+_PRICE_COST_NEAR = {
+    "עולה", "יעלה", "עלה", "יעלו", "לשלם", "כסף", "שקל", "שקלים",
+    "يكلف", "تكلف", "بكم", "cost", "costs", "pay", "price",
+}
+# English "how much" is about money in this domain unless it asks about an effect.
+_EN_EFFECT_VERBS = ("help", "hurt", "last", "take", "long", "often", "improve")
+_BARE_PRICE = {"כמה זה", "כמה", "كم", "بكم", "how much"}
+
+# One-letter Hebrew prefixes, so "המחיר"/"במחיר" still match. "מ" is deliberately
+# NOT here: stripping it would turn "מעולה" back into "עולה".
+_PRICE_PREFIXES = "בהולכש"
+
+
+def _price_tokens(text: str) -> set:
+    """Whole words plus de-prefixed variants ("המחיר"→"מחיר", "الأسعار"→"أسعار")."""
+    t = (text or "").lower()
+    # Arabic punctuation lives inside the Arabic block, so \w keeps it glued to the
+    # word — without this "غالي؟" never equals "غالي".
+    t = re.sub(r"[،؛؟]+", " ", t)
+    t = re.sub(r"[^\w֐-ۿ]+", " ", t)
+    out = set()
+    for w in t.split():
+        out.add(w)
+        if len(w) >= 4 and w[0] in _PRICE_PREFIXES:
+            out.add(w[1:])
+        if len(w) >= 5 and w.startswith("ال"):
+            out.add(w[2:])
+    return out
+
+
+# Currency symbols never survive tokenization, so they are checked on the raw text.
+_PRICE_SYMBOLS = ("₪", "$", "€")
 
 
 def _is_price(msg: str) -> bool:
-    ml = msg.lower()
-    return any(kw in ml for kw in _PRICE_KW)
+    ml = (msg or "").lower().strip()
+    if any(sym in ml for sym in _PRICE_SYMBOLS):
+        return True
+    tokens = _price_tokens(ml)
+    if tokens & _PRICE_WORDS:                                   # R1: a price word
+        return True
+    if any(q in ml for q in _PRICE_QUANTIFIERS):
+        if tokens & _PRICE_COST_NEAR:                           # R2: how much + cost
+            return True
+        if "how much" in ml and not any(v in ml for v in _EN_EFFECT_VERBS):
+            return True
+        if re.sub(r"[?!.\s؟]+$", "", ml) in _BARE_PRICE:    # R3: bare quantifier
+            return True
+    return False
 
 
 # Treatment duration/time questions → forwarded to the clinic (never answered).
@@ -548,8 +610,108 @@ def _clinic_info_reply(message: str, lang: str) -> str:
     return _forward_msg(lang)
 
 
+# ── "Who are you / what do you do" ───────────────────────────────────────────
+# A very common opening message, answered today with "I didn't understand" twice
+# over: short forms ("מי את") are dropped by the unclear-message gate because every
+# word is under 3 letters, and longer ones fail _is_plausibly_in_scope and are
+# declined before the LLM is ever asked. Handled deterministically so it also works
+# while the LLM is rate-limited — a first impression shouldn't depend on quota.
+
+# Zone A — no other reading exists. Safe to answer unconditionally, even mid-chat.
+_ABOUT_BOT_CERTAIN = [
+    "מי את", "מי אתה", "את בוט", "אתה בוט", "את רובוט", "אתה רובוט",
+    "את בן אדם", "אתה בן אדם", "עם מי אני מדבר", "עם מי אני מדברת",
+    "who are you", "are you a bot", "are you a robot", "are you human",
+    "من أنت", "من انت", "مين انتي", "مين انت", "انتي بوت", "انت بوت", "انتي روبوت",
+]
+
+# Zone C — "מה את עושה?" can equally mean "what happens in this treatment", so it
+# counts as being about the assistant ONLY when nothing on screen gives it a topic
+# to attach to. Getting this wrong would answer "I'm MeDay's assistant" to someone
+# asking what a deep-cleanse facial involves.
+_ABOUT_BOT_CAPABILITY = [
+    "מה את עושה", "מה אתה עושה", "מה את יודעת", "מה אתה יודע",
+    "מה את יכולה", "מה אתה יכול", "במה את יכולה לעזור", "במה אתה יכול לעזור",
+    "איך את יכולה לעזור", "איך אתה יכול לעזור", "מה התפקיד שלך",
+    "what can you do", "what do you do", "how can you help", "what are you for",
+    "شو بتعملي", "شو بتعمل", "شو بتقدري تعملي", "كيف بتساعديني", "شو وظيفتك",
+]
+
+# Words pointing at something already on screen — with any of these the question is
+# about that thing, not about the assistant.
+_ABOUT_BOT_REFERENTS = [
+    "בזה", "בטיפול", "בתחום", "בקטגוריה", "הזה", "הזאת", "כאן", " פה",
+    "עליו", "עליה", "فيها", "فيه", "بهاد", "هون", "in it", "here",
+]
+
+
+def _about_bot_zone(message: str, locked_treatment: Optional[dict] = None,
+                    session: Optional[dict] = None) -> Optional[str]:
+    """'certain' | 'ambiguous' | None — see the zone comments above.
+
+    Ambiguity is never resolved by guessing: an 'ambiguous' hit is answered with a
+    reply that is correct under BOTH readings (who I am + the paths to the
+    treatments), so a misread costs one click, never a wrong answer."""
+    ml = (message or "").lower()
+    if any(k in ml for k in _ABOUT_BOT_CERTAIN):
+        return "certain"
+    if not any(k in ml for k in _ABOUT_BOT_CAPABILITY):
+        return None
+    if _is_whats_offered(message):
+        return None   # "במה את יכולה לעזור" is already routed to the catalog
+    if locked_treatment or any(r in ml for r in _ABOUT_BOT_REFERENTS):
+        return None
+    if _match_named_treatments(message) or _detect_category_in_message(message):
+        return None
+    if _find_subgroup(message):
+        return None
+    if session and session.get("last_category_id"):
+        # Capability wording while a category is on screen: "what do you do" almost
+        # certainly means "in this field". Don't answer about the assistant — and
+        # don't drop the message either, which would read as "I didn't understand".
+        return "topic"
+    return "ambiguous"
+
+
+def _about_bot_reply(lang: str = "he") -> dict:
+    replies = {
+        "he": ("אני העוזרת הדיגיטלית של MeDay 😊\n"
+               "אני יכולה לספר לך על הטיפולים שלנו, לעזור לך לבחור את המתאים לך, "
+               "ולמסור שעות פעילות ומיקום.\n"
+               f"לתיאום תור ולשאלות אישיות — הצוות ב-{CLINIC_PHONE} כאן בשבילך 💛\n\n"
+               "במה נתחיל?"),
+        "ar": ("أنا المساعدة الرقمية لـMeDay 😊\n"
+               "بقدر أحكيلك عن علاجاتنا، أساعدك تختاري الأنسب إلك، "
+               "وأعطيكي ساعات العمل والموقع.\n"
+               f"لتنسيق دور وللأسئلة الشخصية — الفريق على {CLINIC_PHONE} بخدمتك 💛\n\n"
+               "من وين نبدأ؟"),
+        "en": ("I'm MeDay's digital assistant 😊\n"
+               "I can tell you about our treatments, help you choose the right one, "
+               "and give you our hours and location.\n"
+               f"For bookings and personal questions, the team at {CLINIC_PHONE} is here for you 💛\n\n"
+               "Where shall we start?"),
+    }
+    chips = {
+        "he": ["מה אתם מציעים?", "עזרי לי לבחור טיפול", "מה שעות הפעילות?"],
+        "ar": ["شو بتقدموا؟", "ساعديني في اختيار علاج", "ما هي ساعات العمل؟"],
+        "en": ["What do you offer?", "Help me choose a treatment", "What are your hours?"],
+    }
+    return {"reply": replies.get(lang, replies["he"]), "buttons": None, "mode": "general",
+            "suggestions": chips.get(lang, chips["he"]), "no_suggest": True}
+
+
 def _should_clarify_before_treatment(message: str, locked_treatment: Optional[dict]) -> bool:
     if not _is_unclear_message(message):
+        return False
+    # A price question is never unclear — we know exactly what is being asked, and
+    # the hard price guard further down answers it. Short ones ("מה המחיר?",
+    # "יש מבצעים?") are one token after normalization, so without this they were
+    # answered with "I didn't understand" and never reached the guard at all.
+    if _is_price(message):
+        return False
+    # Nor is "מי את" — every word is under 3 letters, so the tokenizer empties it
+    # and it reads as gibberish. It is the clearest question a customer can ask.
+    if _about_bot_zone(message, locked_treatment):
         return False
     text = (message or "").strip()
     compact = re.sub(r"\s+", " ", text.lower().strip(" \t\r\n?!.,;:"))
@@ -892,30 +1054,243 @@ def _is_comparison(message: str) -> bool:
     return any(k in ml for k in _COMPARE_KW)
 
 
+# Fields a comparison may draw on, most distinguishing first. Duration and price
+# are absent by policy — they are forwarded to the clinic, never stated.
+_COMPARE_FIELDS = [
+    ("מתאים ל", "good_for"),
+    ("מה מרגישים", "pain_level"),
+    ("מה קורה בטיפול", "what_to_expect"),
+    ("שיטה/מכשור", "technique_or_equipment"),
+    ("החלמה", "downtime"),
+    ("מספר טיפולים", "sessions_recommended"),
+    ("משך התוצאה", "results_longevity"),
+]
+_COMPARE_MAX_ROWS = 5
+
+
+def _cmp_val(t: dict, col: str) -> str:
+    """A field's value, or "" when it is missing in any of the ways the Excel
+    import can produce it (None, empty, whitespace)."""
+    return str(t.get(col) or "").strip()
+
+
+def _match_named_treatments(message: str, limit: int = 4) -> list:
+    """Every treatment explicitly named in the message, in the order they appear.
+
+    Unlike _match_treatments_for_switch (top-scored only, for context switching)
+    this keeps ALL of them — a comparison needs both sides. Two de-dup rules the
+    data forces: 'עיסוי שוודי' is both a treatment of its own AND an alias of
+    'עיסוי קלאסי', so when two treatments match the same span the real name wins;
+    and a name nested inside a longer matched name is dropped."""
+    ml = (message or "").lower()
+    if not ml.strip():
+        return []
+    hits = []            # (position, span, is_alias, treatment_id)
+    for t in get_all_treatments_summary():
+        name = t.get("treatment_name") or ""
+        for cand, is_alias in [(name, False)] + [
+            (a.strip(), True) for a in (t.get("aliases") or "").split(",") if a.strip()
+        ]:
+            if len(cand) < 5:
+                continue
+            pos = ml.find(cand.lower())
+            if pos < 0:
+                continue
+            if f"טיפולי {cand}" in message or f"טיפול {cand}" in message:
+                continue  # a category phrase, not this treatment
+            hits.append((pos, cand, is_alias, t["treatment_id"]))
+            break
+    if not hits:
+        return []
+    kept = []
+    for pos, span, is_alias, tid in hits:
+        # Nesting is positional, not textual: "בנייה - אורך מלא" is a substring of
+        # "מילוי ללא בנייה - אורך מלא", but when the user names both they sit at
+        # different offsets and both are real. Only drop a span physically covered
+        # by a longer one.
+        end = pos + len(span)
+        covered = any(p2 <= pos and end <= p2 + len(s2) and len(s2) > len(span)
+                      for p2, s2, _, _ in hits)
+        if covered:
+            continue
+        same_span_real = any(o.lower() == span.lower() and not a
+                             for _, o, a, _ in hits)
+        if is_alias and same_span_real:
+            continue      # the treatment actually called this wins over the alias
+        kept.append((pos, tid))
+    out, seen = [], set()
+    for pos, tid in sorted(kept):
+        if tid in seen:
+            continue
+        seen.add(tid)
+        full = get_treatment_by_id(tid)
+        if full:
+            out.append(full)
+    return out[:limit]
+
+
+def _comparison_unavailable_reply(treatments: list, lang: str):
+    """Used whenever we cannot show a real difference — 76% of same-category pairs
+    have a side with no comparable field at all. Naming both treatments with what
+    we DO have beats either an empty table or a silently one-sided one."""
+    lines = []
+    for t in treatments:
+        desc = _cmp_val(t, "short_description") or _cmp_val(t, "good_for")
+        lines.append(f"• **{t['treatment_name']}** — {desc}" if desc
+                     else f"• **{t['treatment_name']}**")
+    body = "\n".join(lines)
+    intros = {
+        "he": (f"{body}\n\nאין לי מספיק פרטים מאומתים כדי להשוות ביניהם כאן. "
+               f"הצוות שלנו ב-{CLINIC_PHONE} ישמח לעזור לך לבחור ביניהם 💛"),
+        "ar": (f"{body}\n\nلا تتوفر لديّ تفاصيل موثّقة كافية للمقارنة بينهما هنا. "
+               f"فريقنا على {CLINIC_PHONE} سيسعد بمساعدتك في الاختيار 💛"),
+        "en": (f"{body}\n\nI don't have enough verified detail to compare them here. "
+               f"Our team at {CLINIC_PHONE} will be glad to help you choose 💛"),
+    }
+    return {"reply": intros.get(lang, intros["he"]), "buttons": None, "mode": "general",
+            "no_suggest": True, "treatments": _treatment_links(treatments)}
+
+
+def _compare_named_treatments(treatments: list, lang: str):
+    """Side-by-side from verified fields only.
+
+    The safety rule that matters: a field is shown as a difference ONLY when BOTH
+    treatments have a value for it. Rendering a one-sided field would let the
+    reader infer something we never said — an empty "pain" cell next to a filled
+    one reads as "this one doesn't hurt". 12% of field slots across real pairs are
+    one-sided, so this is the common case, not an edge case."""
+    a, b = treatments[0], treatments[1]
+    differing, shared, incomplete = [], [], []
+    for label, col in _COMPARE_FIELDS:
+        va, vb = _cmp_val(a, col), _cmp_val(b, col)
+        if va and vb:
+            (shared if va == vb else differing).append((label, va, vb))
+        elif va or vb:
+            incomplete.append(label)     # never rendered as a difference
+    if not differing:
+        return None                      # nothing honest to show → caller falls back
+    parts = []
+    for label, va, vb in differing[:_COMPARE_MAX_ROWS]:
+        parts.append(f"**{label}**\n• {a['treatment_name']}: {va}\n• {b['treatment_name']}: {vb}")
+    heads = {
+        "he": f"הנה ההבדלים בין {a['treatment_name']} ל{b['treatment_name']}:",
+        "ar": f"إليك الفروقات بين {a['treatment_name']} و{b['treatment_name']}:",
+        "en": f"Here's how {a['treatment_name']} and {b['treatment_name']} differ:",
+    }
+    body = heads.get(lang, heads["he"]) + "\n\n" + "\n\n".join(parts)
+    if shared:
+        same_labels = ", ".join(lbl for lbl, _, _ in shared[:3])
+        same = {
+            "he": f"\n\nמשותף לשניהם: {same_labels}.",
+            "ar": f"\n\nمشترك بينهما: {same_labels}.",
+            "en": f"\n\nThe same for both: {same_labels}.",
+        }
+        body += same.get(lang, same["he"])
+    if incomplete:
+        miss_labels = ", ".join(incomplete[:3])
+        miss = {
+            "he": f"\n\nאין לי פרטים מאומתים על {miss_labels} לשני הטיפולים — "
+                  f"הצוות ב-{CLINIC_PHONE} ישמח להשלים 💛",
+            "ar": f"\n\nلا تتوفر لديّ تفاصيل موثّقة عن {miss_labels} للعلاجين — "
+                  f"الفريق على {CLINIC_PHONE} سيسعد بإكمالها 💛",
+            "en": f"\n\nI don't have verified detail on {miss_labels} for both treatments — "
+                  f"the team at {CLINIC_PHONE} will gladly fill that in 💛",
+        }
+        body += miss.get(lang, miss["he"])
+    return {"reply": body, "buttons": None, "mode": "general", "no_suggest": True,
+            "treatments": _treatment_links([a, b])}
+
+
+def _find_subgroups(message: str, limit: int = 2) -> list:
+    """All subgroups named in the message ('מניקור' vs 'פדיקור' are subgroups,
+    not treatments), longest key first so a nested name doesn't shadow a longer one."""
+    ml = message or ""
+    found = []
+    for sg, cid in _subgroup_index():
+        key = sg.split(" (")[0].strip()
+        if key in _GENERIC_SUB or len(key) < 4 or key not in ml:
+            continue
+        if any(key != k and key in k for _, _, k in found):
+            continue
+        found.append((sg, cid, key))
+    return sorted(found, key=lambda f: ml.find(f[2]))[:limit]
+
+
+def _compare_subgroups(subs: list, lang: str):
+    """'מה ההבדל בין מניקור לפדיקור?' — compare the two named groups, not the
+    whole category they happen to share."""
+    blocks = []
+    for sg, cid, key in subs:
+        names = [t["treatment_name"] for t in get_treatments_in_category(cid)
+                 if t.get("subgroup") == sg and t.get("treatment_name")]
+        if not names:
+            return None
+        blocks.append(f"**{key}**\n" + "\n".join(f"• {n}" for n in names[:6]))
+    heads = {
+        "he": f"הנה מה שיש בכל אחד מהם:",
+        "ar": "إليك ما يشمله كل منهما:",
+        "en": "Here's what each one includes:",
+    }
+    tail = {
+        "he": f"\n\nלא בטוחה מה מתאים לך? הצוות ב-{CLINIC_PHONE} ישמח לעזור 💛",
+        "ar": f"\n\nغير متأكدة أيهما يناسبك؟ الفريق على {CLINIC_PHONE} سيسعد بمساعدتك 💛",
+        "en": f"\n\nNot sure which fits? The team at {CLINIC_PHONE} will gladly help 💛",
+    }
+    return {"reply": heads.get(lang, heads["he"]) + "\n\n" + "\n\n".join(blocks)
+                     + tail.get(lang, tail["he"]),
+            "buttons": None, "mode": "general", "no_suggest": True}
+
+
+_CMP_THEM_KW = ("ביניהם", "בינהם", "ביניהן", "between them", "بينهم", "بينهما")
+
+
 def _build_comparison(message: str, session: dict, lang: str):
-    """Compare the treatments in the category/subgroup just discussed (resolves
-    'them' via recent context), showing each one's purpose from existing data."""
+    """Answer a comparison from what was actually asked about.
+
+    Order matters: two named treatments → a real side-by-side; two named subgroups
+    → those two groups; an explicit "between them" about a group just listed →
+    that group's list; anything else ("מה עדיף בשבילי?") is a recommendation
+    request, not a comparison, so it falls through to the recommendation/LLM path
+    instead of dumping an entire category."""
+    named = _match_named_treatments(message)
+    if len(named) >= 2:
+        comparable = [t for t in named if _has_detail(t)]
+        if len(comparable) >= 2:
+            real = _compare_named_treatments(comparable[:2], lang)
+            if real:
+                return real
+        return _comparison_unavailable_reply(named[:2], lang)
+
+    subs = _find_subgroups(message)
+    if len(subs) >= 2:
+        grouped = _compare_subgroups(subs, lang)
+        if grouped:
+            return grouped
+
+    # "מה ההבדל ביניהם?" about the group on screen — the one case the old
+    # category listing was right for.
+    ml = (message or "").lower()
     ctx = " ".join(m.get("content", "") for m in session.get("recent_context", [])
                    if m.get("role") == "assistant")
-    # Subgroup only from the explicit message — category descriptions mention
-    # subgroup words, which would wrongly narrow a category comparison.
     sub = _find_subgroup(message)
+    cat = _detect_category_in_message(message)
+    if not (sub or cat) and any(k in ml for k in _CMP_THEM_KW):
+        cat = _detect_category_in_message(ctx)
     if sub:
         sg, cid, title = sub
         treatments = [t for t in get_treatments_in_category(cid)
                       if t.get("subgroup") == sg and t.get("treatment_name")]
-    else:
-        cat = _detect_category_in_message(message) or _detect_category_in_message(ctx)
-        if not cat:
-            return None
+    elif cat:
         c = get_category_by_id(cat)
         title = c["category_name"] if c else ""
         treatments = [t for t in get_treatments_in_category(cat) if t.get("treatment_name")]
+    else:
+        return None
     if len(treatments) < 2:
         return None
     lines = []
     for t in treatments:
-        desc = t.get("good_for") or t.get("short_description") or t.get("what_to_expect") or ""
+        desc = _cmp_val(t, "good_for") or _cmp_val(t, "short_description") or _cmp_val(t, "what_to_expect")
         lines.append(f"• **{t['treatment_name']}** — {desc}" if desc else f"• **{t['treatment_name']}**")
     body = "\n".join(lines)
     intro = {
@@ -941,7 +1316,7 @@ def _general_suggestions(message: str, lang: str):
         if c and c.get("has_recommendation") and cat in _SG_CHOOSE:
             return [_L(_SG_CHOOSE[cat], lang)]
         return None  # non-rec category → no guidance
-    return [_L(_SG_TREATMENTS, lang), _L(_SG_CHOOSE["CAT-03"], lang), _L(_SG_CHOOSE["CAT-04"], lang)]
+    return None  # general message → no guidance chips
 
 
 def _after_reco_suggestions(lang: str) -> list:
@@ -1080,6 +1455,50 @@ def _build_catalog_overview(lang: str) -> dict:
     }
 
 
+# Words that appear in several category names and so identify none of them.
+_GENERIC_CAT_TOKENS = {"טיפולי", "טיפול", "עיצוב", "אישי", "מקצועי"}
+
+
+# Words that carry no topic of their own, so they don't stop a message from being
+# a bare category reference ("טיפולי גבות" is still just "גבות").
+_CAT_REF_FILLER = {"טיפולי", "טיפול", "טיפולים", "תחום", "בתחום", "קטגוריה", "קטגוריית",
+                   "שירותי", "שירות", "רוצה", "אני", "על"}
+
+
+def _is_bare_category_reference(message: str, category_id: Optional[str]) -> bool:
+    """True when the message is nothing but a way of naming that category. Every
+    significant word must come from the category's own vocabulary — otherwise the
+    message is a question that happens to mention the area, and belongs to the FAQ
+    or treatment handlers further down."""
+    if not category_id:
+        return False
+    cat = get_category_by_id(category_id) or {}
+    vocab = set()
+    for src in [(cat.get("category_name") or "")] + _CAT_UNIQUE_KW.get(category_id, []):
+        vocab |= set(_norm_tokens(src))
+    tokens = [t for t in _norm_tokens(message) if t not in _CAT_REF_FILLER]
+    if not tokens:
+        return False
+    return all(any(t == v or (len(t) >= 4 and (t in v or v in t)) for v in vocab)
+               for t in tokens)
+
+
+def _categories_named_in_message(message: str) -> list:
+    """Categories whose NAME words appear in the message. Unlike
+    _detect_category_in_message this also reports ambiguity: "איפור" belongs to
+    both איפור מקצועי and איפור קבוע ועיצוב גבות, so it is deliberately absent
+    from the unique-keyword table and would otherwise resolve to nothing at all."""
+    ml = (message or "").lower()
+    hits = []
+    for c in get_categories():
+        for tok in (c.get("category_name") or "").split():
+            tok = tok.strip()
+            if len(tok) >= 4 and tok not in _GENERIC_CAT_TOKENS and tok.lower() in ml:
+                hits.append(c["category_id"])
+                break
+    return hits
+
+
 def _match_category_by_name(message: str):
     """Return the category whose name the message EXACTLY is (i.e. a category chip
     was clicked, or the user typed the category name)."""
@@ -1115,7 +1534,13 @@ def _rec_category_ids() -> list:
 _RECOMMEND_KW = [
     "תמליצי", "תמליץ", "המלצה", "המלצי", "עזרי לי לבחור", "עזור לי לבחור", "עזרו לי לבחור",
     "לבחור טיפול", "מה מתאים לי", "איזה טיפול מתאים", "מה הכי מתאים", "לבחור לי", "תעזרי לי לבחור",
+    # "which is better FOR ME" is a request for a recommendation, not a comparison
+    # of two named things — without this it reaches no handler at all and is
+    # declined as out of scope. The "בשבילי"/"for me" part is what separates it
+    # from "מה עדיף בין X ל-Y", which the comparison layer answers.
+    "עדיף בשבילי", "עדיף לי", "מתאים בשבילי", "מומלץ בשבילי", "כדאי לי",
     "recommend", "help me choose", "which treatment", "what suits me", "help me pick",
+    "better for me", "best for me", "أفضل إلي", "أفضل بالنسبة لي",
     "أنصحيني", "انصحيني", "ساعديني في الاختيار", "ساعدني في الاختيار", "شو يناسبني", "ايش يناسبني",
 ]
 
@@ -1123,6 +1548,34 @@ _RECOMMEND_KW = [
 def _is_recommend_intent(message: str) -> bool:
     ml = (message or "").lower()
     return any(k in ml for k in _RECOMMEND_KW)
+
+
+# "I want to <do a service>" — a request, not a question. These must be routed to
+# the relevant category, never answered from the FAQ table: "אני רוצה להסיר שיער
+# בלייזר" is a customer asking to book laser, and answering it with post-laser
+# aftercare instructions reads like a non-sequitur.
+_SERVICE_INTENT_KW = [
+    "רוצה ל", "רוצה את", "רוצות ל", "רוצים ל", "רציתי ל",
+    "מעוניינת ל", "מעוניין ל", "מעוניינת ב", "מעוניין ב",
+    "אשמח ל", "בא לי ל", "צריכה ל", "צריך ל", "מחפשת", "מחפש",
+    "i want to", "i'd like to", "i would like to", "looking for", "i need a",
+    "بدي", "أريد أن", "اريد ان", "بدي أعمل", "بدي اعمل", "أبحث عن",
+]
+
+# ...unless what they want is information — "רוצה לדעת אם זה כואב" is a question,
+# and must still reach the FAQ / field answer it asks for.
+_EPISTEMIC_VERBS = [
+    "לדעת", "לשמוע", "להבין", "לשאול", "לברר", "לקרוא", "לראות מידע",
+    "to know", "to hear", "to ask", "to understand", "to learn",
+    "أعرف", "اعرف", "أسأل", "اسأل", "أفهم",
+]
+
+
+def _is_service_intent(message: str) -> bool:
+    ml = (message or "").lower()
+    if any(v in ml for v in _EPISTEMIC_VERBS):
+        return False
+    return any(k in ml for k in _SERVICE_INTENT_KW)
 
 
 _ABOUT_VERBS = [
@@ -1174,32 +1627,150 @@ def _norm_tokens(text: str) -> list:
     return [w for w in t.split() if len(w) >= 3]
 
 
+# Words that appear in every kind of sentence and carry no topical signal. Without
+# this list a message scores an FAQ on filler alone: "אני רוצה לעשות את השיער שלי"
+# matched the laser-aftercare FAQ on "לעשות" + "השיער", because "לעשות" ("to do")
+# is shared with almost every FAQ phrasing. Question words (מה/איך/כמה/מתי) are
+# deliberately NOT here — they do carry signal about what is being asked.
+_FAQ_STOPWORDS = {
+    # Hebrew — pronouns, possessives, generic verbs, fillers
+    "אני", "אתה", "אתם", "אנחנו", "היא", "הוא", "הם",
+    "שלי", "שלך", "שלכם", "שלנו", "שלה", "שלו",
+    "זה", "זאת", "הזה", "הזאת", "אלה", "אלו",
+    "רוצה", "רוצות", "רוצים", "רציתי", "מעוניינת", "מעוניין",
+    "לעשות", "עושה", "עושים", "לקבל", "אפשר", "יכול", "יכולה",
+    "צריך", "צריכה", "כדאי", "בבקשה", "תודה", "שלום",
+    "יש", "אין", "גם", "עוד", "כדי", "בשביל", "אולי", "ממש", "מאוד", "קצת",
+    "את", "עם", "על", "של", "לי", "לך", "אבל", "כמו",
+    # English
+    "the", "and", "for", "with", "have", "has", "want", "wants", "wanted",
+    "would", "like", "can", "could", "should", "please", "thanks", "thank",
+    "this", "that", "these", "those", "get", "getting", "make", "making",
+    "you", "your", "our", "here", "there", "about",
+    # Arabic
+    "بدي", "أريد", "اريد", "ممكن", "بليز", "شكرا", "هذا", "هذه", "عندي", "عندكم",
+    # Two-letter Hebrew function words. FAQ scoring keeps 2-char tokens (unlike
+    # _norm_tokens, which drops them) because short words like "לק" are exactly
+    # what distinguishes one FAQ from another — but that only works if the
+    # function words at the same length are filtered out here.
+    "יש", "אם", "גם", "כי", "אל", "על", "של", "את", "לא", "זה", "הם", "הן",
+    "לי", "לך", "לו", "בה", "בו", "כן", "או", "עד", "מה", "מן", "כל",
+}
+
+# The list above is written the way people spell these words — with final letters
+# — but _significant_tokens folds those away before the lookup, so entries like
+# "צריך" (→"צריכ") never matched and 17 filler words were being scored as topical
+# signal. That is how "צריך הכנה לפני?" reached the laser FAQ: the match was
+# carried by "צריך" + "לפני", neither of which says what the question is about.
+_FAQ_STOPWORDS = {w.translate(_HEB_FINAL) for w in _FAQ_STOPWORDS}
+
+# FAQ scoring keeps shorter tokens than the generic tokenizer: "כמה זמן מחזיק לק
+# ג'ל" loses its only distinguishing word at a 3-char floor, which made it tie
+# with the permanent-makeup longevity FAQ on the generic words alone.
+_FAQ_MIN_TOKEN = 2
+
+
+def _significant_tokens(text: str) -> list:
+    """Topical tokens only — filler removed. This is what FAQ scoring runs on."""
+    t = (text or "").translate(_HEB_FINAL).lower()
+    t = re.sub(r"[^\w֐-׿]+", " ", t)
+    return [w for w in t.split()
+            if len(w) >= _FAQ_MIN_TOKEN and w not in _FAQ_STOPWORDS]
+
+
 def _tok_hit(mt: str, cand: set) -> bool:
-    """A message token matches a candidate token by equality or substring overlap
-    (handles Hebrew prefixes like ב/ל/ה: 'בגברים' vs 'גברים')."""
+    """A message token matches a candidate token by equality, or by genuine
+    morphological variance: one contains the other, the shorter is ≥4 chars, and
+    they differ by at most 2 characters. That covers Hebrew prefixes and plurals
+    ('השיער'/'שיער', 'מחזיק'/'מחזיקים') without letting an arbitrary 4-char
+    substring bridge two unrelated words."""
     if mt in cand:
         return True
-    return any((len(mt) >= 4 and mt in ct) or (len(ct) >= 4 and ct in mt) for ct in cand)
+    for ct in cand:
+        short, long = (mt, ct) if len(mt) <= len(ct) else (ct, mt)
+        if len(short) >= 4 and len(long) - len(short) <= 2 and short in long:
+            return True
+    return False
 
 
-def _match_faq(message: str):
+# Aspect words say what is being asked (prep, aftercare, pain, longevity) but not
+# what it is about. Every category has a prep FAQ and an aftercare FAQ, so a match
+# carried only by these words fits all of them equally well — with no category to
+# anchor it, answering is a coin flip between categories.
+_FAQ_ASPECT_TOKENS = {w.translate(_HEB_FINAL) for w in {
+    "הכנה", "להתכונן", "מתכוננים", "לפני", "אחרי", "לאחר", "טיפוח",
+    "החלמה", "מחלים", "כאב", "כואב", "כואבת", "תחושה", "מרגישים",
+    "תוצאה", "תוצאות", "נשמר", "נשאר", "מחזיק", "זמן", "כמה", "מתי",
+    "פעמים", "תדירות", "מומלץ", "אסור", "מותר", "עושים", "צריך",
+    "preparation", "prepare", "before", "after", "aftercare", "pain",
+    "hurt", "recovery", "results", "last", "long", "how", "many",
+    "قبل", "بعد", "كم", "مدة", "تحضير", "ألم", "يوجع", "تعافي", "نتيجة",
+}}
+
+
+def _match_faq(message: str, category_id: Optional[str] = None):
     """Fuzzy FAQ match — Hebrew-normalized token overlap, no LLM. Catches phrasing
     variations (e.g. 'כמה זמן מחזיק לק גל' → the gel-polish FAQ) that exact keyword
-    matching misses. Requires ≥2 shared significant tokens to avoid misfires."""
-    msg = _norm_tokens(message)
+    matching misses.
+
+    Precision rules, in order of importance:
+      1. `category_id` gates the candidate set. When the message resolves to a
+         category, only that category's FAQs (+ GENERAL) are eligible. Several
+         categories share vocabulary — "שיער" belongs to both עיצוב שיער and
+         הסרת שיער — so without this gate a hair-styling request is answered with
+         laser aftercare instructions.
+      2. Scoring runs on significant tokens only (see _FAQ_STOPWORDS), so filler
+         like "לעשות" or "רוצה" cannot carry a match on its own.
+      3. At least 2 distinct message tokens must match — the eligibility gate.
+      4. Ranking weights a hit on the FAQ's own `canonical_question` double a hit
+         on `example_phrasings`. The canonical question is the curated statement
+         of what the entry answers; the phrasings are a loose net. Without this,
+         "מה אסור לעשות אחרי לייזר" ties FAQ-04 (whose canonical question is
+         exactly that) against FAQ-01, which only catches "אסור" through a
+         phrasing.
+      5b. With no category at all (rule 6, applied after the winner is picked) a
+         category-specific answer needs at least one matched word that names a
+         subject, not just an aspect ("הכנה", "לפני"). Otherwise the message never
+         said what it is about and any category's prep FAQ would "match".
+      5. A remaining tie is resolved by WHERE the tied FAQs sit. Tied entries in
+         one category are near-duplicates of a single topic (24h vs 48h after
+         laser) and either is a reasonable answer, so the first wins. Tied
+         entries across DIFFERENT categories mean the message never said which
+         topic it is about — answering would be a guess, so we answer nothing
+         and let the caller route by category instead.
+    """
+    msg = _significant_tokens(message)
     if len(msg) < 2:
         return None
-    best, best_score = None, 0
+    scored = []
     for f in get_faq_entries():
-        cand = set(_norm_tokens(
-            (f.get("canonical_question") or "") + " " + (f.get("example_phrasings") or "")
-        ))
-        if not cand:
+        if category_id:
+            fcat = f.get("category_id")
+            if fcat and fcat not in (category_id, "GENERAL"):
+                continue
+        canon = set(_significant_tokens(f.get("canonical_question") or ""))
+        phras = set(_significant_tokens(f.get("example_phrasings") or ""))
+        if not (canon or phras):
             continue
-        score = sum(1 for mt in msg if _tok_hit(mt, cand))
-        if score > best_score:
-            best_score, best = score, f
-    return best["answer"] if best and best_score >= 2 else None
+        matched = [mt for mt in msg if _tok_hit(mt, canon) or _tok_hit(mt, phras)]
+        if len(matched) < 2:
+            continue
+        rank = sum(2 if _tok_hit(mt, canon) else 1 for mt in matched)
+        scored.append((rank, matched, f))
+    if not scored:
+        return None
+    top = max(r for r, _, _ in scored)
+    tied = [(m, f) for r, m, f in scored if r == top]
+    if len({(f.get("category_id") or "GENERAL") for _, f in tied}) > 1:
+        return None  # ambiguous across categories — see rule 5
+    matched, winner = sorted(tied, key=lambda x: x[1]["faq_id"])[0]
+    # Rule 6: nothing anchored this message to a category, and the winner belongs
+    # to one. Only answer if some matched word names a subject — a match made
+    # purely of aspect words picks a category at random (see _FAQ_ASPECT_TOKENS).
+    if not category_id and (winner.get("category_id") or "GENERAL") != "GENERAL":
+        if all(mt in _FAQ_ASPECT_TOKENS for mt in matched):
+            return None
+    return winner["answer"]
 
 
 def _match_treatment(message: str):
@@ -1427,8 +1998,23 @@ def setConversationState(session: dict, state: str):
 
 def clearConversationContext(session: dict):
     # Starting over or switching category clears treatment focus and state.
+    # last_category_id deliberately survives: the whole point of it is to scope
+    # follow-ups to the topic that is still on screen.
     session["conversation_state"] = GENERAL_CHAT
     _clear_treatment_context(session)
+
+
+def _last_assistant_text(session: dict) -> str:
+    for m in reversed(session.get("recent_context") or []):
+        if m.get("role") == "assistant":
+            return (m.get("content") or "").strip()
+    return ""
+
+
+def _remember_category(session: dict, category_id: Optional[str]):
+    """The topic a bare follow-up refers to when it names no category itself."""
+    if category_id:
+        session["last_category_id"] = category_id
 
 
 def isTreatmentFollowUp(message: str) -> bool:
@@ -1452,6 +2038,45 @@ def isTreatmentFollowUp(message: str) -> bool:
         "معلومات أكثر", "اشرح", "احكي", "فوائد", "مخاطر", "تعافي", "مؤلم",
     ]
     return any(k in ml for k in keywords)
+
+
+# A refusal is not a question about the treatment on screen. Without this, "לא",
+# "לאא" and "לא בכללי" all satisfy _is_short_treatment_followup (which only checks
+# that the message is short) and get answered with the full treatment card — the
+# same card, over and over, with no way out.
+_NEGATION_WORDS = {w.translate(_HEB_FINAL) for w in {
+    "לא", "לא תודה", "לא רוצה", "לא מעוניינת", "לא מעוניין", "לא צריך", "לא צריכה",
+    "ממש לא", "בכלל לא", "לא בכלל", "לא בכללי", "לא כרגע", "לא עכשיו", "לא משהו",
+    "no", "nope", "no thanks", "not really", "nah", "no thank you",
+    "لا", "لأ", "لا شكرا", "مش هيك", "لا مش هيك", "مو هيك",
+}}
+
+
+def _is_negation(message: str) -> bool:
+    low = _flow_norm(message)
+    if not low:
+        return False
+    # "לאא" / "לאאא" / "noo" — an elongated refusal is still a refusal.
+    collapsed = re.sub(r"(.)\1+", r"\1", low)
+    return low in _NEGATION_WORDS or collapsed in _NEGATION_WORDS
+
+
+def _negation_reply(lang: str = "he") -> dict:
+    msgs = {
+        "he": ("בסדר גמור 😊 אפשר לספר לך על טיפול אחר, לעזור לך לבחור את המתאים לך, "
+               "או לחבר אותך לצוות. מה יעזור לך יותר?"),
+        "ar": ("تمام 😊 بقدر أحكيلك عن علاج تاني، أساعدك تختاري الأنسب إلك، "
+               "أو أوصلك للفريق. شو بيساعدك أكتر؟"),
+        "en": ("No problem 😊 I can tell you about a different treatment, help you choose, "
+               "or connect you with the team. What would help most?"),
+    }
+    chips = {
+        "he": ["מה אתם מציעים?", "עזרי לי לבחור טיפול", "אני רוצה לקבוע תור"],
+        "ar": ["شو بتقدموا؟", "ساعديني في اختيار علاج", "بدي أحجز دور"],
+        "en": ["What do you offer?", "Help me choose a treatment", "I'd like to book"],
+    }
+    return {"reply": msgs.get(lang, msgs["he"]), "buttons": None, "mode": "general",
+            "suggestions": chips.get(lang, chips["he"]), "no_suggest": True}
 
 
 def _is_short_treatment_followup(message: str) -> bool:
@@ -1600,10 +2225,14 @@ def _missing_treatment_info_msg(lang: str = "he") -> str:
     return msgs.get(lang, msgs["he"])
 
 
+# Topics the bot may answer with general background when MeDay has no verified
+# field for them. "duration" is deliberately NOT here: treatment time is forwarded
+# to the clinic, never stated, so general background about it would be an invented
+# estimate ("45-75 minutes") printed under a MeDay heading.
 _LOW_RISK_GENERAL_TOPICS = {
     "general", "process", "purpose", "sensation", "benefits",
     "pain_level", "downtime", "preparation", "aftercare",
-    "sessions", "results_longevity", "duration",
+    "sessions", "results_longevity",
 }
 
 
@@ -1722,6 +2351,8 @@ The requested topic is missing or insufficient in MeDay's verified data for this
 Write 2-3 short, warm sentences of GENERAL background knowledge only.
 Do not claim this is MeDay clinic information.
 Do not include prices, medical approval, suitability, safety conclusions, or promises.
+Do not state or estimate how long the treatment takes — no durations in minutes or
+hours, not even an approximate range. Treatment time is answered by the clinic only.
 Do not give personal medical advice.
 """
     try:
@@ -1851,6 +2482,7 @@ def _begin_flow(session: dict, session_id: str, category_id: str, lang: str) -> 
         return None
     session["mode"] = "in_flow"
     setConversationState(session, RECOMMENDATION_FLOW)
+    _remember_category(session, category_id)
     session["flow_category_id"] = category_id
     session["flow_question_index"] = 0
     session["flow_scores"] = {}
@@ -1876,7 +2508,7 @@ def _deterministic_fallback(message: str, lang: str) -> Optional[dict]:
     log = _match_logistics_faq(message)
     if log:
         return {"reply": log, "buttons": None, "mode": "general"}
-    ans = _match_faq(message)
+    ans = _match_faq(message, category_id=_detect_category_in_message(message))
     if ans:
         return {"reply": ans, "buttons": None, "mode": "general"}
     # A specific treatment named in the message beats its whole-category list.
@@ -1900,6 +2532,32 @@ def _deterministic_fallback(message: str, lang: str) -> Optional[dict]:
     if _match_forward_topic(message):
         return {"reply": _forward_msg(lang), "buttons": None, "mode": "general"}
     return None  # nothing matched → caller treats it as out of scope
+
+
+# ── Internal IDs must never reach the user ───────────────────────────────────
+# Category and treatment IDs (CAT-06, MUP-02 …) are sent to the LLM so it can
+# pick an action, and the model sometimes copies them into its reply. They are
+# plumbing — the client should only ever see names.
+_ID_PREFIXES = "CAT|MP|MUP|PMU|HR|HS|BD|CO|AE|ST"
+_INTERNAL_CODE_RE = re.compile(
+    rf"[\[(]\s*(?:{_ID_PREFIXES})-\d{{1,3}}\s*[\])]"   # [CAT-06] / (CAT-06)
+    rf"|\b(?:{_ID_PREFIXES})-\d{{1,3}}\b",             # bare CAT-06
+    re.IGNORECASE,
+)
+
+
+def _strip_internal_codes(text: str) -> str:
+    """Remove internal IDs from user-facing text, leaving the sentence readable."""
+    if not text or "-" not in text:
+        return text
+    cleaned = _INTERNAL_CODE_RE.sub("", text)
+    if cleaned == text:
+        return text
+    cleaned = re.sub(r"[\[(][\s,،/|·-]*[\])]", "", cleaned)  # brackets left empty
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"[ \t]+([,.:;!?،؛])", r"\1", cleaned)
+    cleaned = re.sub(r"[ \t]+\n", "\n", cleaned)
+    return cleaned.strip()
 
 
 def _attach_suggestions(result: dict, message: str):
@@ -2005,7 +2663,8 @@ def _llm_respond(message: str, context: list, lang: str, locked_treatment: Optio
    לעולם אל תציני מחיר ואל תציני את משך/זמן הטיפול — לשאלות מחיר או משך זמן הפני ל-{CLINIC_PHONE}.
 8. אם השאלה קשורה למכון אך אין לך נתונים (שמות/פרטי עובדים, מידע אישי, נהלים, זמינות תורים, התאמה רפואית) — אל תשלפי את רשימת הקטגוריות כמילוי מקום. הפני בחום ל-{CLINIC_PHONE} וקבעי forward=true.
    אם השאלה כלל אינה קשורה למכון או ליופי (למשל ספורט, חדשות, מזג אוויר, מתמטיקה, שאלות כלליות) — אל תעני עליה ואל תפני לטלפון. השיבי בחום שאת עוזרת רק בנושאי MeDay (טיפולים, שירותים ותורים) ושאלי במה תוכלי לעזור. אל תמציאי תשובה.
-9. אם את מציעה עזרה בבחירת טיפול — חובה לצרף action תואם: offer_recommendation:CATEGORY_ID אם התחום ידוע, אחרת offer_pick_category. לעולם אל תסיימי בהצעת בחירה בטקסט חופשי בלי action — אחרת המשתמש עונה "כן" ואין לאן להמשיך.
+9. הקודים הפנימיים (CAT-01, MUP-02 וכו') הם לשימוש פנימי בלבד — בשדה action בלבד. לעולם אל תכתבי קוד כזה בתוך ה-reply, לא בסוגריים ולא בסוגריים מרובעים. ציינו רק את שם הקטגוריה או שם הטיפול.
+10. אם את מציעה עזרה בבחירת טיפול — חובה לצרף action תואם: offer_recommendation:CATEGORY_ID אם התחום ידוע, אחרת offer_pick_category. לעולם אל תסיימי בהצעת בחירה בטקסט חופשי בלי action — אחרת המשתמש עונה "כן" ואין לאן להמשיך.
 
 קטגוריות ושירותים שלנו:
 {cat_block}
@@ -2033,7 +2692,10 @@ def _llm_respond(message: str, context: list, lang: str, locked_treatment: Optio
         data = json.loads(raw)
         _record_llm_status("ok")
         return {
-            "reply": data.get("reply") or "",
+            # Scrub here too, not only on the way out: the reply is appended to
+            # the conversation context, and a leaked ID there teaches the model
+            # to keep emitting them on the next turn.
+            "reply": _strip_internal_codes(data.get("reply") or ""),
             "action": data.get("action") or None,
             "forward": bool(data.get("forward", False)),
         }
@@ -2169,6 +2831,217 @@ def _handle_flow_button(session: dict, session_id: str, button_value: str, quest
             },
         }
     return _finish_flow(session, session_id)
+
+
+# ── Typed answers during the questionnaire ───────────────────────────────────
+# People type instead of clicking — often the button's own words. Reading that
+# text as an answer is reliable here because the option space is tiny and closed
+# (the current question's 2-6 labels), so this stays deterministic: no LLM, no
+# latency, and a miss falls through to the normal interruption path.
+
+# Filler that survives _FAQ_STOPWORDS but carries no choice signal, so
+# "אני מעדיפה משהו עדין" scores on "עדין" alone.
+_FLOW_FILLER = {
+    "משהו", "יותר", "נראה", "מעדיפה", "מעדיף", "מחפשת", "מחפש",
+    "חושבת", "חושב", "טיפול", "טיפולים", "בעיקר", "כנראה",
+    "לשמוע", "לדעת", "לפני", "אחרי", "בערך", "כזה", "כאלה",
+}
+
+# A typed answer must clear this share of one side's tokens, and beat the
+# runner-up by this margin — otherwise it's too vague to act on and we let the
+# normal path handle it rather than guessing the wrong answer.
+_FLOW_MATCH_MIN = 0.6
+_FLOW_MATCH_MARGIN = 0.2
+
+# Asking *about* the options is not choosing one. "מה זה ניקוי עמוק?" shares
+# almost every token with an option label, so this guard does the real work.
+_FLOW_QUESTION_KW = (
+    "?", "؟", "מהו", "מהי", "האם", "למה", "מדוע", "איך", "כיצד", "מתי",
+    "איפה", "היכן", "כמה", "מה זה", "מה ההבדל", "מה כולל", "מה יותר",
+    "what", "which", "how", "why", "when", "where",
+)
+
+_FLOW_NEGATIONS = {w.translate(_HEB_FINAL) for w in
+                   {"לא", "לא תודה", "ממש לא", "no", "nope", "no thanks", "لا", "لا شكرا"}}
+
+
+def _flow_norm(text: str) -> str:
+    """Normalized label/answer text for exact comparison ('עדין / קלאסי' → 'עדין קלאסי')."""
+    t = (text or "").translate(_HEB_FINAL).lower()
+    return " ".join(re.sub(r"[^\w֐-׿]+", " ", t).split())
+
+
+def _flow_deprefix(tok: str) -> str:
+    """Drop one Hebrew prefix letter when a real stem is left. Used only as a
+    fallback after the full forms fail to match, so an over-eager strip costs a
+    little recall at worst — it can never create a match on its own."""
+    if len(tok) >= 4 and tok[0] in "בלמכש":
+        return tok[1:]
+    if len(tok) >= 3 and tok[0] in "הו":       # "הגב" → "גב"
+        return tok[1:]
+    return tok
+
+
+def _flow_tokens(text: str) -> set:
+    return {t for t in _significant_tokens(text) if t not in _FLOW_FILLER}
+
+
+def _flow_hit(tok: str, cand: set) -> bool:
+    """_tok_hit, plus a de-prefixed retry so 'לאקנה' reaches 'באקנה' — same length,
+    neither contains the other, so the plain comparison can't bridge them."""
+    if _tok_hit(tok, cand):
+        return True
+    stripped = {_flow_deprefix(c) for c in cand}
+    return _tok_hit(_flow_deprefix(tok), stripped)
+
+
+def _looks_like_flow_question(message: str) -> bool:
+    ml = (message or "").lower()
+    return any(k in ml for k in _FLOW_QUESTION_KW)
+
+
+def _names_option_alternative(label: str, msg_tokens: set) -> bool:
+    """True when a message token *is* one of the alternatives the label lists.
+    Labels enumerate choices ('גב, צוואר וכתפיים'), so a single-word part is a
+    choice on its own; a multi-word part is not matched by one of its words."""
+    # Split before normalizing — _flow_norm drops the very punctuation we split on.
+    parts = [_flow_norm(p) for p in re.split(r"[,;/]| או ", label or "")]
+    single = {p for p in parts if p and " " not in p}
+    if not single:
+        return False
+    return bool(single & (msg_tokens | {_flow_deprefix(t) for t in msg_tokens}))
+
+
+_FLOW_GENERIC_CACHE: dict[str, set] = {}
+
+
+def _flow_generic_tokens(category_id: str) -> set:
+    """Words that identify nothing inside this questionnaire because they name the
+    category itself or run through most of its treatments — 'עיסוי' says only
+    'massage' when every option is a massage."""
+    if category_id in _FLOW_GENERIC_CACHE:
+        return _FLOW_GENERIC_CACHE[category_id]
+    names = [t.get("treatment_name") or "" for t in get_treatments_in_category(category_id)]
+    counts: dict[str, int] = {}
+    for n in names:
+        for tok in set(_significant_tokens(n)):
+            counts[tok] = counts.get(tok, 0) + 1
+    floor = max(2, len(names) // 4)
+    generic = {t for t, c in counts.items() if c >= floor}
+    cat = get_category_by_id(category_id) or {}
+    generic |= set(_significant_tokens(cat.get("category_name") or ""))
+    _FLOW_GENERIC_CACHE[category_id] = generic
+    return generic
+
+
+def _match_yes_no_option(message: str, options: list) -> Optional[dict]:
+    """A bare 'כן'/'לא' answers a yes/no question ('האם הטיפול לקראת אירוע קרוב?')."""
+    # Heads are folded like the labels they are compared against — _flow_norm
+    # turns "כן, יש לי אירוע קרוב" into "כנ ...", so an unfolded "כן" never matches.
+    if _is_affirmation(message):
+        heads = tuple(h.translate(_HEB_FINAL) for h in ("כן", "yes", "نعم"))
+    elif _flow_norm(message) in _FLOW_NEGATIONS:
+        heads = tuple(h.translate(_HEB_FINAL) for h in ("לא", "no", "لا"))
+    else:
+        return None
+    hits = [b for b in options if _flow_norm(b["label"]).startswith(heads)]
+    return hits[0] if len(hits) == 1 else None   # ambiguous → not an answer
+
+
+def _match_flow_option(category_id: str, question_index: int, message: str) -> Optional[dict]:
+    """The option the typed message chooses, or None if it isn't an answer."""
+    q = build_question_response(category_id, question_index)
+    if not q:
+        return None
+    options = q["buttons"]
+    msg_norm = _flow_norm(message)
+    if not msg_norm:
+        return None
+
+    # The label typed verbatim — beats every other consideration.
+    for b in options:
+        if _flow_norm(b["label"]) == msg_norm:
+            return b
+
+    yn = _match_yes_no_option(message, options)
+    if yn:
+        return yn
+
+    if _looks_like_flow_question(message):
+        return None
+
+    msg_tokens = _flow_tokens(message)
+    if not msg_tokens:
+        return None
+    scored = []
+    for b in options:
+        opt_tokens = _flow_tokens(b["label"])
+        if not opt_tokens:
+            continue
+        hit_tokens = {t for t in opt_tokens if _flow_hit(t, msg_tokens)}
+        msg_hits = sum(1 for t in msg_tokens if _flow_hit(t, opt_tokens))
+        # Either direction counts: "עדין" is fully covered by the user's word,
+        # and a verbatim-ish answer fully covers the label.
+        score = max(len(hit_tokens) / len(opt_tokens), msg_hits / len(msg_tokens))
+        scored.append((score, hit_tokens, b))
+    if not scored:
+        return None
+    scored.sort(key=lambda s: s[0], reverse=True)
+    best, runner = scored[0][0], (scored[1][0] if len(scored) > 1 else 0.0)
+    if best >= _FLOW_MATCH_MIN and best - runner >= _FLOW_MATCH_MARGIN:
+        return scored[0][2]
+
+    # Below the bar, but a long word that belongs to exactly one option and to no
+    # other still identifies a choice: "נקבוביות גדולות", "כואב לי הגב". Words that
+    # are generic inside this questionnaire ("עיסוי" in the massage one) are
+    # excluded, so "אני רוצה לשמוע על עיסוי שוודי" stays an interruption.
+    hit_options = [row for row in scored if row[1]]
+    if len(hit_options) == 1:
+        generic = _flow_generic_tokens(category_id)
+        distinctive = {t for t in hit_options[0][1]
+                       if len(t) >= 4 and _flow_deprefix(t) not in generic and t not in generic}
+        if distinctive:
+            return hit_options[0][2]
+
+    # Or the user named one alternative *listed inside* a label: "כואב לי הגב"
+    # picks "גב, צוואר וכתפיים". Only a whole listed alternative counts — "עור"
+    # inside "ניקוי עמוק ותחזוקת עור" is a modifier, not a choice — which is what
+    # keeps this from firing on every passing mention of a word in a label.
+    named = [b for b in options if _names_option_alternative(b["label"], msg_tokens)]
+    if len(named) == 1:
+        return named[0]
+    return None
+
+
+def _reask_flow_question(session: dict, message: str) -> Optional[dict]:
+    """Re-show the question on screen. For an affirmation ('כן בבקשה') the user is
+    accepting the invitation, not choosing — dropping the flow here strands them."""
+    q = build_question_response(session["flow_category_id"], session.get("flow_question_index", 0))
+    if not q:
+        return None
+    leads = {"he": "בשמחה 😊", "ar": "بكل سرور 😊", "en": "Of course 😊"}
+    lang = _detect_language(message or "")
+    return {
+        "reply": leads.get(lang, leads["he"]) + "\n\n" + q["question_text"],
+        "buttons": q["buttons"],
+        "offer_continue": None,
+        "mode": "in_flow",
+        "question_progress": {"current": q["question_index"] + 1, "total": q["total_questions"]},
+    }
+
+
+def _handle_flow_text(session: dict, session_id: str, message: str) -> Optional[dict]:
+    """Free text while the questionnaire is open. Returns None for a genuine
+    interruption ('אתם פתוחים בשישי?'), which the caller handles as before."""
+    category_id = session.get("flow_category_id")
+    if not category_id:
+        return None
+    opt = _match_flow_option(category_id, session.get("flow_question_index", 0), message)
+    if opt:
+        return _handle_flow_button(session, session_id, opt["value"], opt["question_id"])
+    if _is_affirmation(message) or _is_acknowledgment(message):
+        return _reask_flow_question(session, message)
+    return None
 
 
 # ── Category-keyword fallback (no LLM needed) ────────────────────────────────
@@ -2311,6 +3184,12 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
     append_context(session, "user", message, MAX_CONTEXT_MESSAGES)
     locked_treatment = _active_treatment(session)
 
+    # Remember the category at DETECTION time, not at reply time: whichever branch
+    # below answers (including the LLM), the next turn's bare follow-up — "צריך
+    # הכנה לפני?" — still knows what we were talking about. Sticky until another
+    # category is named, and always overridden by a category in the new message.
+    _remember_category(session, _detect_category_in_message(message))
+
     # An explicit new treatment name in THIS message always wins over the old
     # selected treatment — detected and swapped in before any handler below
     # (booking, employee, follow-up, ...) reads locked_treatment, so nothing
@@ -2323,6 +3202,15 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
     # deterministic/LLM path unchanged.
     if locked_treatment:
         switch_candidates = _match_treatments_for_switch(message)
+        if len(switch_candidates) > 1:
+            # False ambiguity from the data: "עיסוי שוודי" is both a treatment and
+            # an alias of "עיסוי קלאסי". _match_named_treatments already resolves
+            # that (a real name beats an alias for the same span), so ask it before
+            # bothering the customer with a choice they did not create.
+            resolved = _match_named_treatments(message)
+            if len(resolved) == 1:
+                switch_candidates = resolved
+    if locked_treatment:
         if len(switch_candidates) > 1:
             resp = _treatment_disambiguation_reply(switch_candidates, lang)
             append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
@@ -2387,12 +3275,39 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
         save_session(session_id, session)
         return resp
 
+    # A category the customer named, by its full name OR by the keyword people
+    # actually type ("סטיילינג", "איפור", "גבות"). The exact-name check alone let
+    # a locked treatment swallow every short category word and answer with its own
+    # card instead — "סטיילינג" was answered with Botox.
     explicit_category = _match_category_by_name(message)
+    switched_category = _detect_category_in_message(message)
+    named_categories = _categories_named_in_message(message)
+    locked_cat = (locked_treatment or {}).get("category_id")
+    if switched_category and switched_category == locked_cat:
+        switched_category = None      # same topic → a genuine follow-up, not a switch
+    # An ambiguous area word ("איפור") resolves to no single category, but it is
+    # still unmistakably a change of subject away from the locked treatment.
+    ambiguous_categories = ([c for c in named_categories if c != locked_cat]
+                            if len(named_categories) > 1 else [])
     followup_message = isTreatmentFollowUp(message)
     should_use_treatment = (
         locked_treatment
         and not explicit_category
+        and not switched_category
+        and not ambiguous_categories
         and not _is_price(message)
+        # Same reason as the price line above: the hard duration guard sits below
+        # this block, so without this a duration question about the active
+        # treatment never reaches it and gets answered as a follow-up instead.
+        and not _is_duration_question(message)
+        # "מי את?" mid-conversation is about the assistant, not the treatment on
+        # screen. Only Zone A can be truthy here (Zone C requires no active
+        # treatment), so this never steals a real follow-up.
+        and not _about_bot_zone(message, locked_treatment)
+        # A refusal, and a question about the clinic's whole offering, are both
+        # about leaving this treatment — not about it.
+        and not _is_negation(message)
+        and not _is_whats_offered(message)
         and not _is_acknowledgment(message)
         and not _is_greeting(message)
         and not _match_logistics_faq(message)
@@ -2419,6 +3334,16 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
         save_session(session_id, session)
         return {"reply": reply, "buttons": None, "mode": "general"}
 
+    # A plain "no" — acknowledge it and open the alternatives, instead of
+    # re-serving the treatment they just declined.
+    if _is_negation(message):
+        _clear_treatment_context(session)
+        setConversationState(session, GENERAL_CHAT)
+        resp = _negation_reply(lang)
+        append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return resp
+
     # Acknowledgment short-circuit — no LLM, instant reply
     if _is_acknowledgment(message):
         reply = _ack_reply(lang)
@@ -2432,6 +3357,23 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
         append_context(session, "assistant", reply, MAX_CONTEXT_MESSAGES)
         save_session(session_id, session)
         return {"reply": reply, "buttons": None, "mode": "general"}
+
+    # "Who are you / what can you do" — answered from here, not by the LLM, so it
+    # survives a rate-limited key. The session is passed so an ambiguous phrasing
+    # is suppressed while a category is still on screen (see _about_bot_zone).
+    about_zone = _about_bot_zone(message, locked_treatment, session)
+    if about_zone:
+        resp = None
+        if about_zone == "topic":
+            resp = _build_category_db_reply(session.get("last_category_id"), lang)
+            # That category is already on screen verbatim — repeating it answers
+            # nothing, so take the other reading of the question instead.
+            if resp and resp["reply"].strip() == _last_assistant_text(session):
+                resp = None
+        resp = resp or _about_bot_reply(lang)
+        append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+        save_session(session_id, session)
+        return resp
 
     # ── Deterministic intent layer — answers the common intents from data, so
     #    they never depend on the LLM being up. The LLM handles only the rest. ──
@@ -2516,6 +3458,37 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
         save_session(session_id, session)
         return sub
 
+    # 2e. The message is essentially a category word ("סטיילינג", "איפור") rather
+    #     than the full category name. Runs after the subgroup step so a more
+    #     specific match still wins, and requires that no treatment was named —
+    #     otherwise "עיסוי שוודי" would open the whole massage category.
+    #     "Essentially" is strict on purpose: every word of the message must come
+    #     from that category's own vocabulary. "הנחיות אחרי לייזר" and "כמה מחזיק
+    #     מיקרובליידינג" name a category too, but they carry extra words and have
+    #     real FAQ answers further down — opening a category would swallow them.
+    if (not _match_named_treatments(message)
+            and not _looks_like_flow_question(message)
+            and _is_bare_category_reference(message, switched_category or (
+                ambiguous_categories[0] if ambiguous_categories else None))):
+        resp = None
+        if switched_category:
+            resp = _build_category_db_reply(switched_category, lang)
+        elif ambiguous_categories:
+            # "איפור" — two categories carry that word. Offer both rather than
+            # picking one at random or, worse, answering about the locked treatment.
+            names = [get_category_by_id(c) for c in ambiguous_categories]
+            resp = _category_picker_reply(
+                lang, _L({"he": "באיזה תחום מדובר?", "ar": "أي مجال تقصدين؟",
+                          "en": "Which area do you mean?"}, lang))
+            resp["buttons"] = [_button(c["category_name"], f"__show_category__:{c['category_id']}")
+                               for c in names if c]
+        if resp:
+            clearConversationContext(session)
+            setConversationState(session, CATEGORY_SELECTED)
+            append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+            save_session(session_id, session)
+            return resp
+
     # 3. "What do you offer" / "explain the treatments" — category-aware.
     if _is_whats_offered(message) or _is_about_treatments(message):
         cat_id = _detect_category_in_message(message)
@@ -2537,9 +3510,33 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
         save_session(session_id, session)
         return picker
 
+    # 4b. "I want to <service>" naming a category → open that category, don't
+    #     answer from the FAQ table. A request to receive a service is not a
+    #     question about it: "אני רוצה להסיר שיער בלייזר" must show the laser
+    #     treatments, not post-laser aftercare instructions. Runs before the FAQ
+    #     step so it wins, and is deterministic so it holds with the LLM down.
+    if _is_service_intent(message):
+        intent_cat = _detect_category_in_message(message)
+        if intent_cat:
+            resp = _build_category_db_reply(intent_cat, lang)
+            if resp:
+                clearConversationContext(session)
+                setConversationState(session, CATEGORY_SELECTED)
+                append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
+                save_session(session_id, session)
+                return resp
+
     # 5. Known FAQ (fuzzy, LLM-free) → answer from the FAQ table. Runs before the
     #    LLM so FAQ answers work forever, even with no LLM available.
-    faq_ans = _match_faq(message)
+    #    Gated by the category the message resolves to (plus the active treatment's
+    #    category, for follow-ups that name no category of their own) so a shared
+    #    word like "שיער" can't pull an answer out of an unrelated category.
+    faq_scope = (
+        _detect_category_in_message(message)
+        or (locked_treatment or {}).get("category_id")
+        or session.get("last_category_id")
+    )
+    faq_ans = _match_faq(message, category_id=faq_scope)
     if faq_ans:
         append_context(session, "assistant", faq_ans, MAX_CONTEXT_MESSAGES)
         save_session(session_id, session)
@@ -2637,6 +3634,55 @@ def handle_message(
     question_id: Optional[str] = None,
     selected_treatment: Optional[dict] = None,
 ) -> dict:
+    """Public entry point. Routes the message, scrubs internal IDs from the reply,
+    and refuses to send the very same reply twice in a row."""
+    prev_reply = ""
+    for m in reversed(get_session(session_id).get("recent_context") or []):
+        if m.get("role") == "assistant":
+            prev_reply = (m.get("content") or "").strip()
+            break
+
+    result = _handle_message(session_id, message, button_value, question_id, selected_treatment)
+    if isinstance(result, dict) and result.get("reply"):
+        result["reply"] = _strip_internal_codes(result["reply"])
+        # Backstop for every classification miss, present and future: whatever went
+        # wrong upstream, repeating the identical wall of text tells the customer
+        # nothing and reads as a broken bot. Typed messages only — clicking the same
+        # button twice may legitimately repeat.
+        # Buttons make a reply actionable and distinct even when its text repeats —
+        # the disambiguation prompt is the same sentence every time and only its
+        # buttons differ. Guarding it would hide the very choice it is offering.
+        if (message and prev_reply and not result.get("buttons")
+                and result["reply"].strip() == prev_reply):
+            result = _repeated_reply_nudge(_detect_language(message), result)
+    return result
+
+
+def _repeated_reply_nudge(lang: str, previous: dict) -> dict:
+    msgs = {
+        "he": ("נראה שאני חוזרת על עצמי 😊 אפשר לשאול אותי משהו ספציפי — למשל על "
+               "ההכנה, התחושה או ההחלמה — או שאעזור לך למצוא טיפול אחר."),
+        "ar": ("يبدو إني عم بكرّر حالي 😊 بتقدري تسأليني عن شي محدد — زي التحضير، "
+               "الإحساس أو فترة التعافي — أو بساعدك تلاقي علاج تاني."),
+        "en": ("It seems I'm repeating myself 😊 You can ask me something specific — "
+               "preparation, how it feels, recovery — or I can help you find another treatment."),
+    }
+    chips = {
+        "he": ["איך מתכוננים לטיפול?", "מה אתם מציעים?", "עזרי לי לבחור טיפול"],
+        "ar": ["كيف بتحضّر للعلاج؟", "شو بتقدموا؟", "ساعديني في اختيار علاج"],
+        "en": ["How do I prepare?", "What do you offer?", "Help me choose a treatment"],
+    }
+    return {**previous, "reply": msgs.get(lang, msgs["he"]), "buttons": None,
+            "suggestions": chips.get(lang, chips["he"]), "no_suggest": True}
+
+
+def _handle_message(
+    session_id: str,
+    message: Optional[str] = None,
+    button_value: Optional[str] = None,
+    question_id: Optional[str] = None,
+    selected_treatment: Optional[dict] = None,
+) -> dict:
     session = get_session(session_id)
     _apply_selected_treatment_context(session, selected_treatment)
     mode = session.get("mode", "general")
@@ -2667,8 +3713,9 @@ def handle_message(
         lang = _detect_language(message or "")
         clearConversationContext(session)
         setConversationState(session, CATEGORY_SELECTED)
-        save_session(session_id, session)
         category_id = button_value.split(":", 1)[1].strip()
+        _remember_category(session, category_id)
+        save_session(session_id, session)
         resp = _show_category_all_reply(category_id, lang)
         return resp or {"reply": _missing_treatment_info_msg(lang), "buttons": None, "offer_continue": None, "mode": "general"}
 
@@ -2676,8 +3723,9 @@ def handle_message(
         lang = _detect_language(message or "")
         clearConversationContext(session)
         setConversationState(session, CATEGORY_SELECTED)
-        save_session(session_id, session)
         _, category_id, goal = button_value.split(":", 2)
+        _remember_category(session, category_id.strip())
+        save_session(session_id, session)
         resp = _compact_treatment_reply(category_id.strip(), goal.strip())
         return resp or {"reply": _missing_treatment_info_msg(lang), "buttons": None, "offer_continue": None, "mode": "general"}
 
@@ -2738,8 +3786,12 @@ def handle_message(
     if mode == "in_flow" and button_value and question_id:
         return _handle_flow_button(session, session_id, button_value, question_id)
 
-    # In-flow: free text → exit flow, answer normally, then offer Continue
+    # In-flow: free text → read it as an answer to the question on screen first;
+    # only a genuine interruption exits the flow.
     if mode == "in_flow" and message:
+        flow_result = _handle_flow_text(session, session_id, message)
+        if flow_result:
+            return flow_result
         session["mode"] = "general"
         setConversationState(session, GENERAL_CHAT)
         save_session(session_id, session)
