@@ -16,7 +16,7 @@ import { openAppointmentWhatsApp } from "../lib/booking";
 const navLinks = [
   { label: "אודות", href: "#about" },
   { label: "סוגי טיפולים", href: "#treatments", isTreatmentsDropdown: true },
-  { label: "גלריה", href: "#gallery" },
+  { label: "גלריה", href: "/gallery" },
   { label: "דרושים", href: "/recruitment" },
   { label: "צור קשר", href: "#contact" },
 ];

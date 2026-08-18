@@ -22,6 +22,7 @@ import ServiceCategoryPage from "./pages/ServiceCategoryPage";
 import ServiceTreatmentDetailsPage from "./pages/ServiceTreatmentDetailsPage";
 import ClientArea from "./pages/ClientArea";
 import RecruitmentPage from "./pages/RecruitmentPage";
+import GalleryPage from "./pages/GalleryPage";
 import LoginModal from "./components/LoginModal";
 import ProtectedRoute from "./components/ProtectedRoute";
 import { AuthProvider } from "./context/AuthContext";
@@ -130,6 +131,7 @@ function AppContent() {
           <Route path="/treatments" element={<Navigate to="/categories/cosmetology" replace />} />
           <Route path="/treatments/:id" element={<TreatmentDetailsPage />} />
           <Route path="/recruitment" element={<RecruitmentPage />} />
+          <Route path="/gallery" element={<GalleryPage />} />
           <Route path="/staff-login" element={<StaffLogin />} />
           <Route path="/admin-login" element={<Navigate to="/staff-login" replace />} />
           <Route
