@@ -77,10 +77,10 @@ function WhyChooseUs() {
     { num: '05', text: 'חוויה אישית, חמה ומזמינה — כי את מגיעה לטוב ביותר.' },
   ];
 
-  const stats = [
-    { value: '500+', label: 'לקוחות מרוצות', color: '#4A9BA8' },
-    { value: '14h',  label: 'זמינות יומית',   color: '#C4795A' },
-    { value: '100%', label: 'מקצועיות מוכחת', color: '#E8C97A' },
+  const accentSwatches = [
+    'linear-gradient(135deg, #4A9BA8, #7dd3d8)',
+    'linear-gradient(135deg, #E8825A, #C4795A)',
+    'linear-gradient(135deg, #F2D9A0, #E8C97A)',
   ];
 
   return (
@@ -207,19 +207,23 @@ function WhyChooseUs() {
               </p>
             </motion.div>
 
-            {/* stats row */}
+            {/* decorative accent row */}
             <motion.div
               initial={{ opacity: 0, y: 16 }}
               animate={inView ? { opacity: 1, y: 0 } : {}}
               transition={{ duration: 0.6, delay: 1.0 }}
-              className="flex gap-8 mt-10 justify-end"
+              className="flex gap-4 mt-10 justify-end"
             >
-              {stats.map(({ value, label, color }, i) => (
-                <div key={i} className="text-right rounded-2xl px-5 py-3" style={{ background: `${color}14` }}>
-                  <p className="font-black leading-none mb-1" style={{ fontSize: 'clamp(1.5rem, 2.2vw, 2rem)', color }}>
-                    {value}
-                  </p>
-                  <p className="text-gray-500 text-sm">{label}</p>
+              {accentSwatches.map((gradient, i) => (
+                <div
+                  key={i}
+                  className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                  style={{ background: gradient, boxShadow: '0 10px 26px rgba(0,0,0,0.08)' }}
+                >
+                  <div
+                    className="w-3 h-3 rounded-[3px]"
+                    style={{ background: 'rgba(255,255,255,0.85)', transform: 'rotate(45deg)' }}
+                  />
                 </div>
               ))}
             </motion.div>
