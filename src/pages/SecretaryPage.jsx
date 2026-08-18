@@ -1928,17 +1928,6 @@ export default function SecretaryPage() {
                   <option key={employee.name} value={employee.name}>{employee.name}</option>
                 ))}
               </select>
-              {availableEmployees.length > 0 && (
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {availableEmployees.map((employee) => (
-                    <span key={employee.name} className="px-2 py-0.5 rounded-full text-[10px] font-semibold"
-                      style={{ background: "#EAF7EF", color: "#2F8F5B", border: "1px solid #BFE8CE" }}>
-                      {employee.name}
-                      {selectedTreatmentCategory && ` - ${formatEmployeeAvailability(employee.name, selectedTreatmentCategory)}`}
-                    </span>
-                  ))}
-                </div>
-              )}
               <FieldError show={fieldErrors.employee_name} />
               <FieldError show={fieldErrors.employee_unavailable} message={GENERAL_ERROR_MESSAGES.employee_unavailable} />
               <FieldError show={fieldErrors.employee_booked} message={GENERAL_ERROR_MESSAGES.employee_booked} />
