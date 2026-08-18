@@ -1,29 +1,39 @@
 import { useCallback, useEffect, useState } from "react";
 import { ChevronLeft, ChevronRight, X } from "lucide-react";
-import makeupSlide from "../assets/makeup-professional.png";
-import manicureSlide from "../assets/slide1.jpg";
-import hairSlide from "../assets/slide2.jpg";
-import cosmoSlide from "../assets/Como.jpg";
-import eyebrowsSlide from "../assets/eyebrows.png";
-import hairRemovalSlide from "../assets/hair-removal.png";
-import bodySlide from "../assets/body-treatments.png";
-import aestheticSlide from "../assets/aesth.png";
-import personalStylingSlide from "../assets/personal_styling.png";
-import spaSlide from "../assets/spa.jpg";
-import facialSlide from "../assets/facialTreatment.jpg";
+import makeupBrushes from "../assets/gallery/gallery-01-makeup-brushes.png";
+import nails from "../assets/gallery/gallery-02-nails.png";
+import treatmentDetail from "../assets/gallery/gallery-03-treatment-detail.png";
+import reception from "../assets/gallery/gallery-04-reception.png";
+import eyebrowsPmu from "../assets/gallery/gallery-05-eyebrows-pmu.png";
+import lounge from "../assets/gallery/gallery-06-lounge.png";
+import haircut from "../assets/gallery/gallery-07-haircut.png";
+import laserHairRemoval from "../assets/gallery/gallery-08-laser-hair-removal.png";
+import facialTreatment from "../assets/gallery/gallery-09-facial-treatment.png";
+import storefront from "../assets/gallery/gallery-10-storefront.png";
+import eyebrowsCloseup from "../assets/gallery/gallery-11-eyebrows-closeup.png";
+import stylingArea from "../assets/gallery/gallery-12-styling-area.png";
+import brandHallway from "../assets/gallery/gallery-13-brand-hallway.png";
+import products from "../assets/gallery/gallery-14-products.png";
+import giftBag from "../assets/gallery/gallery-15-gift-bag.png";
+import aestheticInjection from "../assets/gallery/gallery-16-aesthetic-injection.png";
 
 const GALLERY_PHOTOS = [
-  { src: spaSlide, alt: "המרכז שלנו" },
-  { src: hairSlide, alt: "עיצוב שיער" },
-  { src: facialSlide, alt: "טיפולי פנים" },
-  { src: manicureSlide, alt: "מניקור ופדיקור" },
-  { src: cosmoSlide, alt: "טיפולי קוסמטיקה" },
-  { src: bodySlide, alt: "טיפולי גוף" },
-  { src: eyebrowsSlide, alt: "עיצוב גבות" },
-  { src: hairRemovalSlide, alt: "הסרת שיער" },
-  { src: makeupSlide, alt: "איפור מקצועי" },
-  { src: aestheticSlide, alt: "טיפולי אסתטיקה" },
-  { src: personalStylingSlide, alt: "סטיילינג אישי" },
+  { src: reception, alt: "המרכז שלנו" },
+  { src: haircut, alt: "עיצוב שיער" },
+  { src: eyebrowsPmu, alt: "איפור קבוע ועיצוב גבות" },
+  { src: nails, alt: "מניקור ופדיקור" },
+  { src: lounge, alt: "המרחב שלנו" },
+  { src: laserHairRemoval, alt: "הסרת שיער" },
+  { src: makeupBrushes, alt: "איפור מקצועי" },
+  { src: treatmentDetail, alt: "מהטיפולים שלנו" },
+  { src: facialTreatment, alt: "טיפולי פנים" },
+  { src: storefront, alt: "המרכז שלנו מבחוץ" },
+  { src: eyebrowsCloseup, alt: "עיצוב גבות" },
+  { src: stylingArea, alt: "אזור עיצוב השיער" },
+  { src: brandHallway, alt: "המותג שלנו" },
+  { src: products, alt: "המוצרים שלנו" },
+  { src: giftBag, alt: "מתנה בכל ביקור" },
+  { src: aestheticInjection, alt: "טיפולי אסתטיקה" },
 ];
 
 function Lightbox({ photos, index, onClose, onPrev, onNext }) {
@@ -129,9 +139,10 @@ export default function GalleryPage() {
         style={{ minHeight: "42vh", paddingTop: "6rem" }}
       >
         <img
-          src={spaSlide}
+          src={reception}
           alt="גלריית MeDay Beauty Center"
-          className="absolute inset-0 h-full w-full object-cover object-center"
+          className="absolute inset-0 h-full w-full object-cover"
+          style={{ objectPosition: "center 20%" }}
         />
         <div
           className="absolute inset-0"
