@@ -57,10 +57,11 @@ function CategoryCard({ category, index }) {
       initial={{ opacity: 0, y: 40 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.6, delay: index * 0.07, ease: [0.22, 1, 0.36, 1] }}
+      className="h-full"
     >
       <button
         onClick={() => navigate(`/categories/${category.slug}`)}
-        className="group w-full text-right bg-white rounded-2xl overflow-hidden transition-all duration-300"
+        className="group w-full h-full flex flex-col text-right bg-white rounded-2xl overflow-hidden transition-all duration-300"
         style={{ boxShadow: "0 4px 20px rgba(0,0,0,0.09)", border: "1px solid rgba(232,196,160,0.45)" }}
         onMouseEnter={e => {
           e.currentTarget.style.boxShadow   = `0 20px 48px rgba(0,0,0,0.13), 0 0 32px ${cardAccent}28`;
@@ -107,23 +108,24 @@ function CategoryCard({ category, index }) {
 
         {/* ── text content zone — tinted to match card accent ── */}
         <div
-          className="px-5 pt-3 pb-5"
+          className="px-5 pt-3 pb-5 flex flex-col flex-1"
           style={{ background: `linear-gradient(to bottom, ${cardAccent}09, ${cardAccent}03)` }}
         >
           <h2
-            className="text-lg font-black mb-2 leading-snug"
-            style={{ color: cardAccent }}
+            className="text-lg font-black mb-2 leading-snug line-clamp-2"
+            style={{ color: cardAccent, minHeight: "3.1rem" }}
           >
             {category.name}
           </h2>
 
-          {category.description && (
-            <p className="text-sm text-gray-400 leading-relaxed line-clamp-2 mb-4">
-              {category.description}
-            </p>
-          )}
+          <p
+            className="text-sm text-gray-400 leading-relaxed line-clamp-2 mb-4"
+            style={{ minHeight: "2.8rem" }}
+          >
+            {category.description}
+          </p>
 
-          <div className="flex items-center justify-between pt-3 border-t" style={{ borderColor: `${cardAccent}22` }}>
+          <div className="flex items-center justify-between pt-3 border-t mt-auto" style={{ borderColor: `${cardAccent}22` }}>
             <span
               className="text-sm font-bold transition-all duration-200 group-hover:underline underline-offset-2"
               style={{ color: cardAccent }}

@@ -282,7 +282,7 @@ function CosmeticSectionBlock({ section }) {
 }
 
 /* ── Promo description block — light warm bg + coral heading ──── */
-function PromoDescriptionBlock({ heading, paragraphs }) {
+function PromoDescriptionBlock({ heading, subheading, paragraphs }) {
   return (
     <div
       className="relative overflow-hidden text-center"
@@ -342,6 +342,12 @@ function PromoDescriptionBlock({ heading, paragraphs }) {
           }}
         >
           {heading}
+          {subheading && (
+            <>
+              <br />
+              {subheading}
+            </>
+          )}
         </h2>
 
         {/* thin divider under heading */}
@@ -506,6 +512,7 @@ export default function ServiceCategoryPage() {
         {category.promoHeading ? (
           <PromoDescriptionBlock
             heading={category.promoHeading}
+            subheading={category.promoSubheading}
             paragraphs={category.promoParagraphs || []}
           />
         ) : hasSectionLayout ? (
