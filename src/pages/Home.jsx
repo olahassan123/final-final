@@ -11,6 +11,7 @@ import hairRemovalSlide from '../assets/hair-removal.png';
 import bodySlide from '../assets/body-treatments.png';
 import aestheticSlide from '../assets/aesth.png';
 import personalStylingSlide from '../assets/personal_styling.png';
+import { APPOINTMENT_WHATSAPP_URL } from '../lib/booking';
 
 /* ─── Treatment categories shown in the home grid ──────────────── */
 const CATEGORIES = [
@@ -450,7 +451,7 @@ export default function Home() {
                 >
                   {/* Primary: WhatsApp booking — teal per brand system */}
                   <motion.a
-                    href="https://wa.me/972"
+                    href={APPOINTMENT_WHATSAPP_URL}
                     target="_blank"
                     rel="noopener noreferrer"
                     whileHover={{ scale: 1.05, boxShadow: '0 8px 28px rgba(74,155,168,0.42)' }}
@@ -605,7 +606,7 @@ export default function Home() {
 
               {/* CTA */}
               <motion.a
-                href="https://wa.me/972"
+                href={APPOINTMENT_WHATSAPP_URL}
                 target="_blank"
                 rel="noopener noreferrer"
                 whileHover={{ scale: 1.04, boxShadow: '0 8px 28px rgba(74,155,168,0.40)' }}
@@ -623,7 +624,7 @@ export default function Home() {
 
             {/* ── Blob image (left in RTL — second child) ── */}
             <div
-              className="flex-shrink-0"
+              className="relative flex-shrink-0"
               style={{ width: 'clamp(260px, 34vw, 430px)', height: 'clamp(260px, 34vw, 430px)' }}
             >
               {/* outer glow ring behind the blob */}
