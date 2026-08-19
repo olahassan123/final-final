@@ -44,6 +44,11 @@ APPOINTMENTS_DB = Path(__file__).parent / "appointments.db"
 #    clinic can paste a fresh key from the admin page; env is a fallback. If no
 #    key or it's disabled, the bot runs on its deterministic core. ─────────────
 
+# Set CHATBOT_DEBUG=1 to log which layer answered each message (gemini /
+# database / rule_based / fallback / gemini_error / gemini_unavailable).
+CHATBOT_DEBUG = os.getenv("CHATBOT_DEBUG", "") not in ("", "0", "false", "False")
+
+
 def _get_llm_key() -> str:
     return (get_setting("llm_api_key") or os.getenv("GEMINI_API_KEY", "")).strip()
 
@@ -52,51 +57,120 @@ def _llm_enabled() -> bool:
     return get_setting("llm_enabled", "1") != "0"
 
 
+# After a free-tier 429 there is no point spending latency (and quota) on calls
+# we know will fail; back off briefly and run on the deterministic core instead.
+# This is what keeps two Gemini calls per message affordable on the free plan.
+_LLM_COOLDOWN_SECONDS = 45
+# A daily free-tier cap will not clear for hours. Back off far longer so the bot
+# is not adding a failed round-trip to every message for the rest of the day.
+_LLM_DAILY_COOLDOWN_SECONDS = 30 * 60
+_llm_cooldown_until = 0.0
+
+
+def _llm_cool_down(seconds: float = _LLM_COOLDOWN_SECONDS):
+    global _llm_cooldown_until
+    _llm_cooldown_until = max(_llm_cooldown_until, time.time() + seconds)
+
+
 def _llm_ok() -> bool:
+    if time.time() < _llm_cooldown_until:
+        return False
     return _llm_enabled() and bool(_get_llm_key())
 
 
 def _record_llm_status(status: str):
+    if status in ("daily_quota", "no_quota"):
+        _llm_cool_down(_LLM_DAILY_COOLDOWN_SECONDS)
+    elif status == "rate_limited":
+        _llm_cool_down()
     """Remember the last LLM outcome so the admin panel can show it in plain words.
     status: 'ok' | 'rate_limited' | 'invalid_key' | 'error'."""
     set_setting("llm_last_status", status)
     set_setting("llm_last_status_at", datetime.now(timezone.utc).isoformat())
 
 
+def _redact(text: str) -> str:
+    """Strip the API key out of anything we log. requests puts the full request
+    URL — including ?key=… — into HTTPError's string form, so logging an
+    exception verbatim leaks the secret into the server log."""
+    text = str(text)
+    key = _get_llm_key()
+    if key:
+        text = text.replace(key, "***")
+    return re.sub(r"([?&]key=)[^&\s]+", lambda m: m.group(1) + "***", text)
+
+
+# The thinking-config knob has now broken Gemini twice, because the model behind
+# the `gemini-flash-latest` alias changes underneath us and each generation
+# accepts a different spelling:
+#   thinkingBudget:0        → accepted today; was rejected by an earlier alias target
+#   thinkingLevel:"minimal" → rejected today ("Thinking level MINIMAL is not
+#                             supported for this model"), was the previous fix
+# Both rejections surface as HTTP 400 INVALID_ARGUMENT, which _record_llm_status
+# used to file as "invalid_key" — so the admin page blamed the key and nobody
+# looked at the request body. Instead of hardcoding one spelling, try the
+# preferred one and fall back on a thinking-specific 400. The working shape is
+# remembered per-process so we pay the retry at most once.
+_THINKING_VARIANTS = [{"thinkingBudget": 0}, {"thinkingLevel": "low"}, None]
+_thinking_variant_idx = 0
+
+
+def _is_thinking_config_error(resp) -> bool:
+    """A 400 caused by the thinkingConfig shape rather than by the API key."""
+    if resp is None or resp.status_code != 400:
+        return False
+    try:
+        msg = (resp.json().get("error", {}).get("message") or "").lower()
+    except Exception:
+        msg = (resp.text or "").lower()
+    return "thinking" in msg
+
+
 def _call_gemini(system: str, user_prompt: str, key: Optional[str] = None,
-                 timeout: int = 20, max_tokens: int = 500) -> str:
+                 timeout: int = 20, max_tokens: int = 500,
+                 temperature: float = 0.4) -> str:
     """Single Gemini generateContent call. Returns the raw text (JSON string)."""
+    global _thinking_variant_idx
     key = key or _get_llm_key()
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
-    body = {
-        "system_instruction": {"parts": [{"text": system}]},
-        "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
-        "generationConfig": {
-            "temperature": 0.4,
+
+    def _body(thinking):
+        gen = {
+            "temperature": temperature,
             "maxOutputTokens": max_tokens,
             "responseMimeType": "application/json",
-            # gemini-flash-latest is a "thinking" model; without this it can spend the
-            # whole token budget on internal thoughts and return empty content.
-            # NOTE: thinkingBudget:0 is no longer accepted by the model version
-            # currently behind this alias (gemini-3.6-flash) and returns HTTP 400
-            # "Request contains an invalid argument" — which every caller here
-            # (including the API-key validation ping) then misreports as an
-            # invalid key. thinkingLevel:"minimal" is the current equivalent.
-            "thinkingConfig": {"thinkingLevel": "minimal"},
-        },
-    }
-    # Retry transient Google failures (timeouts, connection drops, 500/502/503).
-    for attempt in range(3):
-        try:
-            resp = requests.post(url, params={"key": key}, json=body, timeout=timeout)
-        except (requests.Timeout, requests.ConnectionError):
-            if attempt < 2:
+        }
+        # These are "thinking" models; left unconstrained they can spend the whole
+        # token budget on internal thoughts and return empty content.
+        if thinking is not None:
+            gen["thinkingConfig"] = thinking
+        return {
+            "system_instruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
+            "generationConfig": gen,
+        }
+
+    resp = None
+    # Walk the thinking variants, but only when the model explicitly rejects the
+    # one we tried. Any other status is returned to the caller untouched.
+    for variant_idx in range(_thinking_variant_idx, len(_THINKING_VARIANTS)):
+        body = _body(_THINKING_VARIANTS[variant_idx])
+        # Retry transient Google failures (timeouts, connection drops, 500/502/503).
+        for attempt in range(3):
+            try:
+                resp = requests.post(url, params={"key": key}, json=body, timeout=timeout)
+            except (requests.Timeout, requests.ConnectionError):
+                if attempt < 2:
+                    time.sleep(1.2 * (attempt + 1))
+                    continue
+                raise
+            if resp.status_code in (500, 502, 503) and attempt < 2:
                 time.sleep(1.2 * (attempt + 1))
                 continue
-            raise
-        if resp.status_code in (500, 502, 503) and attempt < 2:
-            time.sleep(1.2 * (attempt + 1))
+            break
+        if _is_thinking_config_error(resp) and variant_idx + 1 < len(_THINKING_VARIANTS):
             continue
+        _thinking_variant_idx = variant_idx   # remember what this model accepts
         break
     resp.raise_for_status()
     data = resp.json()
@@ -106,11 +180,41 @@ def _call_gemini(system: str, user_prompt: str, key: Optional[str] = None,
     return parts[0].get("text", "")
 
 
+def _classify_http_error(e: requests.HTTPError) -> str:
+    """Map a Gemini HTTP failure onto one of our status words.
+
+    Not every 400 is a bad key. A malformed generationConfig (see the
+    thinking-config note above) also returns 400 INVALID_ARGUMENT, and filing
+    that as 'invalid_key' is what hid a total Gemini outage behind an admin
+    page that said "the key is invalid" — while the key was fine. Only trust
+    401/403, or a 400 that actually names the key, as a key problem."""
+    resp = e.response
+    code = resp.status_code if resp is not None else 0
+    body = (resp.text if resp is not None else "") or ""
+    low = body.lower()
+    if code == 429:
+        if "limit: 0" in body:
+            return "no_quota"        # this Google account/project has NO free-tier allowance
+        # A per-DAY free-tier cap is not a transient throttle: retrying in a
+        # minute will fail all day. Separate it so the admin page can say so and
+        # so we stop paying latency on calls that cannot succeed until reset.
+        if "perday" in low.replace("_", "").replace("-", ""):
+            return "daily_quota"
+        return "rate_limited"        # valid key, just a transient throttle right now
+    if code in (401, 403):
+        return "invalid_key"
+    if code == 400:
+        if "api key" in low or "api_key_invalid" in low or "unregistered caller" in low:
+            return "invalid_key"
+        return "bad_request"         # our request body is wrong — a code bug, not a key bug
+    return "error"
+
+
 def _test_llm_key(key: str) -> tuple[bool, str]:
     """Validate a key with a tiny call. Returns (accepted, status) where status is
-    one of 'ok' | 'rate_limited' | 'invalid_key' | 'error'. A 429 means the key
-    authenticated but hit its free-tier quota — the key itself is valid, so we
-    accept it (an invalid key returns 400/401/403, never 429)."""
+    one of 'ok' | 'rate_limited' | 'invalid_key' | 'bad_request' | 'error'. A 429
+    means the key authenticated but hit its free-tier quota — the key itself is
+    valid, so we accept it (an invalid key returns 400/401/403, never 429)."""
     key = (key or "").strip()
     if not key:
         return False, "invalid_key"
@@ -118,15 +222,11 @@ def _test_llm_key(key: str) -> tuple[bool, str]:
         _call_gemini('Reply with JSON {"ok":true}.', "ping", key=key, timeout=25, max_tokens=20)
         return True, "ok"
     except requests.HTTPError as e:
-        code = e.response.status_code if e.response is not None else 0
-        body = e.response.text if e.response is not None else ""
-        if code == 429:
-            if "limit: 0" in body:
-                return False, "no_quota"     # this Google account/project has NO free-tier allowance
-            return True, "rate_limited"      # valid key, just a transient throttle right now
-        if code in (400, 401, 403):
-            return False, "invalid_key"
-        return False, "error"
+        status = _classify_http_error(e)
+        # A throttle — per-minute or per-day — means the key authenticated, so
+        # the key itself is good. Rejecting it would tell the clinic their brand
+        # new key is invalid simply because today's free allowance is spent.
+        return (status in ("rate_limited", "daily_quota")), status
     except Exception:
         return False, "error"
 
@@ -906,7 +1006,7 @@ def _unmatched_fallback(message: str, lang: str, session: dict) -> dict:
         phrasing; say so, rather than implying the question was off-topic."""
     resp = _deterministic_fallback(message, lang)
     if resp:
-        return resp
+        return {**resp, "response_source": resp.get("response_source", "database")}
     active_treatment = _active_treatment(session)
     if active_treatment:
         # A natural follow-up may not contain one of our exact topic keywords.
@@ -919,13 +1019,13 @@ def _unmatched_fallback(message: str, lang: str, session: dict) -> dict:
         if category_id:
             category_reply = _build_category_db_reply(category_id, lang)
             if category_reply:
-                return category_reply
+                return {**category_reply, "response_source": "database"}
         if _needs_treatment_clarification(message):
-            return _treatment_clarification_reply(lang)
-        return _build_catalog_overview(lang)
+            return {**_treatment_clarification_reply(lang), "response_source": "fallback"}
+        return {**_build_catalog_overview(lang), "response_source": "fallback"}
     if _has_active_context(session):
-        return _cant_parse_reply(lang)
-    return _out_of_scope_reply(lang)
+        return {**_cant_parse_reply(lang), "response_source": "fallback"}
+    return {**_out_of_scope_reply(lang), "response_source": "fallback"}
 
 
 def _match_forward_topic(message: str):
@@ -2395,7 +2495,355 @@ def _detect_followup_topic(message: str) -> str:
     return "general"
 
 
+# ── Gemini stage 1: understand the follow-up ─────────────────────────────────
+# The router used to decide what a treatment follow-up meant with substring
+# keyword lists (_detect_field / _detect_followup_topic). Those only recognise
+# the exact phrasings someone thought to type into the list, so "מה כדאי לדעת
+# לפני?" and "And what about after?" both collapsed to topic "general" and were
+# answered with the same full treatment dump — the "different question, same
+# paragraph" the supervisor saw. Gemini is far better at this and it is the one
+# job it is genuinely suited for, so it now classifies intent. It never writes
+# clinic facts here: it returns FIELD NAMES from a closed list, and Python looks
+# those fields up in the database. An unknown field name is discarded.
+
+_TREATMENT_FIELD_ENUM = [
+    "short_description", "good_for", "what_to_expect", "technique_or_equipment",
+    "preparation", "aftercare", "pain_level", "downtime",
+    "sessions_recommended", "results_longevity",
+]
+
+
+def _llm_understand(message: str, context: list, treatment: dict,
+                    lang: str) -> Optional[dict]:
+    """Classify a follow-up against the current treatment. Returns
+    {about_this_treatment, fields[], confidence} or None if Gemini is unusable.
+
+    Deliberately NOT told which fields hold data: this call decides what was
+    ASKED, Python decides what we can answer. Keeping those separate is what
+    stops a 'helpful' model from steering the question toward the data we have."""
+    if not _llm_ok():
+        return None
+    name = treatment.get("treatment_name") or ""
+    convo = ""
+    if context:
+        convo = "\n".join(
+            f"{m.get('role')}: {m.get('content', '')[:300]}"
+            for m in context[-MAX_CONTEXT_MESSAGES:]
+        )
+    prompt = f"""You classify a customer's follow-up question in a beauty-clinic chat.
+
+The conversation is currently about this treatment: "{name}".
+
+Recent conversation:
+{convo or "(none)"}
+
+The customer just wrote: "{message}"
+
+Return JSON only:
+{{"about_this_treatment": true|false,
+  "fields": ["..."],
+  "confidence": 0.0-1.0}}
+
+"about_this_treatment": true if the message asks something about the treatment
+above (including short follow-ups like "and after?", "ומה אחרי?", "وشو بعد؟"
+that rely on the conversation for their subject). false if the customer changed
+subject (another treatment, opening hours, address, booking, price, a complaint,
+or anything unrelated).
+
+"fields": which of these EXACT field names would answer the question. Pick every
+field that applies — a question about both preparation and aftercare returns
+both. Use [] if none apply or about_this_treatment is false.
+  short_description      - what the treatment is, general overview
+  good_for               - who it suits, what problems it addresses
+  what_to_expect         - what happens during the treatment
+  technique_or_equipment - the method, technology or device used
+  preparation            - what to do BEFORE the treatment
+  aftercare              - what to do AFTER the treatment
+  pain_level             - whether it hurts, how it feels
+  downtime               - recovery, redness, time before going out
+  sessions_recommended   - how many sessions are recommended
+  results_longevity      - how long the result lasts
+
+For a broad request ("tell me more about this", "ספרי לי עוד") return several
+overview fields: short_description, good_for, what_to_expect.
+
+NEVER return a field for a question about price or how long an appointment
+takes — for those return "fields": [] and about_this_treatment: true.
+
+Do not write any explanation, any clinic facts, or any prose. JSON only."""
+    try:
+        raw = _call_gemini(
+            "You are a strict intent classifier. Return JSON only, never prose.",
+            prompt, timeout=12, max_tokens=250, temperature=0,
+        )
+        data = json.loads(raw)
+        fields = [f for f in (data.get("fields") or [])
+                  if isinstance(f, str) and f in _TREATMENT_FIELD_ENUM]
+        seen, ordered = set(), []
+        for f in fields:
+            if f not in seen:
+                seen.add(f)
+                ordered.append(f)
+        _record_llm_status("ok")
+        return {
+            "about_this_treatment": bool(data.get("about_this_treatment", False)),
+            "fields": ordered,
+            "confidence": float(data.get("confidence") or 0.0),
+        }
+    except requests.HTTPError as e:
+        _record_llm_status(_classify_http_error(e))
+        print(f"[chatbot intent error] {_redact(e)}")
+        return None
+    except Exception as e:
+        _record_llm_status("error")
+        print(f"[chatbot intent error] {_redact(e)}")
+        return None
+
+
+def _order_fields(fields: list) -> list:
+    """Canonical reading order, so a combined answer runs preparation → treatment
+    → aftercare → recovery rather than in whatever order the matcher found them."""
+    return sorted(set(fields), key=lambda f: (_TREATMENT_FIELD_ENUM.index(f)
+                                              if f in _TREATMENT_FIELD_ENUM else 99))
+
+
+def _chip_field(message: str) -> Optional[str]:
+    """The suggestion chips are text we wrote ourselves. When the customer clicks
+    one, its label comes back verbatim — there is nothing to interpret, so we skip
+    the Gemini understanding call entirely and save a free-tier request."""
+    ml = (message or "").strip().lower().rstrip("?؟").strip()
+    for field, q in _FIELD_Q.items():
+        for lg in ("he", "ar", "en"):
+            if ml == q[lg].strip().lower().rstrip("?؟").strip():
+                return field
+    return None
+
+
+def _keyword_followup_fields(message: str) -> tuple:
+    """Deterministic baseline, also the fallback whenever Gemini is unavailable.
+    Unlike _detect_field it can return MORE THAN ONE field, so 'before and
+    after' no longer silently loses half the question."""
+    ml = (message or "").lower()
+    fields = []
+    # Check every field's keywords instead of returning on the first hit.
+    for field, kws in _FIELD_KW.items():
+        if any(k in ml for k in kws):
+            fields.append(field)
+    # Bare directional follow-ups the keyword lists miss: "לפני?" / "before?"
+    before = ["לפני", "מראש", "להתכונן", "מתכונ", "הכנה",
+              "before", "prepare", "preparation", "beforehand",
+              "قبل", "تحضير", "استعد"]
+    after = ["אחרי", "לאחר", "בהמשך", "after", "afterwards", "aftercare",
+             "بعد", "العناية بعد"]
+    if any(k in ml for k in before) and "preparation" not in fields:
+        fields.append("preparation")
+    if any(k in ml for k in after) and "aftercare" not in fields:
+        fields.append("aftercare")
+    if fields:
+        fields = _order_fields(fields)
+        topic = fields[0] if len(fields) == 1 else "multi"
+        return fields, topic
+    topic = _detect_followup_topic(message)
+    if topic != "general":
+        return list(_FOLLOWUP_TOPIC_FIELDS.get(topic, [])), topic
+    # "general" is _detect_followup_topic's no-match answer, not a positive
+    # signal. Only treat it as a broad treatment question when the message
+    # really reads like one ("tell me more", "what is it?"); otherwise claim
+    # nothing so the caller keeps routing (category switches, catalog questions).
+    if isTreatmentFollowUp(message):
+        return list(_FOLLOWUP_TOPIC_FIELDS["general"]), "general"
+    return [], None
+
+
+def _resolve_followup_intent(message: str, session: dict, treatment: dict,
+                             lang: str) -> tuple:
+    """(fields, topic, source). fields == [] means 'not a question about this
+    treatment' and the caller should fall through to normal routing."""
+    chip = _chip_field(message)
+    if chip:
+        return [chip], chip, "rule_based"
+
+    kw_fields, kw_topic = _keyword_followup_fields(message)
+
+    understood = _llm_understand(message, session.get("recent_context") or [],
+                                 treatment, lang)
+    if understood is None:
+        return kw_fields, kw_topic, ("rule_based" if kw_fields else "rule_based")
+
+    if not understood["about_this_treatment"]:
+        # Gemini says the subject changed — but only trust that over an explicit
+        # keyword hit when the keywords agree there is nothing treatment-shaped.
+        return ([], None, "gemini") if not kw_fields else (kw_fields, kw_topic, "rule_based")
+
+    fields = understood["fields"]
+    if not fields:
+        # Understood as treatment-related but no field applies (e.g. price or
+        # duration, both hard-guarded elsewhere). Fall through to normal routing.
+        return [], None, "gemini"
+
+    fields = _order_fields(fields)
+    topic = fields[0] if len(fields) == 1 else "multi"
+    return fields, topic, "gemini"
+
+
+# ── Gemini stage 3: phrase the verified data ─────────────────────────────────
+
+_DIGITS_RE = re.compile(r"\d+")
+
+
+def _phrasing_is_grounded(candidate: str, source: str) -> bool:
+    """Accept a Gemini rewrite only if it introduces no new numbers and stays
+    close to the source length. This is the gate that makes it safe to let the
+    model phrase an answer: any invented price, duration, session count or
+    percentage brings in a digit that is not in the verified text, and any
+    padded-out 'general knowledge' blows the length budget."""
+    text = (candidate or "").strip()
+    if not text:
+        return False
+    if len(text) > len(source) * 2.2 + 160:
+        return False
+    allowed = set(_DIGITS_RE.findall(source))
+    if any(d not in allowed for d in _DIGITS_RE.findall(text)):
+        return False
+    if any(sym in text for sym in ("₪", "$", "€")):
+        return False
+    return True
+
+
+def _llm_phrase(message: str, treatment_name: str, source_text: str,
+                lang: str) -> Optional[str]:
+    """Rewrite verified MeDay field text as a direct answer to what was asked.
+    Adds no facts: the output is discarded unless it passes _phrasing_is_grounded."""
+    if not _llm_ok():
+        return None
+    # Name the target language rather than asking the model to infer it: the
+    # verified text is Hebrew, so on an English question "match the user's
+    # language" loses to the Hebrew bulk of the prompt and the reply comes back
+    # in Hebrew.
+    lang_name = {"he": "Hebrew", "ar": "Arabic", "en": "English"}.get(lang, "Hebrew")
+    prompt = f"""Rewrite verified clinic information as a natural, direct answer.
+
+Treatment: {treatment_name}
+The customer asked: "{message}"
+
+VERIFIED INFORMATION (the only facts you may use):
+{source_text}
+
+Rules:
+- Answer the question that was actually asked, using only the verified text above.
+- Add NO facts, numbers, durations, prices, session counts or medical claims
+  that are not in the verified text. Do not round or estimate numbers.
+- Do not add general beauty knowledge. If the verified text does not cover part
+  of the question, simply do not address that part.
+- Keep it short: 2-4 sentences, warm and clear, no bullet-point dump.
+- Write the answer in {lang_name}. This is required even when the verified text
+  above, or the earlier conversation, is in a different language: translate the
+  verified facts into {lang_name} rather than switching language.
+- Start with the answer, not with a preamble like "At MeDay".
+
+Return JSON only: {{"answer":"..."}}"""
+    try:
+        raw = _call_gemini(SYSTEM_PROMPT, prompt, timeout=14, max_tokens=400,
+                           temperature=0.3)
+        text = _strip_internal_codes((json.loads(raw).get("answer") or "").strip())
+        if not _phrasing_is_grounded(text, source_text):
+            print("[chatbot phrasing rejected] ungrounded rewrite discarded")
+            return None
+        _record_llm_status("ok")
+        return text
+    except requests.HTTPError as e:
+        _record_llm_status(_classify_http_error(e))
+        print(f"[chatbot phrasing error] {_redact(e)}")
+        return None
+    except Exception as e:
+        _record_llm_status("error")
+        print(f"[chatbot phrasing error] {_redact(e)}")
+        return None
+
+
+_FIELD_TOPIC_NAME = {
+    "short_description": {"he": "תיאור הטיפול", "ar": "وصف العلاج", "en": "the treatment description"},
+    "good_for": {"he": "למי הטיפול מתאים", "ar": "لمن يناسب العلاج", "en": "who it suits"},
+    "what_to_expect": {"he": "מה קורה בטיפול", "ar": "ما يحدث في العلاج", "en": "what happens during it"},
+    "technique_or_equipment": {"he": "השיטה והמכשור", "ar": "الطريقة والأجهزة", "en": "the method and equipment"},
+    "preparation": {"he": "ההכנה לפני הטיפול", "ar": "التحضير قبل العلاج", "en": "preparation before it"},
+    "aftercare": {"he": "ההנחיות אחרי הטיפול", "ar": "التعليمات بعد العلاج", "en": "aftercare"},
+    "pain_level": {"he": "התחושה בטיפול", "ar": "الإحساس أثناء العلاج", "en": "how it feels"},
+    "downtime": {"he": "זמן ההחלמה", "ar": "فترة التعافي", "en": "downtime"},
+    "sessions_recommended": {"he": "מספר הטיפולים המומלץ", "ar": "عدد الجلسات الموصى به", "en": "the number of sessions"},
+    "results_longevity": {"he": "כמה זמן התוצאה נשמרת", "ar": "مدة بقاء النتيجة", "en": "how long results last"},
+}
+
+
+def _no_verified_detail_msg(treatment_name: str, fields: list, lang: str) -> str:
+    """Honest answer when the question was understood but MeDay has no data for
+    it — instead of repeating the previous general paragraph."""
+    topics = ", ".join(_L(_FIELD_TOPIC_NAME.get(f, {}), lang) or f for f in fields[:2])
+    msgs = {
+        "he": (f"**{treatment_name}**\n\nאין לי מידע מאומת על {topics} בטיפול הזה, "
+               f"ולא אנחש. אפשר לשאול אותי על פרט אחר בטיפול, או שצוות MeDay "
+               f"ישמח לענות בדיוק ב-{CLINIC_PHONE} 💛"),
+        "ar": (f"**{treatment_name}**\n\nلا تتوفر لدي معلومات موثقة عن {topics} لهذا "
+               f"العلاج، ولن أخمّن. يمكنك سؤالي عن تفصيل آخر، أو فريق MeDay سيسعد "
+               f"بالإجابة بدقة على {CLINIC_PHONE} 💛"),
+        "en": (f"**{treatment_name}**\n\nI don't have verified information about "
+               f"{topics} for this treatment, and I won't guess. You can ask me about "
+               f"another detail, or the MeDay team will gladly help on {CLINIC_PHONE} 💛"),
+    }
+    return msgs.get(lang, msgs["he"])
+
+
+def _is_same_answer(a: str, b: str) -> bool:
+    """Same reply modulo whitespace and markdown noise."""
+    def norm(t):
+        return re.sub(r"[\s*_#]+", " ", (t or "")).strip().lower()
+    return bool(norm(a)) and norm(a) == norm(b)
+
+
+def _no_additional_detail_msg(treatment_name: str, fields: list,
+                              leftover: list, lang: str) -> str:
+    """'You already have everything we hold on that point' — plus a concrete
+    pointer to what IS still available, so the conversation can move on."""
+    topic = (_L(_FIELD_TOPIC_NAME.get(fields[0], {}), lang) or "") if fields else ""
+    nxt = ", ".join(_L(_FIELD_TOPIC_NAME.get(f, {}), lang) or f for f in leftover[:2])
+    msgs = {
+        "he": (f"זה כל המידע המאומת שיש לי על {topic} בטיפול {treatment_name} 😊"
+               + (f" אפשר לשאול אותי על {nxt}," if nxt else "")
+               + f" או שצוות MeDay ישלים לך ב-{CLINIC_PHONE} 💛"),
+        "ar": (f"هذه كل المعلومات الموثقة المتوفرة لدي عن {topic} في علاج {treatment_name} 😊"
+               + (f" يمكنك سؤالي عن {nxt}،" if nxt else "")
+               + f" أو فريق MeDay سيكمل لك على {CLINIC_PHONE} 💛"),
+        "en": (f"That's all the verified information I have about {topic} for "
+               f"{treatment_name} 😊"
+               + (f" You can ask me about {nxt}," if nxt else "")
+               + f" or the MeDay team can fill in the rest on {CLINIC_PHONE} 💛"),
+    }
+    return msgs.get(lang, msgs["he"])
+
+
+def _compose_from_fields(treatment: dict, fields: list) -> tuple:
+    """Build the verified answer text out of DB columns only. Returns
+    (source_text, used_fields). Never invents: a column that is empty is skipped."""
+    parts, used = [], []
+    for field in fields:
+        value = treatment.get(field)
+        if value in (None, ""):
+            continue
+        if field == "duration_min":
+            continue                      # duration is always forwarded, never stated
+        label = _FOLLOWUP_TOPIC_LABELS.get(field, field)
+        parts.append(f"**{label}:** {value}")
+        used.append(field)
+    return "\n\n".join(parts), used
+
+
 def handleTreatmentQuestion(session: dict, message: str, lang: str) -> Optional[dict]:
+    """Answer a follow-up about the treatment currently under discussion.
+
+    Pipeline: Gemini understands WHICH fields were asked about → Python reads
+    those fields out of the database → Gemini phrases the verified text as a
+    direct answer (discarded if it adds anything). Every clinic fact in the
+    output comes from a DB column; Gemini only chooses and phrases."""
     treatment_id = session.get("last_treatment_id")
     if not treatment_id:
         return None
@@ -2404,49 +2852,64 @@ def handleTreatmentQuestion(session: dict, message: str, lang: str) -> Optional[
         _clear_treatment_context(session)
         return None
 
-    topic = _detect_followup_topic(message)
-    fields = _FOLLOWUP_TOPIC_FIELDS.get(topic, _FOLLOWUP_TOPIC_FIELDS["general"])
+    fields, topic, intent_source = _resolve_followup_intent(
+        message, session, treatment, lang)
+    if not fields:
+        return None                       # not about this treatment — let routing continue
+
     answered = set(session.get("answered_fields") or [])
-    candidate_fields = [field for field in fields if field not in answered]
-    if not candidate_fields:
-        candidate_fields = fields
-    parts = []
-    used_fields = []
-    for field in candidate_fields:
-        value = treatment.get(field)
-        if value in (None, ""):
-            continue
-        if field == "duration_min":
-            value = f"{value} דקות"
-        label = _FOLLOWUP_TOPIC_LABELS.get(field, field)
-        parts.append(f"**{label}:** {value}")
-        used_fields.append(field)
+    # A broad "tell me more" should move the conversation forward rather than
+    # reprint what was already said, so it skips fields already covered. An
+    # explicit request ("what about aftercare?") is always honoured, even if
+    # that field was part of an earlier overview.
+    candidate_fields = fields
+    if topic == "general":
+        remaining = [f for f in fields if f not in answered]
+        candidate_fields = remaining or fields
+        candidate_fields = candidate_fields[:5]
 
-    if not parts and topic in ("benefits", "process"):
-        for field in _FOLLOWUP_TOPIC_FIELDS["general"][:5]:
-            if field in answered:
-                continue
-            value = treatment.get(field)
-            if value in (None, ""):
-                continue
-            label = _FOLLOWUP_TOPIC_LABELS.get(field, field)
-            parts.append(f"**{label}:** {value}")
-            used_fields.append(field)
+    source_text, used_fields = _compose_from_fields(treatment, candidate_fields)
 
-    if not parts and topic in _LOW_RISK_GENERAL_TOPICS:
-        reply = _general_background_reply(treatment, topic, lang)
-    elif not parts:
-        reply = f"**{treatment['treatment_name']}**\n\n{_missing_treatment_info_msg(lang)}"
+    if used_fields:
+        plain = f"**{treatment['treatment_name']}**\n\n{source_text}"
+        # Loop protection with a reason, not a shrug. If the verified text we are
+        # about to send is exactly what we just sent, the customer asked the same
+        # thing a second way and there is nothing further in the database. Say
+        # that, and point at what IS still available — reprinting the paragraph
+        # (or falling back to a generic "I'm repeating myself") answers nothing.
+        if _is_same_answer(plain, _last_assistant_text(session)):
+            answered_so_far = set(session.get("answered_fields") or [])
+            leftover = [f for f in _TREATMENT_FIELD_ENUM
+                        if treatment.get(f) and f not in answered_so_far]
+            reply = _no_additional_detail_msg(
+                treatment["treatment_name"], used_fields, leftover, lang)
+            response_source = "database"
+        else:
+            phrased = _llm_phrase(message, treatment["treatment_name"], source_text, lang)
+            if phrased:
+                reply = phrased
+                response_source = "gemini"
+            else:
+                reply = plain
+                response_source = "database"
+    elif topic == "general":
+        # Nothing verified at all for a broad question — keep the existing
+        # clearly-labelled general background behaviour for name-only treatments.
+        reply = _general_background_reply(treatment, "general", lang)
+        response_source = "gemini_background"
     else:
-        reply = f"**{treatment['treatment_name']}**\n\n" + "\n\n".join(parts)
+        # The question WAS understood, we simply have no verified data for it.
+        # Say so plainly instead of recycling a generic paragraph.
+        reply = _no_verified_detail_msg(treatment["treatment_name"], fields, lang)
+        response_source = "database"
 
     # Treatment context is intentionally preserved so short follow-ups keep
     # referring to the same selected treatment until the user changes context.
     setConversationState(session, WAITING_FOR_TREATMENT_QUESTION)
-    mapped_field = topic if topic in _FIELD_Q else None
-    if mapped_field:
-        answered.add(mapped_field)
     answered.update(used_fields)
+    # Mark an understood-but-empty field as answered too, so its chip stops
+    # being offered and we don't loop the customer back onto a dead end.
+    answered.update(f for f in fields if not treatment.get(f))
     session["answered_fields"] = list(answered)
     return {
         "reply": reply,
@@ -2455,6 +2918,9 @@ def handleTreatmentQuestion(session: dict, message: str, lang: str) -> Optional[
         "suggestions": _treatment_followups(treatment, lang, exclude=answered),
         "treatments": _treatment_links([treatment]),
         "no_suggest": True,
+        "response_source": response_source,
+        "intent_source": intent_source,
+        "intent_fields": list(fields),
     }
 
 
@@ -2616,7 +3082,7 @@ Do not give personal medical advice.
         text = (data.get("background") or "").strip()
         return text or None
     except Exception as e:
-        print(f"[chatbot general background error] {e}")
+        print(f"[chatbot general background error] {_redact(e)}")
         return None
 
 
@@ -2955,14 +3421,19 @@ def _llm_respond(message: str, context: list, lang: str, locked_treatment: Optio
             "forward": bool(data.get("forward", False)),
         }
     except requests.HTTPError as e:
+        status = _classify_http_error(e)
+        _record_llm_status(status)
         code = e.response.status_code if e.response is not None else 0
-        _record_llm_status("rate_limited" if code == 429
-                           else "invalid_key" if code in (400, 401, 403) else "error")
-        print(f"[chatbot llm error] HTTP {code}")
+        detail = ""
+        if status == "bad_request":
+            # Our own request is malformed — surface enough to debug it, since
+            # this is the failure mode that silently took Gemini offline before.
+            detail = f" — {_redact((e.response.text or '')[:300])}"
+        print(f"[chatbot llm error] HTTP {code} ({status}){detail}")
         return {"reply": "", "action": None, "forward": False}
     except Exception as e:
         _record_llm_status("error")
-        print(f"[chatbot llm error] {e}")
+        print(f"[chatbot llm error] {_redact(e)}")
         return {"reply": "", "action": None, "forward": False}
 
 
@@ -3674,42 +4145,29 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
         return picker
 
     # 2. Logistics (hours / location / contact) — pure data, common, unambiguous.
-    # 2b. Follow-up about a specific attribute ("does it hurt?", "how long?")
-    #     of a named or just-discussed treatment → answer from that field only.
-    #     Never invents: if the field is empty we fall through to safe handling.
-    field = _detect_field(message)
-    if field:
-        t = locked_treatment or _match_treatment(message)
-        if t and t.get(field):
-            ans = _format_field_answer(t, field, lang)
-            # Track answered fields per treatment so chips deplete (no loop).
-            if session.get("last_treatment_id") != t["treatment_id"]:
-                session["answered_fields"] = []
-            session["last_treatment_id"] = t["treatment_id"]
-            setConversationState(session, WAITING_FOR_TREATMENT_QUESTION)
-            answered = set(session.get("answered_fields") or [])
-            answered.add(field)
-            session["answered_fields"] = list(answered)
-            append_context(session, "assistant", ans, MAX_CONTEXT_MESSAGES)
+    # 2b. Follow-up about the treatment under discussion ("does it hurt?",
+    #     "what about after?", "מה כדאי לדעת לפני ואחרי?"). Goes through the
+    #     understand → retrieve → phrase pipeline in handleTreatmentQuestion, so
+    #     typed free text, a clicked suggestion chip and a rephrased question all
+    #     resolve to the same fields. Returns None when the message is not about
+    #     this treatment, and routing then continues untouched below.
+    followup_treatment = locked_treatment or _match_treatment(message)
+    changes_subject = bool(
+        _match_category_by_name(message) or _categories_named_in_message(message)
+        or _is_whats_offered(message) or _is_about_treatments(message)
+        or _is_other_treatments_intent(message) or _is_recommend_intent(message)
+    )
+    if followup_treatment and not _is_comparison(message) and not changes_subject:
+        # Point the session at the treatment the message actually names, so the
+        # handler and the chip bookkeeping agree on the subject.
+        if session.get("last_treatment_id") != followup_treatment["treatment_id"]:
+            session["answered_fields"] = []
+            session["last_treatment_id"] = followup_treatment["treatment_id"]
+        resp = handleTreatmentQuestion(session, message, lang)
+        if resp:
+            append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
             save_session(session_id, session)
-            return {"reply": ans, "buttons": None, "mode": "general",
-                    "suggestions": _treatment_followups(t, lang, exclude=answered),
-                    "treatments": _treatment_links([t]),
-                    "no_suggest": True}  # field chips only, no general nav chips
-        if t:
-            topic = _detect_followup_topic(message)
-            ans = (
-                _general_background_reply(t, topic, lang)
-                if topic in _LOW_RISK_GENERAL_TOPICS else
-                f"**{t['treatment_name']}**\n\n{_missing_treatment_info_msg(lang)}"
-            )
-            setConversationState(session, WAITING_FOR_TREATMENT_QUESTION)
-            append_context(session, "assistant", ans, MAX_CONTEXT_MESSAGES)
-            save_session(session_id, session)
-            return {"reply": ans, "buttons": None, "mode": "general",
-                    "suggestions": _treatment_followups(t, lang),
-                    "treatments": _treatment_links([t]),
-                    "no_suggest": True}
+            return resp
 
     # 2b-cmp. "What's the difference between them?" → compare the treatments in
     #         the category/subgroup just discussed, from their own descriptions.
@@ -3850,7 +4308,8 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
             session["answered_fields"] = []  # fresh treatment → fresh chips
         append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
         save_session(session_id, session)
-        return {**resp, "offer_continue": None}
+        return {**resp, "offer_continue": None,
+                "response_source": resp.get("response_source", "gemini_unavailable")}
 
     result = _llm_respond(message, session.get("recent_context", []), lang, locked_treatment=locked_treatment)
     reply = (result.get("reply") or "").strip()
@@ -3864,7 +4323,8 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
             setConversationState(session, TREATMENT_SELECTED)
         append_context(session, "assistant", resp["reply"], MAX_CONTEXT_MESSAGES)
         save_session(session_id, session)
-        return {**resp, "offer_continue": None}
+        return {**resp, "offer_continue": None,
+                "response_source": resp.get("response_source", "gemini_error")}
 
     # No-data guard: don't lead a "we don't have that" answer with the whole
     # service catalog — it reads like padding/hallucination. Replace with a
@@ -3878,7 +4338,7 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
         setConversationState(session, CATEGORY_SELECTED)
         append_context(session, "assistant", picker["reply"], MAX_CONTEXT_MESSAGES)
         save_session(session_id, session)
-        return picker
+        return {**picker, "response_source": "gemini"}
 
     # Offer yes/no before starting flow (user browsed a category)
     if action.startswith("offer_recommendation:"):
@@ -3893,7 +4353,8 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
             ]
             append_context(session, "assistant", reply, MAX_CONTEXT_MESSAGES)
             save_session(session_id, session)
-            return {"reply": reply, "buttons": buttons, "mode": "general"}
+            return {"reply": reply, "buttons": buttons, "mode": "general",
+                    "response_source": "gemini"}
 
     # Start flow immediately (user explicitly asked for recommendation)
     if action.startswith("start_flow:"):
@@ -3904,7 +4365,8 @@ def _route_general(session: dict, session_id: str, message: str) -> dict:
 
     append_context(session, "assistant", reply, MAX_CONTEXT_MESSAGES)
     save_session(session_id, session)
-    return {"reply": reply, "buttons": None, "mode": "general"}
+    return {"reply": reply, "buttons": None, "mode": "general",
+            "response_source": "gemini"}
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -3937,6 +4399,16 @@ def handle_message(
         if (message and prev_reply and not result.get("buttons")
                 and result["reply"].strip() == prev_reply):
             result = _repeated_reply_nudge(_detect_language(message), result)
+        # Which layer actually produced this answer. Development/debug signal —
+        # the frontend ignores it. 'rule_based' is the default because every
+        # untagged branch is a deterministic template.
+        result.setdefault("response_source", "rule_based")
+        if CHATBOT_DEBUG:
+            print(f"[chatbot source] session={session_id[:8]} "
+                  f"source={result['response_source']} "
+                  f"intent={result.get('intent_source', '-')} "
+                  f"fields={result.get('intent_fields', '-')} "
+                  f"llm_status={get_setting('llm_last_status', '-')}")
     return result
 
 

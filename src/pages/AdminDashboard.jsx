@@ -1736,6 +1736,7 @@ function AiAssistantPanel() {
     no_key: { label: "ללא מפתח", color: "#D9822B" },
     limited: { label: "המכסה נוצלה", color: "#D9822B" },
     invalid: { label: "מפתח לא תקין", color: "#C4544E" },
+    misconfigured: { label: "תקלת הגדרות", color: "#C4544E" },
     error: { label: "תקלה זמנית", color: "#9AA0A6" },
   };
   const statusLabel = (STATUS_UI[status] || STATUS_UI.no_key).label;

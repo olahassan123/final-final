@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
@@ -17,7 +18,14 @@ CLINIC_PHONE = "*3691"
 # paste a fresh free key from the admin page — env GEMINI_API_KEY is a fallback.
 # NOTE: gemini-2.0-flash returns free-tier limit:0 on some accounts/regions;
 # gemini-flash-latest has free quota and works — keep this unless you enable billing.
-GEMINI_MODEL = "gemini-flash-latest"
+# MEASURED 2026-08-19: this alias currently resolves to a model whose free-tier
+# allowance on our project is only 20 requests PER DAY
+# (GenerateRequestsPerDayPerProjectPerModel-FreeTier = 20), which the chatbot
+# exhausts in a handful of conversations. Other flash models carry their own,
+# larger free buckets — e.g. gemini-3.5-flash. Override without editing code:
+#     set GEMINI_MODEL=gemini-3.5-flash
+# Everything here stays on the free tier; none of these options requires billing.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 # Where the owner creates a free key (shown in the admin page):
 GEMINI_KEY_URL = "https://aistudio.google.com/app/apikey"
 EXCEL_FILENAME = "MeDay_Treatments_Data_finalalmost.xlsx"
