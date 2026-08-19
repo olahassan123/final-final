@@ -1,29 +1,8 @@
+import { API_BASE_URL } from "./config";
+import { getAuthToken } from "./authApi";
+
 const JOB_APPLICATIONS_STORAGE_KEY = "meday.jobApplications";
 const JOB_APPLICATION_EVENT = "meday:job-applications-updated";
-
-function canUseStorage() {
-  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
-}
-
-function readApplications() {
-  if (!canUseStorage()) return [];
-
-  try {
-    const raw = window.localStorage.getItem(JOB_APPLICATIONS_STORAGE_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.map(normalizeApplication);
-  } catch {
-    return [];
-  }
-}
-
-function writeApplications(applications) {
-  if (!canUseStorage()) return;
-  const normalized = applications.map(normalizeApplication);
-  window.localStorage.setItem(JOB_APPLICATIONS_STORAGE_KEY, JSON.stringify(normalized));
-  window.dispatchEvent(new CustomEvent(JOB_APPLICATION_EVENT, { detail: normalized }));
-}
 
 function createApplicationId() {
   if (typeof crypto !== "undefined" && crypto.randomUUID) {
@@ -33,32 +12,40 @@ function createApplicationId() {
 }
 
 function normalizeApplication(app) {
-  const feedbackNotes = Array.isArray(app.feedbackNotes) ? app.feedbackNotes : [];
-  const normalizedNotes = feedbackNotes.map((note) => ({
-    id: note.id || createApplicationId(),
-    text: String(note.text || "").trim(),
-    createdAt: note.createdAt || app.createdAt || new Date().toISOString(),
-  })).filter((note) => note.text);
-
   return {
     ...app,
     status: app.status || "חדש",
-    feedbackNotes: normalizedNotes,
+    feedbackNotes: Array.isArray(app.feedbackNotes)
+      ? app.feedbackNotes
+      : [],
   };
 }
 
-/**
- * Save a new job application
- * @param {Object} data - Application data
- * @param {string} data.fullName - Applicant full name
- * @param {string} data.email - Applicant email
- * @param {string} data.phone - Applicant phone
- * @param {string} data.portfolioLink - Portfolio or social media link
- * @param {string} data.field - Selected field/position
- * @returns {Object} The saved application
- */
-export function saveJobApplication({ fullName, email, phone, portfolioLink, field }) {
-  const application = {
+function dispatchUpdate(data) {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(
+      new CustomEvent(JOB_APPLICATION_EVENT, { detail: data })
+    );
+  }
+}
+
+function staffHeaders() {
+  const token = getAuthToken();
+
+  return {
+    "Content-Type": "application/json",
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
+export async function saveJobApplication({
+  fullName,
+  email,
+  phone,
+  portfolioLink,
+  field,
+}) {
+  const application = normalizeApplication({
     id: createApplicationId(),
     fullName: String(fullName || "").trim(),
     email: String(email || "").trim(),
@@ -68,59 +55,98 @@ export function saveJobApplication({ fullName, email, phone, portfolioLink, fiel
     createdAt: new Date().toISOString(),
     status: "חדש",
     feedbackNotes: [],
-  };
+  });
 
-  const applications = [application, ...readApplications()];
-  writeApplications(applications);
-  return application;
+  const response = await fetch(`${API_BASE_URL}/job-applications`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      id: application.id,
+      data: application,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Failed to save job application");
+  }
+
+  const saved = normalizeApplication(await response.json());
+  dispatchUpdate(saved);
+  return saved;
 }
 
-/**
- * Get all job applications
- * @returns {Array} Array of job applications
- */
-export function getJobApplications() {
-  return readApplications();
+export async function getJobApplications() {
+  const response = await fetch(`${API_BASE_URL}/job-applications`, {
+    headers: staffHeaders(),
+  });
+
+  if (!response.ok) {
+    if (response.status === 401 || response.status === 403) return [];
+    throw new Error("Failed to load job applications");
+  }
+
+  const data = await response.json();
+  return Array.isArray(data)
+    ? data.map(normalizeApplication)
+    : [];
 }
 
-/**
- * Update job application status
- * @param {string} id - Application ID
- * @param {string} status - New status ("חדש" or "טופל")
- * @returns {Object|null} Updated application or null if not found
- */
-export function updateJobApplicationStatus(id, status) {
-  const applications = readApplications();
-  const updated = applications.map((app) =>
-    app.id === id ? { ...app, status } : app
+async function saveUpdatedApplication(application) {
+  const response = await fetch(
+    `${API_BASE_URL}/job-applications/${encodeURIComponent(application.id)}`,
+    {
+      method: "PUT",
+      headers: staffHeaders(),
+      body: JSON.stringify({ data: application }),
+    }
   );
-  writeApplications(updated);
-  return updated.find((app) => app.id === id) ?? null;
+
+  if (!response.ok) {
+    throw new Error("Failed to update job application");
+  }
+
+  const saved = normalizeApplication(await response.json());
+  dispatchUpdate(saved);
+  return saved;
 }
 
-/**
- * Add feedback note to a job application
- * @param {string} id - Application ID
- * @param {string} noteText - Feedback note text
- * @returns {Object|null} Updated application or null if not found
- */
-export function addJobApplicationFeedback(id, noteText) {
+export async function updateJobApplicationStatus(id, status) {
+  const applications = await getJobApplications();
+  const application = applications.find((item) => item.id === id);
+
+  if (!application) return null;
+
+  return saveUpdatedApplication({
+    ...application,
+    status,
+  });
+}
+
+export async function addJobApplicationFeedback(id, noteText) {
   const text = String(noteText || "").trim();
   if (!text) return null;
+
+  const applications = await getJobApplications();
+  const application = applications.find((item) => item.id === id);
+
+  if (!application) return null;
 
   const feedbackNote = {
     id: createApplicationId(),
     text,
     createdAt: new Date().toISOString(),
   };
-  const applications = readApplications();
-  const updated = applications.map((app) =>
-    app.id === id
-      ? { ...app, feedbackNotes: [feedbackNote, ...(app.feedbackNotes || [])] }
-      : app
-  );
-  writeApplications(updated);
-  return updated.find((app) => app.id === id) ?? null;
+
+  return saveUpdatedApplication({
+    ...application,
+    feedbackNotes: [
+      feedbackNote,
+      ...(application.feedbackNotes || []),
+    ],
+  });
 }
 
-export { JOB_APPLICATION_EVENT, JOB_APPLICATIONS_STORAGE_KEY };
+export {
+  JOB_APPLICATION_EVENT,
+  JOB_APPLICATIONS_STORAGE_KEY,
+};

@@ -3,8 +3,8 @@ import { createElement } from "react";
 import { motion as Motion, AnimatePresence } from "framer-motion";
 import CountUp from "react-countup";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
-import { CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, addContactInquiryFeedback, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
-import { JOB_APPLICATION_EVENT, JOB_APPLICATIONS_STORAGE_KEY, getJobApplications, updateJobApplicationStatus, addJobApplicationFeedback } from "../api/jobsApi";
+import { CONTACT_INQUIRY_EVENT, addContactInquiryFeedback, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
+import { JOB_APPLICATION_EVENT, getJobApplications, updateJobApplicationStatus, addJobApplicationFeedback } from "../api/jobsApi";
 import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl } from "../api/medayApi";
 import { getSettings, updateSettingsAccount, updateSettingsPassword, updateSystemSettings, getAiSettings, updateAiSettings } from "../api/settingsApi";
 import {
@@ -2245,8 +2245,8 @@ export default function AdminDashboard() {
   const [activeRange, setActiveRange] = useState("all");
   const [activeTab, setActiveTab] = useState("dashboard");
   const [collapsed, setCollapsed] = useState(false);
-  const [contactInquiries, setContactInquiries] = useState(() => getContactInquiries());
-  const [jobApplications, setJobApplications] = useState(() => getJobApplications());
+  const [contactInquiries, setContactInquiries] = useState([]);
+  const [jobApplications, setJobApplications] = useState([]);
   const mainRef = useRef(null);
 
   const load = useCallback(async (silent = false) => {
@@ -2275,51 +2275,91 @@ export default function AdminDashboard() {
   }, [load]);
 
   useEffect(() => {
-    const refreshContactInquiries = () => setContactInquiries(getContactInquiries());
-    const handleStorage = (event) => {
-      if (event.key === CONTACT_INQUIRIES_STORAGE_KEY) refreshContactInquiries();
+    let cancelled = false;
+
+    const refreshContactInquiries = async () => {
+      try {
+        const inquiries = await getContactInquiries();
+        if (!cancelled) {
+          setContactInquiries(inquiries);
+        }
+      } catch (error) {
+        console.error("Failed to load contact inquiries:", error);
+      }
     };
+
+    refreshContactInquiries();
 
     window.addEventListener(CONTACT_INQUIRY_EVENT, refreshContactInquiries);
-    window.addEventListener("storage", handleStorage);
+
     return () => {
+      cancelled = true;
       window.removeEventListener(CONTACT_INQUIRY_EVENT, refreshContactInquiries);
-      window.removeEventListener("storage", handleStorage);
     };
   }, []);
 
-  const changeContactInquiryStatus = useCallback((id, status) => {
-    updateContactInquiryStatus(id, status);
-    setContactInquiries(getContactInquiries());
+  const changeContactInquiryStatus = useCallback(async (id, status) => {
+    try {
+      await updateContactInquiryStatus(id, status);
+      const inquiries = await getContactInquiries();
+      setContactInquiries(inquiries);
+    } catch (error) {
+      console.error("Failed to update contact inquiry:", error);
+    }
   }, []);
 
-  const addContactInquiryNote = useCallback((id, noteText) => {
-    addContactInquiryFeedback(id, noteText);
-    setContactInquiries(getContactInquiries());
+  const addContactInquiryNote = useCallback(async (id, noteText) => {
+    try {
+      await addContactInquiryFeedback(id, noteText);
+      const inquiries = await getContactInquiries();
+      setContactInquiries(inquiries);
+    } catch (error) {
+      console.error("Failed to add contact inquiry note:", error);
+    }
   }, []);
 
   useEffect(() => {
-    const refreshJobApplications = () => setJobApplications(getJobApplications());
-    const handleStorage = (event) => {
-      if (event.key === JOB_APPLICATIONS_STORAGE_KEY) refreshJobApplications();
+    let cancelled = false;
+
+    const refreshJobApplications = async () => {
+      try {
+        const applications = await getJobApplications();
+        if (!cancelled) {
+          setJobApplications(applications);
+        }
+      } catch (error) {
+        console.error("Failed to load job applications:", error);
+      }
     };
+
+    refreshJobApplications();
 
     window.addEventListener(JOB_APPLICATION_EVENT, refreshJobApplications);
-    window.addEventListener("storage", handleStorage);
+
     return () => {
+      cancelled = true;
       window.removeEventListener(JOB_APPLICATION_EVENT, refreshJobApplications);
-      window.removeEventListener("storage", handleStorage);
     };
   }, []);
 
-  const changeJobApplicationStatus = useCallback((id, status) => {
-    updateJobApplicationStatus(id, status);
-    setJobApplications(getJobApplications());
+  const changeJobApplicationStatus = useCallback(async (id, status) => {
+    try {
+      await updateJobApplicationStatus(id, status);
+      const applications = await getJobApplications();
+      setJobApplications(applications);
+    } catch (error) {
+      console.error("Failed to update job application:", error);
+    }
   }, []);
 
-  const addJobApplicationNote = useCallback((id, noteText) => {
-    addJobApplicationFeedback(id, noteText);
-    setJobApplications(getJobApplications());
+  const addJobApplicationNote = useCallback(async (id, noteText) => {
+    try {
+      await addJobApplicationFeedback(id, noteText);
+      const applications = await getJobApplications();
+      setJobApplications(applications);
+    } catch (error) {
+      console.error("Failed to add job application note:", error);
+    }
   }, []);
 
   const analytics = useMemo(() => ({

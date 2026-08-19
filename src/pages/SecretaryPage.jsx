@@ -1,5 +1,10 @@
 import { createElement, useState, useEffect, useRef } from "react";
-import { addContactInquiryFeedback, CONTACT_INQUIRIES_STORAGE_KEY, CONTACT_INQUIRY_EVENT, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
+import {
+  addContactInquiryFeedback,
+  CONTACT_INQUIRY_EVENT,
+  getContactInquiries,
+  updateContactInquiryStatus,
+} from "../api/contactApi";
 import { fetchAppointments, createAppointment, deleteAppointment, updateAppointment, fetchEmployeeShifts } from "../api/medayApi";
 import {
   ChevronLeft, ChevronRight, Trash2, Plus, Sparkles, User, Phone, CalendarDays, Clock, X, LayoutGrid, MessageCircle, Settings, CheckCircle2, Home,
@@ -831,8 +836,8 @@ function AppointmentModal({ appt, onClose, onDelete }) {
 // ── Main Component ────────────────────────────────────────────
 export default function SecretaryPage() {
   const [activeSecretaryTab, setActiveSecretaryTab] = useState("appointments");
-  const [contactInquiries, setContactInquiries] = useState(() => getContactInquiries());
-  const [treatments, setTreatments] = useState([]);
+  const [contactInquiries, setContactInquiries] = useState([]);
+  const [treatments, setTreatments] = useState([]);  
   const [appointments, setAppointments] = useState([]);
   const [saving, setSaving] = useState(false);
   const [success, setSuccess] = useState(false);
@@ -979,27 +984,63 @@ export default function SecretaryPage() {
   }, []);
 
   useEffect(() => {
-    const refreshContactInquiries = () => setContactInquiries(getContactInquiries());
-    const handleStorage = (event) => {
-      if (event.key === CONTACT_INQUIRIES_STORAGE_KEY) refreshContactInquiries();
+    let cancelled = false;
+
+    const refreshContactInquiries = async () => {
+      try {
+        const inquiries = await getContactInquiries();
+
+        if (!cancelled) {
+          setContactInquiries(inquiries);
+        }
+      } catch (error) {
+        console.error("Failed to load contact inquiries:", error);
+      }
     };
 
-    window.addEventListener(CONTACT_INQUIRY_EVENT, refreshContactInquiries);
-    window.addEventListener("storage", handleStorage);
+    refreshContactInquiries();
+
+    window.addEventListener(
+      CONTACT_INQUIRY_EVENT,
+      refreshContactInquiries
+    );
+
     return () => {
-      window.removeEventListener(CONTACT_INQUIRY_EVENT, refreshContactInquiries);
-      window.removeEventListener("storage", handleStorage);
+      cancelled = true;
+
+      window.removeEventListener(
+        CONTACT_INQUIRY_EVENT,
+        refreshContactInquiries
+      );
     };
   }, []);
 
-  function changeContactInquiryStatus(id, status) {
-    updateContactInquiryStatus(id, status);
-    setContactInquiries(getContactInquiries());
+  async function changeContactInquiryStatus(id, status) {
+    try {
+      await updateContactInquiryStatus(id, status);
+
+      const inquiries = await getContactInquiries();
+      setContactInquiries(inquiries);
+    } catch (error) {
+      console.error(
+        "Failed to update contact inquiry:",
+        error
+      );
+    }
   }
 
-  function addContactInquiryNote(id, noteText) {
-    addContactInquiryFeedback(id, noteText);
-    setContactInquiries(getContactInquiries());
+  async function addContactInquiryNote(id, noteText) {
+    try {
+      await addContactInquiryFeedback(id, noteText);
+
+      const inquiries = await getContactInquiries();
+      setContactInquiries(inquiries);
+    } catch (error) {
+      console.error(
+        "Failed to add contact inquiry note:",
+        error
+      );
+    }
   }
 
   useEffect(() => { setPastLabelVisible(true); }, [weekStart]);
