@@ -427,10 +427,15 @@ def get_ai_settings(_: dict = Depends(require_staff)):
         status = "off"
     elif not has_key:
         status = "no_key"
-    elif last == "rate_limited":
-        status = "limited"     # free daily quota used up
+    elif last in ("rate_limited", "daily_quota", "no_quota"):
+        status = "limited"     # free quota used up (per-minute or per-day)
     elif last == "invalid_key":
         status = "invalid"     # key no longer valid
+    elif last == "bad_request":
+        # Our own request was malformed — Gemini is down for a reason that has
+        # nothing to do with the key. Must not read as "active": showing this as
+        # working (or as an invalid key) is what hid a total outage before.
+        status = "misconfigured"
     elif last == "error":
         status = "error"       # transient connection issue
     else:
@@ -464,12 +469,16 @@ def update_ai_settings(body: AiSettingsUpdate, _: dict = Depends(require_admin))
                               "הצ׳אט ממשיך לעבוד מצוין גם בלי מפתח.")
                 elif status == "invalid_key":
                     detail = "המפתח לא תקין"
+                elif status == "bad_request":
+                    detail = ("המפתח כנראה תקין, אך Google דחתה את הבקשה עצמה. "
+                              "זו תקלת הגדרות בצד שלנו ולא בעיה במפתח — יש לבדוק את "
+                              "לוג השרת ואת מודל ה-Gemini המוגדר.")
                 else:
                     detail = "שגיאת חיבור ל-Google, נסי שוב"
                 raise HTTPException(status_code=400, detail=detail)
             out["tested"] = True
-            set_setting("llm_last_status", status)  # 'ok' or 'rate_limited'
-            if status == "rate_limited":
+            set_setting("llm_last_status", status)  # 'ok' | 'rate_limited' | 'daily_quota'
+            if status in ("rate_limited", "daily_quota"):
                 out["warning"] = (
                     "המפתח תקין ונשמר, אך כרגע הגיע למגבלת הקצב החינמית. "
                     "הצ׳אט ישתמש בו אוטומטית ברגע שהמכסה תתאפס (בדרך כלל תוך דקה או ביום העוקב)."
