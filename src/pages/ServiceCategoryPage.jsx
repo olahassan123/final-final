@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform, useInView } from "framer-motion";
 import { getCategoryBySlug, getCategoryTreatments } from "../data/serviceCatalog";
+import { APPOINTMENT_WHATSAPP_URL } from "../lib/booking";
 
 /* ── per-category hero photos ────────────────────────────────── */
 const CATEGORY_PHOTOS = {
@@ -252,7 +253,7 @@ function CosmeticSectionBlock({ section }) {
               {/* CTA — bordered style */}
               <div>
                 <a
-                  href="https://wa.me/972"
+                  href={APPOINTMENT_WHATSAPP_URL}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-2 px-5 py-2 text-sm font-bold rounded-full transition-colors duration-200"
@@ -383,7 +384,7 @@ function PromoDescriptionBlock({ heading, subheading, paragraphs }) {
         {/* CTA */}
         <div className="mt-12">
           <a
-            href="https://wa.me/972"
+            href={APPOINTMENT_WHATSAPP_URL}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center gap-2 px-9 py-3.5 font-bold text-white rounded-full transition-opacity hover:opacity-90"
