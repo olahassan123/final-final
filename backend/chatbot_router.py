@@ -111,7 +111,15 @@ def _redact(text: str) -> str:
 # looked at the request body. Instead of hardcoding one spelling, try the
 # preferred one and fall back on a thinking-specific 400. The working shape is
 # remembered per-process so we pay the retry at most once.
-_THINKING_VARIANTS = [{"thinkingBudget": 0}, {"thinkingLevel": "low"}, None]
+#
+# MEASURED 2026-08-20 on gemini-3.6-flash (current GEMINI_MODEL default):
+# thinkingBudget:0 → 400 "Request contains an invalid argument." — no mention
+# of "thinking" in the message, so _is_thinking_config_error below does NOT
+# recognize it and the walk stops there instead of advancing. thinkingLevel:
+# "low" is what actually works on this model. Listed first so the walk
+# succeeds on the first attempt for the current default; thinkingBudget:0
+# stays as a fallback for an older model reached via a GEMINI_MODEL override.
+_THINKING_VARIANTS = [{"thinkingLevel": "low"}, {"thinkingBudget": 0}, None]
 _thinking_variant_idx = 0
 
 
@@ -2260,6 +2268,59 @@ def _treatment_card(t: dict, lang: str) -> Optional[dict]:
         "last_treatment_id": t["treatment_id"],
         "treatments": _treatment_links([t]),
         "no_suggest": True,  # only treatment field chips here — no general nav chips
+    }
+
+
+# Every field shown here must be a genuine clinic-authored record — this is
+# still 100% grounded, just less compressed than _treatment_card. A missing
+# field is skipped, never guessed or padded out. Duration is deliberately
+# excluded everywhere in this file (hard rule: forwarded to the clinic, never
+# stated) even though it has real data (duration_min/duration_notes).
+_DETAIL_FIELD_ORDER = [
+    "short_description", "what_to_expect", "good_for", "technique_or_equipment",
+    "preparation", "aftercare", "pain_level", "downtime",
+    "sessions_recommended", "results_longevity",
+]
+_DETAIL_FIELD_LABELS = {
+    "good_for":               {"he": "למי זה מתאים",           "ar": "لمن يناسب",              "en": "Good for"},
+    "what_to_expect":         {"he": "מה קורה בטיפול",          "ar": "ماذا يحدث في العلاج",     "en": "What to expect"},
+    "technique_or_equipment": {"he": "שיטה / מכשור",            "ar": "الطريقة / الجهاز",        "en": "Technique / equipment"},
+    "preparation":            {"he": "הכנה לפני הטיפול",        "ar": "التحضير قبل العلاج",      "en": "Preparation"},
+    "aftercare":               {"he": "הנחיות לאחר הטיפול",      "ar": "إرشادات بعد العلاج",      "en": "Aftercare"},
+    "pain_level":              {"he": "תחושה במהלך הטיפול",      "ar": "الإحساس أثناء العلاج",    "en": "Sensation"},
+    "downtime":                {"he": "זמן החלמה",               "ar": "فترة النقاهة",            "en": "Downtime"},
+    "sessions_recommended":    {"he": "מספר טיפולים מומלץ",      "ar": "عدد الجلسات الموصى بها",  "en": "Recommended sessions"},
+    "results_longevity":       {"he": "כמה זמן התוצאה נשמרת",    "ar": "كم تدوم النتيجة",         "en": "How long results last"},
+}
+
+
+def _treatment_details_card(t: dict, lang: str) -> Optional[dict]:
+    """The expanded version of _treatment_card — every populated field the
+    clinic has on record for this treatment, each under its own label,
+    instead of just the two-line teaser. Same grounding discipline: nothing
+    here is generated, an empty field is simply omitted."""
+    if not any(t.get(f) for f in _DETAIL_FIELD_ORDER):
+        return None
+    lines = [f"**{t['treatment_name']}**"]
+    intro_field = "short_description" if t.get("short_description") else ("what_to_expect" if t.get("what_to_expect") else None)
+    if intro_field:
+        lines.append(t[intro_field])
+    for field in _DETAIL_FIELD_ORDER:
+        if field == intro_field or field == "short_description":
+            continue
+        value = t.get(field)
+        if not value:
+            continue
+        label = _L(_DETAIL_FIELD_LABELS[field], lang)
+        lines.append(f"**{label}:** {value}")
+    return {
+        "reply": "\n".join(lines),
+        "buttons": None,
+        "mode": "general",
+        "suggestions": None,  # already covered every field we have — no redundant chips
+        "last_treatment_id": t["treatment_id"],
+        "treatments": _treatment_links([t]),
+        "no_suggest": True,
     }
 
 
@@ -4471,6 +4532,42 @@ def _handle_message(
         setConversationState(session, WAITING_FOR_TREATMENT_QUESTION)
         save_session(session_id, session)
         return _ask_treatment_reply(treatment, lang)
+
+    # "לפרטי הטיפול" — answered inline, in the chat, never a navigation.
+    # Two layers: _treatment_details_card is the deterministic, data-only
+    # version (always correct, works with no AI key) and also doubles as the
+    # ONLY source text handed to Gemini for the paragraph rewrite below — the
+    # model can rephrase those exact fields into flowing prose, never add to
+    # them. If the AI is off, rate-limited, or the rewrite fails the
+    # hallucination check, the deterministic card is what the user sees.
+    if button_value and button_value.startswith("__treatment_info__:"):
+        treatment_id = button_value.split(":", 1)[1].strip()
+        treatment = get_treatment_by_id(treatment_id) or _resolve_selected_treatment(selected_treatment)
+        lang = _detect_language(message or (treatment or {}).get("treatment_name", ""))
+        if not treatment:
+            return {"reply": _missing_treatment_info_msg(lang), "buttons": None, "offer_continue": None, "mode": "general"}
+        card = _treatment_details_card(treatment, lang)
+        if not card:
+            return {"reply": _missing_treatment_info_msg(lang), "buttons": None, "offer_continue": None, "mode": "general"}
+        source_text = "\n".join(card["reply"].split("\n")[1:])  # drop the **name** header line
+        ask_msgs = {
+            "he": "ספר/י לי על הטיפול הזה — למי הוא מתאים ומה עובר עליי בו, בפסקה אחת חמה וברורה.",
+            "ar": "احكِ لي عن هذا العلاج — لمن يناسب وماذا يحدث فيه، بفقرة واحدة دافئة وواضحة.",
+            "en": "Tell me about this treatment — who it suits and what it involves, in one warm, clear paragraph.",
+        }
+        phrased = _llm_phrase(_L(ask_msgs, lang), treatment["treatment_name"], source_text, lang)
+        if phrased:
+            card["reply"] = f"**{treatment['treatment_name']}**\n\n{phrased}"
+        # The details were just shown — don't re-offer "לפרטי הטיפול" on the
+        # card echoed back below the answer, only the open-ended question chip.
+        for t in card.get("treatments") or []:
+            t["info_shown"] = True
+        session["mode"] = "general"
+        session["last_treatment_id"] = treatment["treatment_id"]
+        session["answered_fields"] = []
+        setConversationState(session, TREATMENT_SELECTED)
+        save_session(session_id, session)
+        return card
 
     if button_value == "__pick_category__":
         lang = _detect_language(message or "")
