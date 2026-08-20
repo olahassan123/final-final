@@ -14,6 +14,7 @@ import AdminDashboard from "./pages/AdminDashboard";
 import AdminStaffManagement from "./pages/AdminStaffManagement";
 import AdminCustomerManagement from "./pages/AdminCustomerManagement";
 import AdminAuditLog from "./pages/AdminAuditLog";
+import AdminContentManagement from "./pages/AdminContentManagement";
 import AdminEmployeeShifts from "./pages/AdminEmployeeShifts";
 import AdminEmployees from "./pages/AdminEmployees";
 import AccountSettings from "./pages/AccountSettings";
@@ -179,6 +180,14 @@ function AppContent() {
             element={
               <ProtectedRoute allowedRoles={["admin"]} redirectTo="/staff-login">
                 <AdminAuditLog />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/content"
+            element={
+              <ProtectedRoute allowedRoles={["admin"]} redirectTo="/staff-login">
+                <AdminContentManagement />
               </ProtectedRoute>
             }
           />

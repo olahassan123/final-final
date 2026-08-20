@@ -3,29 +3,54 @@ import { createElement } from "react";
 import { motion as Motion, AnimatePresence } from "framer-motion";
 import CountUp from "react-countup";
 import { useAutoAnimate } from "@formkit/auto-animate/react";
-import { CONTACT_INQUIRY_EVENT, addContactInquiryFeedback, getContactInquiries, updateContactInquiryStatus } from "../api/contactApi";
-import { JOB_APPLICATION_EVENT, getJobApplications, updateJobApplicationStatus, addJobApplicationFeedback } from "../api/jobsApi";
-import { fetchAnalytics, getExcelInfo, getExcelPreview, uploadExcel, getExcelDownloadUrl } from "../api/medayApi";
-import { getSettings, updateSettingsAccount, updateSettingsPassword, updateSystemSettings, getAiSettings, updateAiSettings } from "../api/settingsApi";
+
+import {
+  CONTACT_INQUIRY_EVENT,
+  addContactInquiryFeedback,
+  getContactInquiries,
+  updateContactInquiryStatus,
+} from "../api/contactApi";
+
+import {
+  JOB_APPLICATION_EVENT,
+  getJobApplications,
+  updateJobApplicationStatus,
+  addJobApplicationFeedback,
+} from "../api/jobsApi";
+
+import {
+  fetchAnalytics,
+  getExcelInfo,
+  getExcelPreview,
+  uploadExcel,
+  getExcelDownloadUrl,
+} from "../api/medayApi";
+
+import {
+  getSettings,
+  updateSettingsAccount,
+  updateSettingsPassword,
+  updateSystemSettings,
+  getAiSettings,
+  updateAiSettings,
+} from "../api/settingsApi";
+
+import AiKnowledgePanel from "../components/AiKnowledgePanel";
+
 import {
   Activity,
-  AlertCircle,
   BarChart2,
   Bell,
   Briefcase,
   Calendar,
   CalendarDays,
-  ChevronDown,
   ChevronRight,
-  ChevronUp,
   Clock,
-  Database,
   Download,
   CheckCircle2,
-  Eye,
-  EyeOff,
   FileText,
   Home,
+  LayoutList,
   MessageCircle,
   RefreshCw,
   Save,
@@ -34,7 +59,6 @@ import {
   ShieldCheck,
   Sparkles,
   TrendingUp,
-  Upload,
   Users,
 } from "lucide-react";
 
@@ -109,6 +133,7 @@ const NAV_ITEMS = [
   { key: "inquiries", icon: MessageCircle, label: "פניות" },
   { key: "jobs", icon: Briefcase, label: "דרושים" },
   { key: "analytics", icon: Activity, label: "ניתוח" },
+  { key: "ai", icon: Sparkles, label: "הגדרות AI" },
   { key: "settings", icon: Settings, label: "הגדרות" },
 ];
 
@@ -717,704 +742,6 @@ function ActivityFeed({ recent, mainRef }) {
         )}
       </div>
     </SectionCard>
-  );
-}
-
-const TREATMENT_FIELDS = [
-  { key: "name",                    label: "שם הטיפול",           required: true,  type: "text",     placeholder: "לדוגמה: ניקוי פנים עמוק" },
-  { key: "class_name",              label: "קטגוריה ראשית",       required: false, type: "text",     placeholder: "לדוגמה: טיפולי קוסמטיקה" },
-  { key: "category",                label: "תת-קטגוריה",          required: false, type: "text",     placeholder: "לדוגמה: טיפולי פנים" },
-  { key: "aftercare",               label: "תיאור הטיפול",        required: false, type: "textarea", placeholder: "מה קורה בטיפול, כמה זמן נמשך..." },
-  { key: "suitable_for_all_skins",  label: "למי מתאים",           required: false, type: "textarea", placeholder: "עור שמן, עור מעורב, גיל 25+..." },
-  { key: "medical_limitations",     label: "למי לא מתאים",        required: false, type: "textarea", placeholder: "הריון, אקנה פעיל, עור רגיש מאוד..." },
-  { key: "pregnancy_breastfeeding", label: "הריון והנקה",         required: false, type: "text",     placeholder: "לא מומלץ בהריון / בטוח בהריון" },
-  { key: "results_timing",          label: "תוצאות ומתי רואים",   required: false, type: "text",     placeholder: "שיפור מיידי / לאחר 3 טיפולים..." },
-  { key: "recommended_frequency",   label: "תדירות מומלצת",       required: false, type: "text",     placeholder: "סדרה של 6 טיפולים, פעם בשבועיים" },
-  { key: "keywords",                label: "מילות מפתח / הערות",  required: false, type: "text",     placeholder: "אנטי-אייג'ינג, עדין, ללא כאב..." },
-];
-
-const EMPTY_TREATMENT = Object.fromEntries(TREATMENT_FIELDS.map((f) => [f.key, ""]));
-
-function TreatmentForm({ initial = EMPTY_TREATMENT, onSave, onCancel, saving }) {
-  const [form, setForm] = useState(initial);
-  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
-
-  return (
-    <div className="rounded-2xl border border-[#E8C4A0]/60 bg-white p-5 shadow-sm" dir="rtl">
-      <div className="grid gap-4 sm:grid-cols-2">
-        {TREATMENT_FIELDS.map((f) => (
-          <div key={f.key} className={f.type === "textarea" ? "sm:col-span-2" : ""}>
-            <label className="mb-1 block text-xs font-bold text-gray-700">
-              {f.label}
-              {f.required && <span className="mr-1 text-red-500">*</span>}
-            </label>
-            {f.type === "textarea" ? (
-              <textarea
-                rows={2}
-                value={form[f.key] || ""}
-                onChange={(e) => set(f.key, e.target.value)}
-                placeholder={f.placeholder}
-                className="w-full resize-none rounded-xl border border-[#E8C4A0]/50 bg-[#FAF6F1] px-3 py-2 text-right text-sm text-gray-700 outline-none transition focus:border-[#C4795A] focus:ring-2 focus:ring-[#C4795A]/15"
-              />
-            ) : (
-              <input
-                type="text"
-                value={form[f.key] || ""}
-                onChange={(e) => set(f.key, e.target.value)}
-                placeholder={f.placeholder}
-                className="w-full rounded-xl border border-[#E8C4A0]/50 bg-[#FAF6F1] px-3 py-2 text-right text-sm text-gray-700 outline-none transition focus:border-[#C4795A] focus:ring-2 focus:ring-[#C4795A]/15"
-              />
-            )}
-          </div>
-        ))}
-      </div>
-      <div className="mt-4 flex justify-start gap-3">
-        <button
-          type="button"
-          onClick={onCancel}
-          disabled={saving}
-          className="rounded-full border border-gray-200 bg-white px-5 py-2 text-sm font-bold text-gray-600 transition hover:bg-gray-50"
-        >
-          ביטול
-        </button>
-        <button
-          type="button"
-          disabled={saving || !form.name?.trim()}
-          onClick={() => onSave(form)}
-          className="inline-flex items-center gap-2 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-5 py-2 text-sm font-bold text-white shadow-lg shadow-[#C4795A]/20 disabled:opacity-50"
-        >
-          {saving ? createElement(RefreshCw, { size: 14, className: "animate-spin" }) : createElement(CheckCircle2, { size: 14 })}
-          {saving ? "שומר..." : "שמור טיפול"}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function TreatmentsManagerPanel({ mainRef }) {
-  const [treatments, setTreatments] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState("");
-  const [adding, setAdding] = useState(false);
-  const [editingId, setEditingId] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [deletingId, setDeletingId] = useState(null);
-  const [confirmDelete, setConfirmDelete] = useState(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    try { setTreatments(await listTreatmentsDB()); } catch { /* silent */ }
-    finally { setLoading(false); }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  const handleAdd = async (form) => {
-    setSaving(true);
-    try { await createTreatmentDB(form); await load(); setAdding(false); } catch { /* silent */ }
-    finally { setSaving(false); }
-  };
-
-  const handleUpdate = async (id, form) => {
-    setSaving(true);
-    try { await updateTreatmentDB(id, form); await load(); setEditingId(null); } catch { /* silent */ }
-    finally { setSaving(false); }
-  };
-
-  const handleDelete = async (id) => {
-    setDeletingId(id);
-    try { await deleteTreatmentDB(id); await load(); } catch { /* silent */ }
-    finally { setDeletingId(null); setConfirmDelete(null); }
-  };
-
-  const filtered = treatments.filter((t) =>
-    !search || t.name?.includes(search) || t.class_name?.includes(search) || t.category?.includes(search)
-  );
-
-  const grouped = filtered.reduce((acc, t) => {
-    const cat = t.class_name || "ללא קטגוריה";
-    (acc[cat] = acc[cat] || []).push(t);
-    return acc;
-  }, {});
-
-  return (
-    <div className="space-y-4" dir="rtl">
-      {/* Toolbar */}
-      <div className="flex items-center gap-3">
-        <div className="flex flex-1 items-center gap-2 rounded-xl border border-[#E8C4A0]/50 bg-white px-3 py-2 shadow-sm">
-          {createElement(Search, { size: 15, className: "shrink-0 text-[#C4795A]" })}
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="חיפוש לפי שם, קטגוריה..."
-            className="w-full bg-transparent text-right text-sm text-gray-700 outline-none placeholder:text-gray-400"
-          />
-        </div>
-        <button
-          type="button"
-          onClick={() => { setAdding(true); setEditingId(null); }}
-          className="inline-flex shrink-0 items-center gap-2 rounded-full bg-gradient-to-l from-[#C4795A] to-[#9B5C38] px-4 py-2 text-sm font-bold text-white shadow-lg shadow-[#C4795A]/20"
-        >
-          + הוסף טיפול
-        </button>
-      </div>
-
-      {/* Add form */}
-      {adding && (
-        <TreatmentForm
-          onSave={handleAdd}
-          onCancel={() => setAdding(false)}
-          saving={saving}
-        />
-      )}
-
-      {/* List */}
-      {loading ? (
-        <div className="space-y-2">
-          {[...Array(4)].map((_, i) => <div key={i} className="h-12 animate-pulse rounded-xl bg-white/70" />)}
-        </div>
-      ) : filtered.length === 0 ? (
-        <EmptyState icon={Sparkles} title="לא נמצאו טיפולים" text="הוסיפי טיפול חדש או עדכני את Treatments.xlsx." />
-      ) : (
-        Object.entries(grouped).map(([cat, items]) => (
-          <div key={cat} className="overflow-hidden rounded-2xl border border-[#E8C4A0]/60 bg-[#FAF6F1]">
-            <div className="border-b border-[#E8C4A0]/40 px-4 py-2 text-right">
-              <span className="text-xs font-extrabold text-[#8B5030]">{cat}</span>
-              <span className="mr-2 text-xs text-gray-400">{items.length} טיפולים</span>
-            </div>
-            <div className="divide-y divide-[#E8C4A0]/20">
-              {items.map((t) => (
-                <div key={t.id}>
-                  {editingId === t.id ? (
-                    <div className="p-3">
-                      <TreatmentForm
-                        initial={t}
-                        onSave={(form) => handleUpdate(t.id, form)}
-                        onCancel={() => setEditingId(null)}
-                        saving={saving}
-                      />
-                    </div>
-                  ) : (
-                    <div className="flex items-center justify-between gap-3 px-4 py-3 transition hover:bg-white/60">
-                      <div className="flex shrink-0 items-center gap-2">
-                        {/* Source badge */}
-                        <span className={`rounded-lg px-2 py-0.5 text-[10px] font-bold ${t.source === "admin" ? "bg-blue-50 text-blue-700 border border-blue-100" : "bg-gray-100 text-gray-400"}`}>
-                          {t.source === "admin" ? "ידני" : "Excel"}
-                        </span>
-                        {/* Edit */}
-                        <button
-                          type="button"
-                          onClick={() => { setEditingId(t.id); setAdding(false); }}
-                          className="rounded-lg border border-[#C4795A]/25 bg-white px-3 py-1 text-xs font-bold text-[#8B5030] transition hover:bg-[#F5EDE3]"
-                        >
-                          עריכה
-                        </button>
-                        {/* Delete */}
-                        {confirmDelete === t.id ? (
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              type="button"
-                              onClick={() => handleDelete(t.id)}
-                              disabled={deletingId === t.id}
-                              className="rounded-lg bg-red-500 px-3 py-1 text-xs font-bold text-white transition hover:bg-red-600 disabled:opacity-50"
-                            >
-                              {deletingId === t.id ? "מוחק..." : "אשר מחיקה"}
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setConfirmDelete(null)}
-                              className="rounded-lg border border-gray-200 bg-white px-2 py-1 text-xs text-gray-500"
-                            >
-                              ביטול
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => setConfirmDelete(t.id)}
-                            className="rounded-lg border border-red-100 bg-white px-3 py-1 text-xs font-bold text-red-500 transition hover:bg-red-50"
-                          >
-                            מחיקה
-                          </button>
-                        )}
-                      </div>
-                      {/* Name + sub-category */}
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-gray-900">{t.name}</p>
-                        {t.category && <p className="text-xs text-gray-400">{t.category}</p>}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        ))
-      )}
-
-      <div className="flex justify-end">
-        <button onClick={load} className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-[#C4795A]">
-          {createElement(RefreshCw, { size: 12 })} רענן רשימה
-        </button>
-      </div>
-    </div>
-  );
-}
-
-const KB_FILES = [
-  {
-    type: "treatments",
-    label: "טיפולים",
-    filename: "Treatments.xlsx",
-    description: "מידע על הטיפולים, קטגוריות, התוויות נגד ותשובות לשאלות נפוצות",
-  },
-  {
-    type: "questions",
-    label: "שאלות ותשובות",
-    filename: "questions.xlsx",
-    description: "שאלות ותשובות ספציפיות לכל טיפול שהצ'אטבוט משתמש בהן",
-  },
-  {
-    type: "category_questions",
-    label: "שאלות לפי קטגוריה",
-    filename: "category_questions.xlsx",
-    description: "אילו שאלות הצ'אטבוט שואל לכל קטגוריה, באיזה סדר, עם אילו אפשרויות, ואיזה שדות נדרשים לפני המלצה",
-  },
-  {
-    type: "chatbot_settings",
-    label: "נושאים חסומים",
-    filename: "chatbot_settings.xlsx",
-    description: "נושאים שהצ'אטבוט לא יענה עליהם ויפנה לצוות — מחירים, זמינות, עובדות ועוד. הוסיפי שורות להוספת נושאים חדשים.",
-  },
-];
-
-function KnowledgeBasePanel({ mainRef }) {
-  const [info, setInfo] = useState([]);
-  const [preview, setPreview] = useState(null);
-  const [loadingPreview, setLoadingPreview] = useState(null);
-  const [uploading, setUploading] = useState(null);
-  const [uploadMsg, setUploadMsg] = useState({});
-  const [refreshing, setRefreshing] = useState(false);
-  const fileInputRefs = useRef({});
-
-  const loadInfo = useCallback(async () => {
-    setRefreshing(true);
-    try {
-      const data = await getExcelInfo();
-      setInfo(data);
-    } catch {
-      // silently ignore on initial load failure
-    } finally {
-      setRefreshing(false);
-    }
-  }, []);
-
-  useEffect(() => { loadInfo(); }, [loadInfo]);
-
-  const handleUpload = useCallback(async (fileType, file) => {
-    setUploading(fileType);
-    setUploadMsg((prev) => ({ ...prev, [fileType]: null }));
-    try {
-      const result = await uploadExcel(fileType, file);
-      setUploadMsg((prev) => ({
-        ...prev,
-        [fileType]: { ok: true, text: `הועלה בהצלחה — ${result.rows} שורות` },
-      }));
-      await loadInfo();
-      if (preview?.file_type === fileType) setPreview(null);
-    } catch (e) {
-      setUploadMsg((prev) => ({
-        ...prev,
-        [fileType]: { ok: false, text: e.message },
-      }));
-    } finally {
-      setUploading(null);
-      if (fileInputRefs.current[fileType]) fileInputRefs.current[fileType].value = "";
-    }
-  }, [loadInfo, preview]);
-
-  const togglePreview = useCallback(async (fileType) => {
-    if (preview?.file_type === fileType) { setPreview(null); return; }
-    setLoadingPreview(fileType);
-    try {
-      const data = await getExcelPreview(fileType);
-      setPreview({ file_type: fileType, ...data });
-    } catch {
-      setPreview(null);
-    } finally {
-      setLoadingPreview(null);
-    }
-  }, [preview]);
-
-  const infoByType = useMemo(() =>
-    Object.fromEntries((info || []).map((i) => [i.file_type, i])), [info]);
-
-  return (
-    <SectionCard
-      icon={Database}
-      title="בסיס הידע של הצ'אטבוט"
-      subtitle="ניהול קובצי Excel שהצ'אטבוט מסתמך עליהם למתן תשובות"
-      className="lg:col-span-3"
-    >
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-        {KB_FILES.map((cfg) => {
-          const meta = infoByType[cfg.type];
-          const msg = uploadMsg[cfg.type];
-          const isUploading = uploading === cfg.type;
-          const isPreviewing = preview?.file_type === cfg.type;
-          const isLoadingPreview = loadingPreview === cfg.type;
-
-          return (
-            <div
-              key={cfg.type}
-              className="rounded-2xl border border-[#E8C4A0]/60 bg-[#FAF6F1] p-4 text-right"
-            >
-              {/* Header */}
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="flex items-start gap-2 text-right">
-                  <div>
-                    <p className="text-sm font-extrabold text-gray-900">{cfg.label}</p>
-                    <p className="text-xs text-gray-500">{cfg.filename}</p>
-                  </div>
-                </div>
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#C4795A]/10 text-[#C4795A]">
-                  {createElement(FileText, { size: 18 })}
-                </div>
-              </div>
-
-              {/* Meta info */}
-              <p className="mb-3 text-xs leading-5 text-gray-500">{cfg.description}</p>
-              {meta && (
-                <div className="mb-3 flex flex-wrap gap-2 text-right">
-                  <span className="rounded-lg bg-white px-2 py-1 text-xs font-semibold text-gray-600 shadow-sm">
-                    {meta.rows} שורות
-                  </span>
-                  {meta.last_modified && (
-                    <span className="rounded-lg bg-white px-2 py-1 text-xs text-gray-400 shadow-sm">
-                      עודכן {new Date(meta.last_modified).toLocaleDateString("he-IL")}
-                    </span>
-                  )}
-                  <span className="rounded-lg bg-white px-2 py-1 text-xs text-gray-400 shadow-sm">
-                    {meta.size_kb} KB
-                  </span>
-                </div>
-              )}
-
-              {/* Feedback message */}
-              {msg && (
-                <div className={`mb-3 flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-semibold ${msg.ok ? "bg-green-50 text-green-700" : "bg-red-50 text-red-600"}`}>
-                  {createElement(msg.ok ? CheckCircle2 : AlertCircle, { size: 14 })}
-                  <span>{msg.text}</span>
-                </div>
-              )}
-
-              {/* Action buttons */}
-              <div className="flex flex-wrap items-center gap-2">
-                {/* Upload */}
-                <label
-                  className={`inline-flex cursor-pointer items-center gap-1.5 rounded-xl px-3 py-2 text-xs font-bold shadow-sm transition-all ${
-                    isUploading
-                      ? "bg-gray-100 text-gray-400 cursor-not-allowed"
-                      : "bg-[#C4795A] text-white hover:bg-[#9B5C38]"
-                  }`}
-                >
-                  {createElement(isUploading ? RefreshCw : Upload, {
-                    size: 13,
-                    className: isUploading ? "animate-spin" : "",
-                  })}
-                  {isUploading ? "מעלה..." : "העלאת קובץ"}
-                  <input
-                    ref={(el) => { fileInputRefs.current[cfg.type] = el; }}
-                    type="file"
-                    accept=".xlsx"
-                    className="sr-only"
-                    disabled={isUploading}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleUpload(cfg.type, file);
-                    }}
-                  />
-                </label>
-
-                {/* Preview toggle */}
-                <button
-                  onClick={() => togglePreview(cfg.type)}
-                  className="inline-flex items-center gap-1.5 rounded-xl border border-[#C4795A]/30 bg-white px-3 py-2 text-xs font-bold text-[#C4795A] shadow-sm transition-all hover:bg-[#FDF3ED]"
-                  disabled={isLoadingPreview}
-                >
-                  {createElement(isLoadingPreview ? RefreshCw : isPreviewing ? EyeOff : Eye, {
-                    size: 13,
-                    className: isLoadingPreview ? "animate-spin" : "",
-                  })}
-                  {isPreviewing ? "סגור תצוגה" : "תצוגה מקדימה"}
-                </button>
-
-                {/* Download */}
-                {meta?.rows > 0 && (
-                  <a
-                    href={getExcelDownloadUrl(cfg.type)}
-                    download={cfg.filename}
-                    className="inline-flex items-center gap-1.5 rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-600 shadow-sm transition-all hover:bg-gray-50"
-                  >
-                    {createElement(Download, { size: 13 })}
-                    הורדה
-                  </a>
-                )}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Preview table */}
-      {preview && (
-        <Motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0 }}
-          className="mt-5 overflow-hidden rounded-2xl border border-[#E8C4A0]/60"
-        >
-          <div className="flex items-center justify-between bg-[#FAF6F1] px-4 py-3 text-right">
-            <button
-              onClick={() => setPreview(null)}
-              className="text-xs text-gray-400 hover:text-gray-600"
-            >
-              {createElement(ChevronUp, { size: 14 })}
-            </button>
-            <p className="text-xs font-bold text-gray-600">
-              {KB_FILES.find((f) => f.type === preview.file_type)?.label} — מציג {preview.rows.length} מתוך {preview.total_rows} שורות
-            </p>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-right text-xs" dir="rtl">
-              <thead>
-                <tr className="border-b border-[#E8C4A0]/40 bg-[#FDF3ED]">
-                  {preview.columns.map((col) => (
-                    <th key={col} className="whitespace-nowrap px-3 py-2 font-bold text-[#8B5030]">
-                      {col}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {preview.rows.map((row, i) => (
-                  <tr key={i} className={`border-b border-[#E8C4A0]/20 ${i % 2 === 0 ? "bg-white" : "bg-[#FAF6F1]"}`}>
-                    {preview.columns.map((col) => (
-                      <td key={col} className="max-w-[180px] truncate px-3 py-2 text-gray-600">
-                        {String(row[col] ?? "")}
-                      </td>
-                    ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Motion.div>
-      )}
-
-      {/* Reload button */}
-      <div className="mt-4 flex justify-end">
-        <button
-          onClick={loadInfo}
-          className="inline-flex items-center gap-1.5 text-xs font-semibold text-gray-400 hover:text-[#C4795A]"
-        >
-          {createElement(RefreshCw, { size: 13, className: refreshing ? "animate-spin" : "" })}
-          רענן מידע
-        </button>
-      </div>
-    </SectionCard>
-  );
-}
-
-const PRIORITY_STYLE = {
-  critical: { label: "קריטי", cls: "bg-red-50 text-red-700 border border-red-200" },
-  high:     { label: "גבוה",  cls: "bg-orange-50 text-orange-700 border border-orange-200" },
-  medium:   { label: "בינוני", cls: "bg-gray-100 text-gray-600 border border-gray-200" },
-};
-
-function ChatbotConfigPanel({ mainRef }) {
-  const [config, setConfig] = useState(null);
-  const [loadingConfig, setLoadingConfig] = useState(true);
-  const [expanded, setExpanded] = useState({});
-
-  useEffect(() => {
-    getChatbotConfig()
-      .then(setConfig)
-      .catch(() => setConfig(null))
-      .finally(() => setLoadingConfig(false));
-  }, []);
-
-  const toggle = (cat) => setExpanded((prev) => ({ ...prev, [cat]: !prev[cat] }));
-
-  if (loadingConfig) {
-    return (
-      <div className="space-y-3">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="h-14 animate-pulse rounded-2xl bg-white/70" />
-        ))}
-      </div>
-    );
-  }
-
-  if (!config || !config.categories?.length) {
-    return (
-      <EmptyState
-        icon={MessageCircle}
-        title="לא נמצאו הגדרות קטגוריות"
-        text="העלי קובץ category_questions.xlsx כדי להגדיר את שאלות הצ'אטבוט לפי קטגוריה."
-      />
-    );
-  }
-
-  return (
-    <div className="space-y-4">
-      {/* How the chatbot uses this legend */}
-      <div className="rounded-2xl bg-gradient-to-l from-[#FAF6F1] to-[#F5EDE3] p-4 text-right">
-        <p className="mb-2 text-sm font-extrabold text-gray-800">איך הצ׳אטבוט משתמש בהגדרות אלה?</p>
-        <div className="grid gap-3 text-xs leading-6 text-gray-600 sm:grid-cols-3">
-          <div className="flex items-start gap-2">
-            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-500" />
-            <span><span className="font-bold text-red-700">קריטי</span> — נשאל ראשון, חובה לפני כל שאלה אחרת</span>
-          </div>
-          <div className="flex items-start gap-2">
-            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-orange-500" />
-            <span><span className="font-bold text-orange-700">גבוה</span> — נשאל מיד אחרי קריטי, משפיע מאוד על ההמלצה</span>
-          </div>
-          <div className="flex items-start gap-2">
-            <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-gray-400" />
-            <span><span className="font-bold text-gray-700">בינוני</span> — משפר את ההמלצה אם הלקוחה עונה</span>
-          </div>
-        </div>
-        <p className="mt-3 text-xs text-gray-500">
-          שדות <span className="font-bold text-[#C4795A]">מינימום נדרש</span> חייבים להיות מלאים לפני שהצ׳אטבוט יציע המלצה.
-          הלקוחה יכולה גם לבקש "תמליצי לי עכשיו" אחרי שמולא לפחות שדה אחד.
-        </p>
-      </div>
-
-      {/* Mode flow diagram */}
-      <div className="flex items-center gap-2 overflow-x-auto rounded-2xl border border-[#E8C4A0]/60 bg-white/80 px-4 py-3">
-        {[
-          { label: "idle", desc: "שאלות כלליות" },
-          { label: "→" },
-          { label: "questioning", desc: "אוסף מידע" },
-          { label: "→" },
-          { label: "sub_discovery", desc: "עוזרת להבין" },
-          { label: "→" },
-          { label: "recommending", desc: "ממליצה" },
-        ].map((step, i) =>
-          step.label === "→" ? (
-            <ChevronRight key={i} size={14} className="shrink-0 text-gray-300" />
-          ) : (
-            <div key={i} className="shrink-0 text-center">
-              <span className="block rounded-lg bg-[#C4795A]/10 px-2 py-1 text-xs font-bold text-[#8B5030]">{step.label}</span>
-              <span className="mt-1 block text-[10px] text-gray-400">{step.desc}</span>
-            </div>
-          )
-        )}
-      </div>
-
-      {/* Blocked topics live view */}
-      {config.blocked_topics?.length > 0 && (
-        <div className="rounded-2xl border border-[#E8C4A0]/60 bg-[#FAF6F1] p-4">
-          <p className="mb-3 text-right text-sm font-extrabold text-gray-800">
-            נושאים חסומים — הצ׳אטבוט יפנה לצוות במקום לענות
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {config.blocked_topics.map((t) => (
-              <div
-                key={t.topic}
-                className={`flex items-center gap-1.5 rounded-xl px-3 py-1.5 text-xs font-semibold ${
-                  t.active
-                    ? "bg-red-50 text-red-700 border border-red-200"
-                    : "bg-gray-100 text-gray-400 border border-gray-200 line-through"
-                }`}
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${t.active ? "bg-red-500" : "bg-gray-300"}`} />
-                {t.topic}
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-right text-xs text-gray-400">
-            לשינוי — ערכי את <span className="font-bold">chatbot_settings.xlsx</span> והעלי מחדש
-          </p>
-        </div>
-      )}
-
-      {/* Category cards */}
-      <div className="space-y-2">
-        {config.categories.map((cat) => (
-          <div key={cat.category} className="overflow-hidden rounded-2xl border border-[#E8C4A0]/60 bg-[#FAF6F1]">
-            <button
-              type="button"
-              onClick={() => toggle(cat.category)}
-              className="flex w-full items-center justify-between gap-3 p-4 text-right transition hover:bg-[#F5EDE3]"
-            >
-              <div className="flex shrink-0 items-center gap-2">
-                {createElement(expanded[cat.category] ? ChevronUp : ChevronDown, { size: 15, className: "text-gray-400" })}
-                <span className="rounded-lg bg-white px-2 py-0.5 text-xs font-semibold text-gray-600 shadow-sm">
-                  {cat.total_fields} שאלות
-                </span>
-                <span className="rounded-lg bg-[#C4795A]/10 px-2 py-0.5 text-xs font-bold text-[#8B5030]">
-                  מינימום {cat.can_recommend_after} שדות
-                </span>
-              </div>
-              <span className="text-sm font-extrabold text-gray-900">{cat.category}</span>
-            </button>
-
-            {expanded[cat.category] && (
-              <div className="space-y-2 border-t border-[#E8C4A0]/40 p-4">
-                {cat.fields.map((field) => {
-                  const pStyle = PRIORITY_STYLE[field.priority] ?? PRIORITY_STYLE.medium;
-                  return (
-                    <div
-                      key={field.field}
-                      className={`rounded-xl p-3 text-right ${field.is_minimum ? "border border-[#C4795A]/30 bg-white" : "border border-gray-100 bg-white/60"}`}
-                    >
-                      <div className="mb-1.5 flex items-center justify-between gap-2">
-                        <div className="flex shrink-0 items-center gap-1.5">
-                          <span className={`rounded-lg px-2 py-0.5 text-[11px] font-bold ${pStyle.cls}`}>
-                            {pStyle.label}
-                          </span>
-                          {field.is_minimum && (
-                            <span className="rounded-lg border border-[#C4795A]/25 bg-[#C4795A]/8 px-2 py-0.5 text-[11px] font-bold text-[#C4795A]">
-                              מינימום
-                            </span>
-                          )}
-                          {field.has_guidance && (
-                            <span className="rounded-lg border border-blue-100 bg-blue-50 px-2 py-0.5 text-[11px] font-bold text-blue-600">
-                              כולל הנחיה
-                            </span>
-                          )}
-                        </div>
-                        <div>
-                          <p className="text-sm font-bold text-gray-900">{field.question}</p>
-                          <p className="text-[11px] text-gray-400 font-mono">{field.field}</p>
-                        </div>
-                      </div>
-                      {field.options?.length > 0 && (
-                        <div className="flex flex-wrap justify-end gap-1.5">
-                          {field.options.map((opt) => (
-                            <span key={opt} className="rounded-full bg-[#F5EDE3] px-2.5 py-0.5 text-xs font-semibold text-[#8B5030]">
-                              {opt}
-                            </span>
-                          ))}
-                          {field.has_guidance && (
-                            <span className="rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-semibold text-gray-500">
-                              + לא יודעת
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -2540,6 +1867,17 @@ export default function AdminDashboard() {
                     </button>
                     <button
                       type="button"
+                      onClick={() => window.location.assign("/admin/content")}
+                      className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold transition"
+                      style={{ background: "rgba(255,255,255,0.95)", color: "#8B5030", boxShadow: "0 4px 16px rgba(0,0,0,0.20)" }}
+                      onMouseEnter={e => { e.currentTarget.style.background = "#FAF6F1"; }}
+                      onMouseLeave={e => { e.currentTarget.style.background = "rgba(255,255,255,0.95)"; }}
+                    >
+                      <LayoutList size={16} />
+                      ניהול תוכן
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => window.location.assign("/admin/audit-log")}
                       className="inline-flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-bold transition"
                       style={{ background: "rgba(255,255,255,0.95)", color: "#8B5030", boxShadow: "0 4px 16px rgba(0,0,0,0.20)" }}
@@ -2755,13 +2093,23 @@ export default function AdminDashboard() {
               </>
             ) : null}
 
+            {activeTab === "ai" ? (
+              // Same reasoning as the settings tab below: no whileInView wrapper,
+              // these panels mount after the one-time scroll-in animation fires.
+              <div className="space-y-5">
+                <AiKnowledgePanel />
+                <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
+                  <AiAssistantPanel />
+                </div>
+              </div>
+            ) : null}
+
             {activeTab === "settings" ? (
               // NOTE: plain div (not the whileInView motion wrapper) on purpose — the
               // account/password/business panels load their data async and mount after
               // the one-time scroll-in animation fires, which left them stuck at opacity:0.
               <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
                 <AdminSettingsPanel />
-                <AiAssistantPanel />
               </div>
             ) : null}
           </div>

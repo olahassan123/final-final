@@ -157,44 +157,6 @@ export async function fetchAnalytics({ fromDate, toDate } = {}) {
   return res.json();
 }
 
-// ── Excel (admin) ─────────────────────────────────────────────────────────
-
-export async function getExcelInfo() {
-  const res = await fetch(`${API_BASE_URL}/admin/excel/info`, { headers: authHeaders() });
-  if (!res.ok) throw new Error("Failed to fetch excel info");
-  return res.json();
-}
-
-export async function getExcelPreview(fileType) {
-  const res = await fetch(`${API_BASE_URL}/admin/excel/preview/${fileType}`, {
-    headers: authHeaders(),
-  });
-  if (!res.ok) throw new Error("Failed to fetch preview");
-  return res.json();
-}
-
-export async function uploadExcel(fileType, file) {
-  const form = new FormData();
-  form.append("file_type", fileType);
-  form.append("file", file);
-  const res = await fetch(`${API_BASE_URL}/admin/excel/upload`, {
-    method: "POST",
-    headers: authHeaders(),
-    body: form,
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(err.detail || `Upload failed (${res.status})`);
-  }
-  return res.json();
-}
-
-export const getExcelDownloadUrl = (fileType) => {
-  const token = getAuthToken();
-  const query = token ? `?access_token=${encodeURIComponent(token)}` : "";
-  return `${API_BASE_URL}/admin/excel/download/${fileType}${query}`;
-};
-
 // ── Secretaries (staff) ───────────────────────────────────────────────────
 
 export async function listSecretaries() {
