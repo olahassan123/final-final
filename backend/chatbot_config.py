@@ -13,19 +13,28 @@ MAX_CHAT_MESSAGE_CHARS = 1000
 CHAT_SESSION_EXPIRY_DAYS = 14
 
 CLINIC_PHONE = "*3691"
-# Optional LLM layer. Provider is Google Gemini (generous free tier, no card).
+# Optional LLM layer. Provider is Google Gemini.
 # The API key is stored in the DB (cb_settings 'llm_api_key') so the clinic can
 # paste a fresh free key from the admin page — env GEMINI_API_KEY is a fallback.
-# NOTE: gemini-2.0-flash returns free-tier limit:0 on some accounts/regions;
-# gemini-flash-latest has free quota and works — keep this unless you enable billing.
-# MEASURED 2026-08-19: this alias currently resolves to a model whose free-tier
-# allowance on our project is only 20 requests PER DAY
-# (GenerateRequestsPerDayPerProjectPerModel-FreeTier = 20), which the chatbot
-# exhausts in a handful of conversations. Other flash models carry their own,
-# larger free buckets — e.g. gemini-3.5-flash. Override without editing code:
-#     set GEMINI_MODEL=gemini-3.5-flash
-# Everything here stays on the free tier; none of these options requires billing.
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+# NOTE: gemini-2.0-flash returns free-tier limit:0 on some accounts/regions.
+# MEASURED 2026-08-19: gemini-flash-latest resolved to a model whose free-tier
+# allowance on our project was only 20 requests PER DAY, exhausted in a
+# handful of conversations.
+# MEASURED 2026-08-20, directly against this project's key: gemini-2.5-flash
+# now returns 404 — "no longer available to new users". gemini-3.6-flash
+# (Google's own suggested replacement) works but is a "thinking" model and
+# was measured at 14-46s for a single chatbot reply (real system prompt,
+# thinkingLevel:"low") — unusable latency for a chat button. Same exact
+# prompt against gemini-flash-lite-latest: ~1-2s, correct, equally grounded
+# output. Lite is the right tier for this app's short classify/phrase calls;
+# it was never a Flash-vs-Lite quality tradeoff, it was a thinking-overhead
+# problem. If Gemini deprecates this alias too, re-run the same before/after
+# timing check before guessing a new one — model aliases on this API have
+# broken this integration more than once; don't assume a plausible-looking
+# name resolves *or* is fast enough without measuring. Override without
+# editing code: set GEMINI_MODEL=<alias>. Paid-tier cost stays a few cents to
+# a few dollars/month at this app's traffic regardless of which flash model.
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest")
 # Where the owner creates a free key (shown in the admin page):
 GEMINI_KEY_URL = "https://aistudio.google.com/app/apikey"
 EXCEL_FILENAME = "MeDay_Treatments_Data_finalalmost.xlsx"

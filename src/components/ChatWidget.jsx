@@ -5,7 +5,6 @@ import { sendChat, getChatCategories, clearChatSession } from "../api/medayApi";
 import { MessageCircle, X, Send, RotateCcw, Sparkles } from "lucide-react";
 import { cn } from "../lib/utils";
 import { openAppointmentWhatsApp } from "../lib/booking";
-import { serviceCatalog, getCategoryTreatments } from "../data/serviceCatalog";
 
 const SESSION_KEY = "meday_chat_session_id";
 const MAX_MESSAGE_CHARS = 1000;
@@ -43,38 +42,6 @@ const WELCOME_MSG = {
   text: "היי, אני העוזרת האישית של MeDay ✨\nאשמח לעזור לך למצוא את הטיפול שהכי מתאים למה שאת/ה מחפש/ת.",
   suggestions: WELCOME_CATEGORIES,
 };
-
-function normalizeLabel(value) {
-  return (value || "").trim().replace(/\s+/g, " ").toLowerCase();
-}
-
-function getTreatmentCategoryRoute(treatment) {
-  const targetName = normalizeLabel(treatment?.name);
-  const targetCategory = normalizeLabel(treatment?.category);
-  if (targetCategory) {
-    const category = serviceCatalog.find(
-      (item) => normalizeLabel(item.name) === targetCategory
-    );
-    if (category) {
-      const match = getCategoryTreatments(category).find(
-        (item) => normalizeLabel(item.name) === targetName
-      );
-      return `/categories/${category.slug}${match ? `#treatment-${match.slug}` : ""}`;
-    }
-  }
-
-  if (!targetName) return null;
-
-  for (const category of serviceCatalog) {
-    const match = getCategoryTreatments(category).find(
-      (item) => normalizeLabel(item.name) === targetName
-    );
-    if (match) {
-      return `/categories/${category.slug}#treatment-${match.slug}`;
-    }
-  }
-  return null;
-}
 
 export default function ChatWidget() {
   const navigate = useNavigate();
@@ -242,6 +209,19 @@ export default function ChatWidget() {
     _send(null, `__ask_treatment__:${treatment.id}`, null, context);
   }
 
+  // "לפרטי הטיפול" answers inline, in the chat — it never navigates away.
+  // The backend returns a short, data-only card (name + description + who
+  // it's for) built straight from the clinic's records, never generated text.
+  function handleTreatmentInfo(treatment) {
+    if (loading || !treatment?.id || !treatment?.name) return;
+    const context = { id: treatment.id, name: treatment.name };
+    setSelectedTreatment(context);
+    selectedTreatmentRef.current = context;
+    window.__medaySelectedTreatment = context;
+    setMessages((m) => [...m, { from: "user", text: `לפרטים על טיפול ${treatment.name}` }]);
+    _send(null, `__treatment_info__:${treatment.id}`, null, context);
+  }
+
   function handleContinue(catId) {
     _send(null, "__continue__", null);
   }
@@ -267,13 +247,6 @@ export default function ChatWidget() {
     setMessages([WELCOME_MSG]);
     setLoading(false);
     await clearChatSession(oldSessionId);
-  }
-
-  function openTreatmentDetails(treatment) {
-    const route = getTreatmentCategoryRoute(treatment);
-    if (!route) return;
-    setOpen(false);
-    navigate(route);
   }
 
   return (
@@ -395,7 +368,6 @@ export default function ChatWidget() {
                 {m.from === "bot" && m.treatments && idx === messages.length - 1 && (
                   <div className="mt-3 grid w-full max-w-[88%] gap-2">
                     {m.treatments
-                      .map((treatment) => ({ ...treatment, route: getTreatmentCategoryRoute(treatment) }))
                       .slice(0, 3)
                       .map((treatment) => (
                         <div
@@ -407,11 +379,12 @@ export default function ChatWidget() {
                             <p className="mt-1 text-xs leading-relaxed text-gray-600">{treatment.reason}</p>
                           )}
                           <div className="mt-2 flex flex-wrap gap-2">
-                            {treatment.route && (
+                            {treatment.id && !treatment.info_shown && (
                               <button
                                 type="button"
-                                onClick={() => openTreatmentDetails(treatment)}
-                                className="px-3 py-1.5 rounded-full text-xs font-medium border border-primary/40 text-primary bg-white hover:bg-pink-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30"
+                                onClick={() => handleTreatmentInfo(treatment)}
+                                disabled={loading}
+                                className="px-3 py-1.5 rounded-full text-xs font-medium border border-primary/40 text-primary bg-white hover:bg-pink-50 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 disabled:opacity-40"
                               >
                                 לפרטי הטיפול
                               </button>
