@@ -15,6 +15,8 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform, useInView } from "framer-motion";
 import { getCategoryBySlug, getCategoryTreatments } from "../data/serviceCatalog";
+import { applyCategoryContent } from "../data/categoryContent";
+import { fetchCategoryContent } from "../api/siteContentApi";
 
 /* ── per-category hero photos ────────────────────────────────── */
 const CATEGORY_PHOTOS = {
@@ -401,10 +403,29 @@ function PromoDescriptionBlock({ heading, subheading, paragraphs }) {
 export default function ServiceCategoryPage() {
   const { categorySlug } = useParams();
   const { hash } = useLocation();
-  const category = getCategoryBySlug(categorySlug);
+
+  // What the admin saved under "ניהול תוכן", if anything. The slug is stored
+  // alongside the result so a stale answer for the previous category is never
+  // treated as this one's; a null content means the category was never
+  // customised and keeps what ships in serviceCatalog.js.
+  const [loaded, setLoaded] = useState(null);
 
   useEffect(() => {
-    if (!hash) return;
+    let cancelled = false;
+    fetchCategoryContent(categorySlug).then((content) => {
+      if (!cancelled) setLoaded({ slug: categorySlug, content });
+    });
+    return () => { cancelled = true; };
+  }, [categorySlug]);
+
+  const contentReady = loaded?.slug === categorySlug;
+  const category = applyCategoryContent(
+    getCategoryBySlug(categorySlug),
+    contentReady ? loaded.content : null
+  );
+
+  useEffect(() => {
+    if (!hash || !contentReady) return;
     const targetId = decodeURIComponent(hash.slice(1));
     const timer = window.setTimeout(() => {
       document.getElementById(targetId)?.scrollIntoView({
@@ -413,7 +434,7 @@ export default function ServiceCategoryPage() {
       });
     }, 150);
     return () => window.clearTimeout(timer);
-  }, [categorySlug, hash]);
+  }, [categorySlug, hash, contentReady]);
 
   if (!category) {
     return (
@@ -431,7 +452,7 @@ export default function ServiceCategoryPage() {
 
   const treatments = getCategoryTreatments(category);
   const hasSectionLayout = Boolean(category.sections?.length);
-  const shouldOpenSingleTreatment = !hasSectionLayout && treatments.length === 1;
+  const shouldOpenSingleTreatment = contentReady && !hasSectionLayout && treatments.length === 1;
 
   if (shouldOpenSingleTreatment) {
     return <Navigate to={`/categories/${category.slug}/${treatments[0].slug}`} replace />;
@@ -509,7 +530,14 @@ export default function ServiceCategoryPage() {
       {/* ══ TREATMENTS ══ */}
       <section className={category.promoHeading ? "" : "pb-24"}>
 
-        {category.promoHeading ? (
+        {!contentReady ? (
+          /* Nothing until the override lookup settles — otherwise the built-in
+             content paints first and visibly swaps for the admin's version. */
+          <div className="py-24 text-center text-sm font-semibold" style={{ color: "#9B5C38" }}>
+            טוען…
+          </div>
+
+        ) : category.promoHeading ? (
           <PromoDescriptionBlock
             heading={category.promoHeading}
             subheading={category.promoSubheading}

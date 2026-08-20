@@ -51,3 +51,8 @@ backend/.env
 
 # Database file (local data)
 backend/appointments.db
+
+# Chatbot knowledge-base admin: DB snapshots taken before each Excel import,
+# and short-lived staged uploads awaiting confirmation.
+backend/backups/
+backend/.import_staging/
