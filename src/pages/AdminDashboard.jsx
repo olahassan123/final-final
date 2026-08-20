@@ -18,13 +18,7 @@ import {
   addJobApplicationFeedback,
 } from "../api/jobsApi";
 
-import {
-  fetchAnalytics,
-  getExcelInfo,
-  getExcelPreview,
-  uploadExcel,
-  getExcelDownloadUrl,
-} from "../api/medayApi";
+import { fetchAnalytics } from "../api/medayApi";
 
 import {
   getSettings,
