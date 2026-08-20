@@ -324,6 +324,18 @@ from chatbot_router import handle_message as _chatbot_handle
 
 init_chatbot_db()
 
+# Admin editor for the chatbot's knowledge base (cb_* tables). Auth and the
+# audit logger are passed in so admin_content never imports this module back.
+from admin_content import build_router as _build_ai_content_router
+
+app.include_router(_build_ai_content_router(require_admin, log_audit))
+
+# Admin-editable copy for the public category pages. Same arrangement: the auth
+# dependency and audit logger are handed in rather than imported back.
+from site_content import build_router as _build_site_content_router
+
+app.include_router(_build_site_content_router(require_admin, log_audit))
+
 
 # ------------------------------------------------------------
 # Basic routes
